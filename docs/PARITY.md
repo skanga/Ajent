@@ -1,0 +1,58 @@
+# Ajent parity ledger
+
+Ajent targets behavioral parity with AgenTTY commit
+`c7594d64020cfdacb10b6a0b2074bcedcc827bba`. The pinned dependency commits
+are recorded in the machine-readable manifests under
+`ajent-parity/src/test/resources/reference/`.
+
+## Evidence rules
+
+- Raw reference artifacts are retained and hashed before any normalization.
+- JSON comparison requires exact field presence, types, values, and array
+  order. JSON object key order is ignored.
+- The only standing normalization allowance covers generated timestamps,
+  generated identifiers, the declared program-name difference, and declared
+  workspace/data-root prefixes.
+- Every additional normalized or deliberate difference requires a ledger row
+  with evidence and review. “Semantically similar” is not parity.
+- A feature remains incomplete until its reference capture, Java test,
+  implementation, differential result, and documentation evidence are all
+  present.
+
+## Reference baseline
+
+| Item | Evidence | Status |
+|---|---|---|
+| AgenTTY source | pinned commit in `capture-manifest.json` | frozen |
+| Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
+| acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
+| mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 4 pure suites ported from source |
+| Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
+| JDK 25 | project-local Maven toolchain selects `C:\lang\jdk-25` for compile/tests | `mvn verify` green |
+| Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
+
+## Feature ledger
+
+| Surface | Reference fixture | Java test | Implementation | Differential result | Status |
+|---|---|---|---|---|---|
+| CLI and configuration | help/version/invalid raw fixtures | `AjentCliTest`, `CliParityTest` | parser, help, version, invalid handling | exact after `agentty` → `ajent` name substitution | partial |
+| Pure FSM/model/edit contracts | pinned C++ tests | 28 translated unit tests | implemented | source assertions translated; native CTest confirmation pending | partial |
+| Thread/settings persistence | planned | planned | planned | missing | planned |
+| Credential v1 envelope | planned | planned | planned | missing | planned |
+| Anthropic provider | planned | planned | planned | missing | planned |
+| OpenAI-compatible providers | planned | planned | planned | missing | planned |
+| Ollama provider | planned | planned | planned | missing | planned |
+| Native tool catalog/dispatch | planned | planned | planned | missing | planned |
+| Permissions and scheduling | planned | planned | planned | missing | planned |
+| Skills and memory | planned | planned | planned | missing | planned |
+| RAG and repository map | planned | planned | planned | missing | planned |
+| Agent loop/reducer | harness required | planned | planned | missing | planned |
+| ACP | planned | planned | planned | missing | planned |
+| MCP client/server | planned | planned | planned | missing | planned |
+| Terminal/rendering | planned | planned | planned | missing | planned |
+| Interactive UX and platform integration | planned | planned | planned | missing | planned |
+| Documentation/distribution | inventory pending | planned | planned | missing | planned |
+
+The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
+and exit-gate authority for advancing these rows.

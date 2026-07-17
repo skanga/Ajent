@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "comparatorVersion": 1,
+  "reference": {
+    "repository": "https://github.com/1ay1/agentty",
+    "commit": "c7594d64020cfdacb10b6a0b2074bcedcc827bba",
+    "version": "0.2.8",
+    "binary": {
+      "path": "agentty/agentty.exe",
+      "sha256": "8b108f09a62220136383835b52f1506f003e6da246a9b1335846ab3e11733fff",
+      "platform": "windows-x86_64"
+    },
+    "submodules": {
+      "maya": "8c655268272b416faed1ba13ffb6d36c292415ed",
+      "acpCpp": "d8b80082f021fe15a081ddd9fe812667f9435ade",
+      "mcpCpp": "f87d78aa5e031cb80257692b3379805d54e54ca5"
+    }
+  },
+  "normalizationAllowlist": [
+    "generated timestamps",
+    "generated UUIDs and thread/tool/message identifiers",
+    "declared program name: agentty versus ajent",
+    "declared workspace and data-root prefixes"
+  ],
+  "comparators": {
+    "rawBytes": "SHA-256 and byte-for-byte comparison before normalization",
+    "json": "parse JSON; require exact types, keys, values, array order, and field presence; object key order is ignored",
+    "headers": "case-insensitive names, exact multi-value sets, explicit allowlist for transport-generated headers",
+    "eventTrace": "exact event type/order/payload after only manifest-listed nondeterministic fields are replaced",
+    "filesystem": "exact relative paths, file bytes, permissions where supported, and operation/atomicity trace",
+    "terminalCells": "exact grapheme, width, style, cursor, committed-row, and viewport cell state",
+    "ansi": "byte-for-byte terminal wire comparison after declared terminal capability negotiation",
+    "cli": "exact exit code and stdout/stderr bytes with declared path/program substitutions only"
+  },
+  "fixtureClasses": [
+    {
+      "id": "cli",
+      "status": "partial-goldens-green",
+      "sources": ["agentty/src/runtime/main.cpp", "agentty/docs/website/cli.md"],
+      "cases": ["help", "version", "invalid arguments", "all subcommand names", "top-level option parsing", "airgap tail forwarding", "option precedence", "environment precedence"],
+      "evidence": [
+        "reference/cli/help.stderr.txt",
+        "reference/cli/version.stdout.txt",
+        "reference/cli/invalid.stderr.txt",
+        "com.github.skanga.ajent.parity.CliParityTest"
+      ]
+    },
+    {
+      "id": "persistence",
+      "status": "planned",
+      "sources": ["agentty/src/io/persistence.cpp", "agentty/src/io/cred_crypt.cpp", "agentty/src/io/auth.cpp"],
+      "cases": ["settings", "threads", "legacy fields", "metadata listing", "atomic write", "credential v1 envelope", "corruption"]
+    },
+    {
+      "id": "provider-anthropic",
+      "status": "planned",
+      "sources": ["agentty/src/provider/anthropic/transport.cpp", "agentty/tests/anthropic_md_stream.cpp"],
+      "cases": ["request headers/body", "fragmented SSE", "text", "tool calls", "usage", "stop reasons", "errors", "retries", "cancel"]
+    },
+    {
+      "id": "provider-openai-compatible",
+      "status": "planned",
+      "sources": ["agentty/src/provider/openai/transport.cpp", "agentty/tests/openai_transport_test.cpp"],
+      "cases": ["openai", "groq", "openrouter", "together", "cerebras", "raw host:port", "fragmented tool calls", "weak-model salvage"]
+    },
+    {
+      "id": "provider-ollama",
+      "status": "planned",
+      "sources": ["agentty/src/provider/ollama/transport.cpp", "agentty/tests/ollama_transport_test.cpp"],
+      "cases": ["native request", "NDJSON fragmentation", "images", "tool calls", "errors", "no-key behavior"]
+    },
+    {
+      "id": "native-tools",
+      "status": "planned",
+      "sources": ["agentty/include/agentty/tool/spec.hpp", "agentty/tests/toolset_e2e_test.cpp"],
+      "cases": ["full catalog", "success", "validation error", "workspace refusal", "permission", "timeout", "cancel", "UTF-8 truncation", "change records"]
+    },
+    {
+      "id": "reducer",
+      "status": "planned-reference-harness-required",
+      "sources": ["agentty/src/runtime/app/update.cpp", "agentty/src/runtime/app/update", "agentty/include/agentty/runtime/msg.hpp"],
+      "cases": ["chat", "fragmented stream", "tool batches", "approve", "reject", "retry", "cancel", "compact", "provider/model/profile switch", "checkpoint", "thread lifecycle"]
+    },
+    {
+      "id": "acp",
+      "status": "planned",
+      "sources": ["agentty/include/agentty/acp/server.hpp", "agentty/src/acp/server.cpp", "agentty/tests/acp_integration_test.cpp", "agentty/scripts/acp_methods_test.py"],
+      "cases": ["initialize", "authenticate", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel", "session/update", "session/request_permission", "errors", "concurrency"]
+    },
+    {
+      "id": "mcp-server-client",
+      "status": "planned",
+      "sources": ["agentty/src/mcp", "agentty/tests/mcp_bridge_test.cpp", "agentty/tests/mcp_http_test.cpp"],
+      "cases": ["initialize", "capabilities", "tools/list", "tools/call", "resources", "prompts", "list_changed", "progress", "shutdown", "malformed request", "errors", "cancel", "stdio", "streamable HTTP"]
+    },
+    {
+      "id": "terminal",
+      "status": "planned",
+      "sources": ["agentty/src/runtime/view", "agentty/maya", "agentty/tests/scrollback_oracle_test.cpp"],
+      "cases": ["welcome", "composer", "streaming markdown", "tool cards", "permissions", "pickers", "diff review", "thread switch", "resize", "cancel", "shutdown", "append-only scrollback"]
+    }
+  ]
+}
