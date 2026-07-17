@@ -10,7 +10,7 @@
   <name>Ajent</name>
   <modules>
     <module>ajent-domain</module><module>ajent-core</module><module>ajent-provider</module>
-    <module>ajent-tools</module><module>ajent-protocol</module><module>ajent-terminal</module>
+    <module>ajent-tools</module><module>ajent-runtime</module><module>ajent-protocol</module><module>ajent-terminal</module>
     <module>ajent-cli</module><module>ajent-parity</module>
   </modules>
   <properties>

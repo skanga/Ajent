@@ -8,7 +8,7 @@
     <artifactId>ajent-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
   </parent>
-  <artifactId>ajent-cli</artifactId>
+  <artifactId>ajent-runtime</artifactId>
   <dependencies>
     <dependency>
       <groupId>com.github.skanga.ajent</groupId>
@@ -21,19 +21,8 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>com.github.skanga.ajent</groupId>
-      <artifactId>ajent-runtime</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>com.github.skanga.ajent</groupId>
-      <artifactId>ajent-protocol</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>com.github.skanga.ajent</groupId>
-      <artifactId>ajent-terminal</artifactId>
-      <version>${project.version}</version>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
     </dependency>
   </dependencies>
 </project>
