@@ -36,6 +36,17 @@ import java.util.concurrent.ThreadLocalRandom;
 /** Pure headless agent reducer: {@code (state, message) -> (state, effects)}. */
 public final class AgentReducer {
   private static final int MAX_STREAMING_BYTES = 8 * 1024 * 1024;
+  private static final int MAX_TRUNCATION_RETRIES = 2;
+  private static final String MAX_TOKENS_TOOL_ERROR =
+      "Output token cap (max_tokens) was reached before the tool input finished streaming, "
+          + "so the call was cut off. Even if the args parsed, the body is likely truncated. "
+          + "Retry with a smaller payload: prefer `edit` over `write` for long files, or split "
+          + "the change across multiple calls.";
+  private static final String MID_STRING_TOOL_ERROR =
+      "tool args truncated mid-string — the wire cut off inside a string value (likely "
+          + "`content` / `command` / `new_text`), so the body is incomplete and the call was "
+          + "refused. Re-emit the tool with the full payload — prefer `edit` over `write` for "
+          + "long files, or split the change across multiple calls.";
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final TypeReference<Map<String, Object>> ARGUMENTS = new TypeReference<>() {};
 
@@ -98,8 +109,9 @@ public final class AgentReducer {
     var cancellation = new CancellationSignal();
     SessionPhase phase = SessionPhase.start(new SessionPhase.Idle(),
         ActiveTurn.start(cancellation, context.nanoClock().getAsLong()));
-    AgentState revised = copy(state, thread, phase, turnId, turnId, state.tokensIn(),
-        state.tokensOut(), "", Optional.empty(), state.queued(), state.sessionGrants());
+    AgentState revised = clearTruncationSignals(copy(state, thread, phase, turnId, turnId,
+        state.tokensIn(), state.tokensOut(), "", Optional.empty(), state.queued(),
+        state.sessionGrants()));
     return new Step(revised, List.of(new RuntimeEffect.Persist(thread),
         new RuntimeEffect.StartStream(turnId, thread.messages(), cancellation)));
   }
@@ -121,16 +133,163 @@ public final class AgentReducer {
       case StreamEvent.Usage usage -> done(copy(live, live.thread(), live.phase(),
           live.activeTurnId(), live.turnCounter(), usage.inputTokens(), usage.outputTokens(),
           live.status(), live.toolDraft(), live.queued(), live.sessionGrants()));
-      case StreamEvent.Finished ignored -> finalizeStream(live);
+      case StreamEvent.Finished finished -> finalizeStream(live, finished.stopReason());
       case StreamEvent.Error error -> streamError(live, error);
     };
   }
 
-  private Step finalizeStream(AgentState state) {
-    AgentState revised = state.toolDraft().isPresent() ? endTool(state) : state;
+  private Step finalizeStream(AgentState state,
+                              com.github.skanga.ajent.provider.stream.StopReason stopReason) {
+    DraftFinalization draft = finalizeDraft(state, stopReason);
+    AgentState revised = draft.state();
+    if (draft.truncated() && stopReason !=
+        com.github.skanga.ajent.provider.stream.StopReason.MAX_TOKENS) {
+      ActiveTurn active = revised.phase().active().orElseThrow();
+      Optional<Message> assistant = lastAssistant(revised);
+      boolean committed = assistant.map(message -> !message.text().isEmpty()
+          || message.toolCalls().stream().anyMatch(call ->
+              call.status() instanceof ToolStatus.Done
+                  || call.status() instanceof ToolStatus.Running)).orElse(false);
+      if (!committed && active.truncationRetries() < MAX_TRUNCATION_RETRIES) {
+        ActiveTurn retry = active.withTruncationRetries(active.truncationRetries() + 1);
+        revised = replaceUncommittedAssistant(withActive(revised, retry));
+        revised = copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+            revised.turnCounter(), revised.tokensIn(), revised.tokensOut(),
+            "retrying (upstream cut off)…", Optional.empty(), revised.queued(),
+            revised.sessionGrants());
+        return new Step(revised, List.of(new RuntimeEffect.StartStream(revised.activeTurnId(),
+            revised.thread().messages(), retry.cancellation())));
+      }
+      revised = clearTruncationSignals(failPendingTools(revised, MID_STRING_TOOL_ERROR));
+    }
     List<ToolUse> calls = lastAssistant(revised).map(Message::toolCalls).orElse(List.of());
     if (!calls.isEmpty()) return kickTools(revised);
     return finishTurn(revised, "");
+  }
+
+  private record DraftFinalization(AgentState state, boolean truncated) {}
+
+  private DraftFinalization finalizeDraft(
+      AgentState state, com.github.skanga.ajent.provider.stream.StopReason stopReason) {
+    if (state.toolDraft().isEmpty()) {
+      return stopReason == com.github.skanga.ajent.provider.stream.StopReason.MAX_TOKENS
+          ? new DraftFinalization(clearTruncationSignals(
+              failPendingTools(state, MAX_TOKENS_TOOL_ERROR)), false)
+          : validatePendingTools(state, false);
+    }
+    AgentState.ToolDraft draft = state.toolDraft().orElseThrow();
+    if (stopReason == com.github.skanga.ajent.provider.stream.StopReason.MAX_TOKENS) {
+      AgentState cleared = clearDraft(state);
+      return new DraftFinalization(clearTruncationSignals(
+          failPendingTools(cleared, MAX_TOKENS_TOOL_ERROR)), false);
+    }
+    if (PartialJson.endedInsideString(draft.partialJson())) {
+      AgentState marked = markTruncated(clearDraft(state), draft.callId());
+      return validatePendingTools(marked, true);
+    }
+    try {
+      var root = JSON.readTree(PartialJson.close(draft.partialJson()));
+      if (!root.isObject()) throw new IllegalArgumentException("arguments must be an object");
+      Map<String, Object> arguments = JSON.convertValue(root, ARGUMENTS);
+      AgentState parsed = updateTool(state, draft.callId(), call -> new ToolUse(call.id(),
+          call.name(), arguments, call.status()));
+      String missing = missingRequiredField(findTool(parsed, draft.callId()).orElseThrow());
+      parsed = clearDraft(parsed);
+      if (missing.isEmpty()) return validatePendingTools(parsed, false);
+      String failure = "Tool call arguments look incomplete — `" + missing
+          + "` is missing. This usually means the stream was truncated before the full tool "
+          + "input arrived. Please emit a fresh tool call with every required field populated "
+          + "(including `" + missing + "`).";
+      AgentState failed = updateTool(parsed, draft.callId(), call -> new ToolUse(call.id(),
+          call.name(), call.arguments(), new ToolStatus.Failed(failure)));
+      return validatePendingTools(failed, true);
+    } catch (Exception exception) {
+      AgentState failed = updateTool(state, draft.callId(), call -> new ToolUse(call.id(),
+          call.name(), call.arguments(), new ToolStatus.Failed("invalid tool arguments: "
+              + exception.getMessage())));
+      return new DraftFinalization(clearDraft(failed), false);
+    }
+  }
+
+  private AgentState clearDraft(AgentState state) {
+    return copy(state, state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.status(), Optional.empty(), state.queued(),
+        state.sessionGrants());
+  }
+
+  private DraftFinalization validatePendingTools(AgentState state, boolean truncated) {
+    AgentState revised = state;
+    for (ToolUse call : lastAssistant(state).map(Message::toolCalls).orElse(List.of())) {
+      if (!(call.status() instanceof ToolStatus.Pending)) continue;
+      if (state.truncatedToolIds().contains(call.id().value())) {
+        truncated = true;
+        continue;
+      }
+      String missing = missingRequiredField(call);
+      if (missing.isEmpty()) continue;
+      String failure = "Tool call arguments look incomplete â€” `" + missing
+          + "` is missing. This usually means the stream was truncated before the full tool "
+          + "input arrived. Please emit a fresh tool call with every required field populated "
+          + "(including `" + missing + "`).";
+      revised = updateTool(revised, call.id().value(), value -> new ToolUse(value.id(),
+          value.name(), value.arguments(), new ToolStatus.Failed(failure)));
+      truncated = true;
+    }
+    return new DraftFinalization(revised, truncated);
+  }
+
+  private AgentState markTruncated(AgentState state, String callId) {
+    var ids = new java.util.HashSet<>(state.truncatedToolIds());
+    ids.add(callId);
+    return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(), ids,
+        state.sessionGrants());
+  }
+
+  private AgentState clearTruncationSignals(AgentState state) {
+    if (state.truncatedToolIds().isEmpty()) return state;
+    return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
+        Set.of(), state.sessionGrants());
+  }
+
+  private AgentState failPendingTools(AgentState state, String error) {
+    return updateEveryTool(state, call -> call.status() instanceof ToolStatus.Pending
+        ? new ToolUse(call.id(), call.name(), call.arguments(), new ToolStatus.Failed(error)) : call);
+  }
+
+  static String missingRequiredField(ToolUse call) {
+    Map<String, Object> arguments = call.arguments();
+    return switch (call.name().value()) {
+      case "write" -> !hasString(arguments, "path", "file_path", "filepath", "filename")
+          ? "path" : !hasString(arguments, "content", "file_text", "text", "file_content",
+              "contents", "body", "data") ? "content" : "";
+      case "edit" -> missingEditField(arguments);
+      case "bash", "diagnostics" -> hasString(arguments, "command") ? "" : "command";
+      case "grep" -> hasString(arguments, "pattern") ? "" : "pattern";
+      case "find_definition" -> hasString(arguments, "symbol") ? "" : "symbol";
+      case "search_docs" -> hasString(arguments, "query") ? "" : "query";
+      case "web_fetch" -> hasString(arguments, "url") ? "" : "url";
+      case "git_commit" -> hasString(arguments, "message") ? "" : "message";
+      case "remember" -> hasString(arguments, "text") ? "" : "text";
+      case "task" -> hasString(arguments, "prompt") ? "" : "prompt";
+      case "skill" -> hasString(arguments, "name") ? "" : "name";
+      default -> "";
+    };
+  }
+
+  private static String missingEditField(Map<String, Object> arguments) {
+    if (!hasString(arguments, "path", "file_path", "filepath", "filename")) return "path";
+    if (arguments.get("edits") instanceof List<?> edits && !edits.isEmpty()) return "";
+    if (!hasString(arguments, "old_string", "old_str", "oldStr")) return "old_string";
+    return hasString(arguments, "new_string", "new_str", "newStr") ? "" : "new_string";
+  }
+
+  private static boolean hasString(Map<String, Object> arguments, String... keys) {
+    for (String key : keys) {
+      if (arguments.get(key) instanceof String value && !value.isEmpty()) return true;
+    }
+    return false;
   }
 
   private Step toolCompleted(AgentState state, RuntimeMessage.ToolCompleted completed) {
@@ -177,9 +336,9 @@ public final class AgentReducer {
     AgentState settled = updateEveryTool(state, call -> call.status().isTerminal() ? call
         : new ToolUse(call.id(), call.name(), call.arguments(), new ToolStatus.Rejected()));
     SessionPhase.Idle idle = SessionPhase.abort(settled.phase());
-    AgentState revised = copy(settled, settled.thread(), idle, 0, settled.turnCounter(),
+    AgentState revised = clearTruncationSignals(copy(settled, settled.thread(), idle, 0, settled.turnCounter(),
         settled.tokensIn(), settled.tokensOut(), "cancelled", Optional.empty(), settled.queued(),
-        settled.sessionGrants());
+        settled.sessionGrants()));
     return new Step(revised, List.of(new RuntimeEffect.Persist(revised.thread())));
   }
 
@@ -245,9 +404,9 @@ public final class AgentReducer {
   private Step finishTurn(AgentState state, String status) {
     SessionPhase.Idle idle = state.phase() instanceof SessionPhase.Streaming streaming
         ? SessionPhase.finish(streaming) : SessionPhase.abort(state.phase());
-    AgentState revised = copy(state, state.thread(), idle, 0, state.turnCounter(),
+    AgentState revised = clearTruncationSignals(copy(state, state.thread(), idle, 0, state.turnCounter(),
         state.tokensIn(), state.tokensOut(), status, Optional.empty(), state.queued(),
-        state.sessionGrants());
+        state.sessionGrants()));
     var effects = new ArrayList<RuntimeEffect>();
     effects.add(new RuntimeEffect.Persist(revised.thread()));
     if (revised.queued().isEmpty()) return new Step(revised, effects);
@@ -356,9 +515,10 @@ public final class AgentReducer {
       messages.removeLast();
     messages.add(message(Role.ASSISTANT, "", List.of(), List.of(), context.wallClock().get()));
     var thread = withMessages(state.thread(), messages, context.wallClock().get());
-    return copy(state, thread, state.phase(), state.activeTurnId(), state.turnCounter(),
+    AgentState revised = copy(state, thread, state.phase(), state.activeTurnId(), state.turnCounter(),
         state.tokensIn(), state.tokensOut(), state.status(), Optional.empty(), state.queued(),
         state.sessionGrants());
+    return clearTruncationSignals(revised);
   }
 
   private static Duration clampRetryAfter(Duration value) {
@@ -393,9 +553,17 @@ public final class AgentReducer {
   private AgentState endTool(AgentState state) {
     if (state.toolDraft().isEmpty()) return state;
     AgentState.ToolDraft draft = state.toolDraft().orElseThrow();
+    if (PartialJson.endedInsideString(draft.partialJson()))
+      return markTruncated(clearDraft(state), draft.callId());
     AgentState revised;
     try {
-      var root = JSON.readTree(draft.partialJson().isEmpty() ? "{}" : draft.partialJson());
+      String raw = draft.partialJson().isEmpty() ? "{}" : draft.partialJson();
+      com.fasterxml.jackson.databind.JsonNode root;
+      try {
+        root = JSON.readTree(raw);
+      } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
+        root = JSON.readTree(PartialJson.close(raw));
+      }
       if (!root.isObject()) throw new IllegalArgumentException("arguments must be an object");
       Map<String, Object> arguments = JSON.convertValue(root, ARGUMENTS);
       revised = updateTool(state, draft.callId(), call -> new ToolUse(call.id(), call.name(),
@@ -529,7 +697,7 @@ public final class AgentReducer {
                                  Optional<AgentState.ToolDraft> draft,
                                  List<RuntimeMessage.Submit> queued, Set<String> grants) {
     return new AgentState(thread, phase, activeTurnId, turnCounter, tokensIn, tokensOut, status,
-        draft, queued, grants);
+        draft, queued, state.truncatedToolIds(), grants);
   }
 
   private static Step done(AgentState state) {

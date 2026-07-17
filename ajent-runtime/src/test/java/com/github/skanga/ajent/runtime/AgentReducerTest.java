@@ -248,6 +248,123 @@ final class AgentReducerTest {
     assertThat(drained.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
   }
 
+  @Test void upstreamMidStringToolCutoffRetriesTwiceOnTheSameContext() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = unfinishedWrite(reducer, submit(reducer), 1);
+    AgentReducer.Step first = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(first.state().activeTurnId()).isEqualTo(1);
+    assertThat(first.state().phase().active().orElseThrow().truncationRetries()).isEqualTo(1);
+    assertThat(first.state().status()).isEqualTo("retrying (upstream cut off)…");
+    assertThat(first.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
+
+    state = unfinishedWrite(reducer, first.state(), 1);
+    AgentReducer.Step second = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(second.state().phase().active().orElseThrow().truncationRetries()).isEqualTo(2);
+    assertThat(second.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
+  }
+
+  @Test void exhaustedTruncationBudgetFailsTheCallAndContinuesForModelRecovery() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    for (int attempt = 0; attempt < 2; attempt++) {
+      state = unfinishedWrite(reducer, state, 1);
+      state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+          new StreamEvent.Finished(StopReason.END_TURN))).state();
+    }
+    state = unfinishedWrite(reducer, state, 1);
+    AgentReducer.Step exhausted = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(exhausted.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(exhausted.state().activeTurnId()).isEqualTo(2);
+    assertThat(exhausted.state().thread().messages().get(1).toolCalls().getFirst().status())
+        .isInstanceOfSatisfying(ToolStatus.Failed.class, failed ->
+            assertThat(failed.output()).contains("truncated mid-string", "full payload"));
+  }
+
+  @Test void maxTokensNeverRetriesAndExplainsHowToSplitTheToolPayload() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = unfinishedWrite(reducer, submit(reducer), 1);
+    AgentReducer.Step capped = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.MAX_TOKENS)));
+    assertThat(capped.state().activeTurnId()).isEqualTo(2);
+    assertThat(capped.state().thread().messages().get(1).toolCalls().getFirst().status())
+        .isInstanceOfSatisfying(ToolStatus.Failed.class, failed ->
+            assertThat(failed.output()).contains("max_tokens", "prefer `edit` over `write`"));
+  }
+
+  @Test void safelyClosesNonStringPartialJsonBeforeDispatchingTheTool() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("partial", "read"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{\"path\":\"README.md\""));
+    AgentReducer.Step finalized = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.TOOL_USE)));
+    assertThat(finalized.effects()).singleElement().isInstanceOfSatisfying(
+        RuntimeEffect.ExecuteTool.class,
+        effect -> assertThat(effect.call().arguments()).containsEntry("path", "README.md"));
+  }
+
+  @Test void toolBlockCloseRetainsMidStringTruncationUntilTurnFinish() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = unfinishedWrite(reducer, submit(reducer), 1);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
+    assertThat(state.thread().messages().getLast().toolCalls().getFirst().status())
+        .isInstanceOf(ToolStatus.Pending.class);
+    AgentReducer.Step finished = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.TOOL_USE)));
+    assertThat(finished.state().phase().active().orElseThrow().truncationRetries()).isEqualTo(1);
+    assertThat(finished.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
+  }
+
+  @Test void missingRequiredFieldAfterSafePartialCloseIsRetryEligible() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("missing", "write"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{\"path\":\"x\","));
+    AgentReducer.Step finished = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.TOOL_USE)));
+    assertThat(finished.state().phase().active().orElseThrow().truncationRetries()).isEqualTo(1);
+    assertThat(finished.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
+  }
+
+  @Test void committedTextBlocksTruncationRetryAndMalformedNonStringArgsFailDirectly() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.TextDelta("committed"));
+    state = unfinishedWrite(reducer, state, 1);
+    AgentReducer.Step committed = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(committed.effects()).filteredOn(RuntimeEffect.StartStream.class::isInstance)
+        .singleElement().isInstanceOfSatisfying(RuntimeEffect.StartStream.class,
+            stream -> assertThat(stream.turnId()).isEqualTo(2));
+    assertThat(committed.state().thread().messages().get(1).toolCalls().getFirst().status())
+        .isInstanceOf(ToolStatus.Failed.class);
+
+    state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("bad-finish", "read"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{not-json"));
+    AgentReducer.Step malformed = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.TOOL_USE)));
+    assertThat(malformed.state().thread().messages().get(1).toolCalls().getFirst().status())
+        .isInstanceOfSatisfying(ToolStatus.Failed.class,
+            failed -> assertThat(failed.output()).contains("invalid tool arguments"));
+  }
+
+  @Test void maxTokensUpgradesAPendingToolEvenAfterItsBlockClosed() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("closed", "read"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{\"path\":\"x\"}"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
+    AgentReducer.Step capped = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.MAX_TOKENS)));
+    assertThat(capped.state().thread().messages().get(1).toolCalls().getFirst().status())
+        .isInstanceOfSatisfying(ToolStatus.Failed.class,
+            failed -> assertThat(failed.output()).contains("max_tokens"));
+  }
+
   @Test void policyDenialBecomesAToolErrorWithoutExecuting() {
     AgentReducer reducer = reducer(PermissionVerdict.DENY);
     AgentState state = toolFinished(reducer);
@@ -266,6 +383,8 @@ final class AgentReducerTest {
         1, "call-1", new ToolCompletion.Success("ok"))).state();
     long turn = continued.activeTurnId();
     continued = event(reducer, continued, turn, new StreamEvent.ToolUseStart("call-2", "write"));
+    continued = event(reducer, continued, turn,
+        new StreamEvent.ToolUseDelta("{\"path\":\"y\",\"content\":\"z\"}"));
     continued = event(reducer, continued, turn, new StreamEvent.ToolUseEnd());
     AgentReducer.Step second = reducer.update(continued, new RuntimeMessage.ProviderEvent(turn,
         new StreamEvent.Finished(StopReason.TOOL_USE)));
@@ -280,8 +399,11 @@ final class AgentReducerTest {
     state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("ignored-before-start"));
     state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
     state = event(reducer, state, 1, new StreamEvent.ToolUseStart("read-1", "read"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{\"path\":\"x\"}"));
     state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
     state = event(reducer, state, 1, new StreamEvent.ToolUseStart("write-1", "write"));
+    state = event(reducer, state, 1,
+        new StreamEvent.ToolUseDelta("{\"path\":\"x\",\"content\":\"y\"}"));
     state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
     AgentReducer.Step first = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
         new StreamEvent.Finished(StopReason.TOOL_USE)));
@@ -358,10 +480,17 @@ final class AgentReducerTest {
   private static AgentState toolFinished(AgentReducer reducer) {
     AgentState state = submit(reducer);
     state = event(reducer, state, 1, new StreamEvent.ToolUseStart("call-1", "write"));
-    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{\"path\":\"x\"}"));
+    state = event(reducer, state, 1,
+        new StreamEvent.ToolUseDelta("{\"path\":\"x\",\"content\":\"body\"}"));
     state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
     return reducer.update(state, new RuntimeMessage.ProviderEvent(1,
         new StreamEvent.Finished(StopReason.TOOL_USE))).state();
+  }
+
+  private static AgentState unfinishedWrite(AgentReducer reducer, AgentState state, long turn) {
+    state = event(reducer, state, turn, new StreamEvent.ToolUseStart("cutoff", "write"));
+    return event(reducer, state, turn,
+        new StreamEvent.ToolUseDelta("{\"path\":\"x\",\"content\":\"half"));
   }
 
   private static AgentState submit(AgentReducer reducer) {

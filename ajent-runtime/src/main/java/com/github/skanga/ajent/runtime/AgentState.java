@@ -17,6 +17,7 @@ public record AgentState(
     String status,
     Optional<ToolDraft> toolDraft,
     List<RuntimeMessage.Submit> queued,
+    Set<String> truncatedToolIds,
     Set<String> sessionGrants) {
 
   public record ToolDraft(String callId, String partialJson) {
@@ -32,11 +33,12 @@ public record AgentState(
     status = Objects.requireNonNull(status, "status");
     toolDraft = Objects.requireNonNull(toolDraft, "toolDraft");
     queued = List.copyOf(queued);
+    truncatedToolIds = Set.copyOf(truncatedToolIds);
     sessionGrants = Set.copyOf(sessionGrants);
   }
 
   public static AgentState initial(Thread thread) {
     return new AgentState(thread, new SessionPhase.Idle(), 0, 0, 0, 0, "",
-        Optional.empty(), List.of(), Set.of());
+        Optional.empty(), List.of(), Set.of(), Set.of());
   }
 }
