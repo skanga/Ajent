@@ -48,9 +48,9 @@
       "classification": "unit",
       "surface": "composer-terminal",
       "referenceRun": "ctest --test-dir <build> -R \"^composer_edit_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/ComposerEditTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/composer/ComposerEditorTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q -pl ajent-terminal -am verify", "all 11 reference checks translated"]
     },
     {
       "id": "composer_flicker_probe",

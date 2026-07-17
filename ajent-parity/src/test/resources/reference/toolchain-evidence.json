@@ -6,8 +6,8 @@
     "selectedHome": "C:\\lang\\jdk-25",
     "version": "25",
     "mavenVersion": "3.9.12",
-    "selection": "project-local .mvn/toolchains.xml for compiler and Surefire",
-    "status": "verified-mvn-verify-green"
+    "selection": "Windows user JAVA_HOME/PATH plus project-local .mvn/toolchains.xml",
+    "status": "verified-java-version-maven-version-and-mvn-test-green-on-jdk-25"
   },
   "reference": {
     "commit": "c7594d64020cfdacb10b6a0b2074bcedcc827bba",

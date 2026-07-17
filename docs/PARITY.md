@@ -27,9 +27,9 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 9 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 10 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
-| JDK 25 | project-local Maven toolchain selects `C:\lang\jdk-25` for compile/tests | `mvn verify` green |
+| JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
 
 ## Feature ledger
@@ -50,7 +50,7 @@ are recorded in the machine-readable manifests under
 | Agent loop/reducer | doom-loop and salvage-dedup source suites | `DoomLoopBreakerTest`, `SalvagedCallDeduplicatorTest` | loop breaker and immutable re-leak reducer | source assertions translated; full loop missing | partial |
 | ACP | planned | planned | planned | missing | planned |
 | MCP client/server | planned | planned | planned | missing | planned |
-| Terminal/rendering | planned | planned | planned | missing | planned |
+| Terminal/rendering | model-label and composer-edit source suites | `ModelLabelsTest`, `ComposerEditorTest` | labels, immutable composer word deletion, chip placeholders, undo | source assertions translated; renderer missing | partial |
 | Interactive UX and platform integration | planned | planned | planned | missing | planned |
 | Documentation/distribution | inventory pending | planned | planned | missing | planned |
 
