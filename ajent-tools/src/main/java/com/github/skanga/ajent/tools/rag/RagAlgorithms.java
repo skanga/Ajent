@@ -8,16 +8,21 @@ import java.util.List;
 import java.util.Map;
 
 public final class RagAlgorithms {
+  private static final boolean STEMMER_ENABLED = stemmerEnabled(System.getenv("BM25_USE_STEMMER"));
   public record Score(int document, double score) {}
   private RagAlgorithms() {}
 
   public static Bm25Index buildBm25(List<RagChunk> chunks) {
+    return buildBm25(chunks, STEMMER_ENABLED);
+  }
+
+  public static Bm25Index buildBm25(List<RagChunk> chunks, boolean stemmed) {
     var postings = new HashMap<String, List<Bm25Index.Posting>>();
     int[] lengths = new int[chunks.size()];
     long total = 0;
     for (int document = 0; document < chunks.size(); document++) {
-      var tokens = new ArrayList<>(tokenize(chunks.get(document).text()));
-      tokens.addAll(tokenize(chunks.get(document).context()));
+      var tokens = new ArrayList<>(tokenizeBm25(chunks.get(document).text(), stemmed));
+      tokens.addAll(tokenizeBm25(chunks.get(document).context(), stemmed));
       lengths[document] = tokens.size();
       total += tokens.size();
       var frequencies = new HashMap<String, Integer>();
@@ -27,14 +32,14 @@ public final class RagAlgorithms {
           ignored -> new ArrayList<>()).add(new Bm25Index.Posting(id, frequency)));
     }
     return new Bm25Index(postings, lengths, chunks.isEmpty() ? 0
-        : (double) total / chunks.size(), chunks.size());
+        : (double) total / chunks.size(), chunks.size(), stemmed);
   }
 
   public static List<Score> searchBm25(Bm25Index index, String query, int limit) {
     if (index.documentCount() == 0 || limit <= 0) return List.of();
     var scores = new HashMap<Integer, Double>();
     int[] lengths = index.documentLengths();
-    for (String term : tokenize(query)) {
+    for (String term : tokenizeBm25(query, index.stemmed())) {
       List<Bm25Index.Posting> postings = index.postings().get(term);
       if (postings == null || postings.isEmpty()) continue;
       double frequency = postings.size();
@@ -87,5 +92,15 @@ public final class RagAlgorithms {
       }
     }
     return result;
+  }
+
+  private static List<String> tokenizeBm25(String text, boolean stemmed) {
+    List<String> tokens = tokenize(text);
+    return stemmed ? RagStemmer.stemTokens(tokens) : tokens;
+  }
+
+  static boolean stemmerEnabled(String value) {
+    return value != null && !value.isEmpty() && value.charAt(0) != '0'
+        && !value.equals("false") && !value.equals("FALSE");
   }
 }
