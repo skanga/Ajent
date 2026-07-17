@@ -89,6 +89,39 @@ final class AgentLoopTest {
         () -> loop.dispatch(new RuntimeMessage.Submit("late", List.of())));
   }
 
+  @Test void closeDrainsPersistenceEffectsBeforeClosingTheirPort() throws Exception {
+    var saveStarted = new CountDownLatch(1);
+    var releaseSave = new CountDownLatch(1);
+    var persistenceClosed = new CountDownLatch(1);
+    var closeFinished = new CountDownLatch(1);
+    PersistencePort persistence = new PersistencePort() {
+      @Override public void save(Thread ignored) {
+        saveStarted.countDown();
+        await(releaseSave);
+      }
+
+      @Override public void close() {
+        persistenceClosed.countDown();
+      }
+    };
+    var loop = new AgentLoop(AgentState.initial(thread()), reducer(PermissionVerdict.ALLOW),
+        (turn, messages, cancellation, sink) -> {},
+        call -> new ToolCompletion.Success("unused"),
+        call -> new PermissionPort.Decision(true, false), persistence, state -> {});
+
+    loop.dispatch(new RuntimeMessage.Submit("persist me", List.of()));
+    assertThat(saveStarted.await(5, TimeUnit.SECONDS)).isTrue();
+    java.lang.Thread.startVirtualThread(() -> {
+      loop.close();
+      closeFinished.countDown();
+    });
+    assertThat(persistenceClosed.await(100, TimeUnit.MILLISECONDS)).isFalse();
+
+    releaseSave.countDown();
+    assertThat(closeFinished.await(5, TimeUnit.SECONDS)).isTrue();
+    assertThat(persistenceClosed.getCount()).isZero();
+  }
+
   @Test void interpretsScheduledRetryWithoutBlockingWorkers() throws Exception {
     var idle = new CountDownLatch(1);
     var providerCalls = new AtomicInteger();
@@ -182,6 +215,15 @@ final class AgentLoopTest {
         () -> new MessageId("loop-refresh-" + ids.incrementAndGet()),
         call -> PermissionVerdict.ALLOW, () -> 1.0, () -> 200_000,
         () -> java.util.Optional.of("refresh-token")));
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      if (!latch.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("timed out");
+    } catch (InterruptedException exception) {
+      java.lang.Thread.currentThread().interrupt();
+      throw new IllegalStateException("interrupted", exception);
+    }
   }
 
   private static Thread thread() {

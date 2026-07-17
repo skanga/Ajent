@@ -12,6 +12,11 @@
   <dependencies>
     <dependency>
       <groupId>com.github.skanga.ajent</groupId>
+      <artifactId>ajent-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.github.skanga.ajent</groupId>
       <artifactId>ajent-provider</artifactId>
       <version>${project.version}</version>
     </dependency>

@@ -153,6 +153,10 @@ public final class AgentLoop implements AutoCloseable {
       state.phase().active().ifPresent(active -> active.cancellation().cancel());
     }
     scheduler.shutdownNow();
-    tasks.close();
+    try {
+      tasks.close();
+    } finally {
+      persistence.close();
+    }
   }
 }
