@@ -1,0 +1,195 @@
+package com.github.skanga.ajent.tools.fs;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.skanga.ajent.tools.runtime.ToolErrorKind;
+import com.github.skanga.ajent.tools.runtime.ToolResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class FileToolsTest {
+  private static final ObjectMapper JSON = new ObjectMapper();
+
+  @Test
+  void portsPinnedMcpCppFilesystemEndToEndContract(@TempDir Path directory) throws Exception {
+    var tools = tools(directory);
+    Path file = directory.resolve("hello.txt");
+
+    ToolResult.Success written = success(tools.execute("write", object()
+        .put("file_path", file.toString()).put("content", "line1\nline2\nline3\n")));
+    assertThat(written.output().change()).isPresent().get().satisfies(change -> {
+      assertThat(change.path()).isEqualTo(file.toAbsolutePath().normalize().toString());
+      assertThat(change.added()).isEqualTo(3);
+      assertThat(change.after()).isEqualTo("line1\nline2\nline3\n");
+    });
+
+    ToolResult.Success read = success(tools.execute("read", object().put("path", file.toString())));
+    assertThat(read.output().text()).contains("line1", "line3");
+    assertThat(success(tools.execute("read", object().put("path", file.toString())))
+        .output().text()).contains("File unchanged since last read");
+
+    ObjectNode edit = object().put("old_text", "line2").put("new_text", "LINE-TWO");
+    ToolResult.Success edited = success(tools.execute("edit", object()
+        .put("path", file.toString()).set("edits", JSON.createArrayNode().add(edit))));
+    assertThat(edited.output().text()).contains("Edited");
+    assertThat(edited.output().change()).isPresent().get().satisfies(change -> {
+      assertThat(change.before()).contains("line2");
+      assertThat(change.after()).contains("LINE-TWO");
+    });
+    assertThat(Files.readString(file)).contains("LINE-TWO").doesNotContain("line2");
+
+    Path duplicate = directory.resolve("dup.txt");
+    success(tools.execute("write", object().put("file_path", duplicate.toString())
+        .put("content", "x\nx\ny\n")));
+    ToolResult.Failure ambiguous = failure(tools.execute("edit", object()
+        .put("path", duplicate.toString()).set("edits", JSON.createArrayNode().add(
+            object().put("old_text", "x").put("new_text", "z")))));
+    assertThat(ambiguous.error().kind()).isEqualTo(ToolErrorKind.AMBIGUOUS);
+    assertThat(ambiguous.error().detail()).contains("appears");
+
+    assertThat(success(tools.execute("list_dir", object().put("path", directory.toString())))
+        .output().text()).contains("hello.txt", "dup.txt");
+  }
+
+  @Test
+  void readSupportsAliasesRangesErrorsAndBinaryGuard(@TempDir Path directory) throws Exception {
+    var tools = tools(directory);
+    Path text = Files.writeString(directory.resolve("lines.txt"), "one\r\ntwo\r\nthree\r\nfour");
+
+    ToolResult.Success range = success(tools.execute("read", object()
+        .put("file", text.toString()).put("start_line", "2").put("end_line", 3)));
+    assertThat(range.output().text()).startsWith("two\nthree\nfour\n")
+        .contains("showing lines 2-4 of 4");
+
+    assertThat(failure(tools.execute("read", object().put("path", directory.resolve("nope").toString())))
+        .error().kind()).isEqualTo(ToolErrorKind.NOT_FOUND);
+    assertThat(failure(tools.execute("read", object().put("path", directory.toString())))
+        .error().kind()).isEqualTo(ToolErrorKind.NOT_A_FILE);
+    Path binary = directory.resolve("binary.bin");
+    Files.write(binary, new byte[] {1, 0, 2});
+    assertThat(failure(tools.execute("read", object().put("path", binary.toString())))
+        .error().kind()).isEqualTo(ToolErrorKind.BINARY);
+    assertThat(failure(tools.execute("read", object()))
+        .error().kind()).isEqualTo(ToolErrorKind.INVALID_ARGS);
+  }
+
+  @Test
+  void writeIsAtomicHandlesNoChangeAndRejectsDirectories(@TempDir Path directory) throws Exception {
+    var tools = tools(directory);
+    Path nested = directory.resolve("a/b/new.txt");
+    ObjectNode write = object().put("path", nested.toString());
+    write.putArray("text").add("a").add("b");
+    ToolResult.Success created = success(tools.execute("write", write));
+    assertThat(created.output().text()).contains("Created");
+    assertThat(Files.readString(nested)).isEqualTo("a\nb");
+    assertThat(Files.exists(nested.resolveSibling("new.txt.tmp"))).isFalse();
+    assertThat(success(tools.execute("write", object()
+        .put("path", nested.toString()).put("content", "a\nb"))).output().text())
+        .isEqualTo("File already matches content — no changes written.");
+    assertThat(failure(tools.execute("write", object()
+        .put("path", directory.toString()).put("content", "x"))).error().kind())
+        .isEqualTo(ToolErrorKind.NOT_A_FILE);
+  }
+
+  @Test
+  void listSortsDirectoriesFirstSkipsRecursiveBuildContentsAndRejectsEscape(@TempDir Path directory)
+      throws Exception {
+    Path workspace = Files.createDirectories(directory.resolve("workspace"));
+    Files.writeString(workspace.resolve("z.txt"), "z");
+    Files.createDirectories(workspace.resolve("a-dir"));
+    Path build = Files.createDirectories(workspace.resolve("build"));
+    Files.writeString(build.resolve("hidden.txt"), "hidden");
+    var tools = tools(workspace);
+
+    String flat = success(tools.execute("list_dir", object().put("path", workspace.toString())))
+        .output().text();
+    assertThat(flat.indexOf("a-dir/")).isLessThan(flat.indexOf("z.txt"));
+    String recursive = success(tools.execute("list_dir", object()
+        .put("path", workspace.toString()).put("recursive", true))).output().text();
+    assertThat(recursive).contains("build/").doesNotContain("hidden.txt");
+
+    ToolResult.Failure escaped = failure(tools.execute(
+        "read", object().put("path", directory.resolve("outside.txt").toString())));
+    assertThat(escaped.error().kind()).isEqualTo(ToolErrorKind.OUT_OF_WORKSPACE);
+  }
+
+  @Test
+  void sourceRelevantFailureAndNoOpPathsRemainTyped(@TempDir Path directory) throws Exception {
+    var tools = tools(directory);
+    assertThat(failure(tools.execute("unknown", object())).error().kind())
+        .isEqualTo(ToolErrorKind.UNKNOWN);
+    assertThat(failure(tools.execute("write", object())).error().kind())
+        .isEqualTo(ToolErrorKind.INVALID_ARGS);
+    assertThat(failure(tools.execute("write", object().put("path", "x"))).error().kind())
+        .isEqualTo(ToolErrorKind.INVALID_ARGS);
+    assertThat(failure(tools.execute("write", object().put("path", "large")
+        .put("content", "x".repeat(5 * 1024 * 1024 + 1)))).error().kind())
+        .isEqualTo(ToolErrorKind.TOO_LARGE);
+
+    Path parentFile = Files.writeString(directory.resolve("parent"), "not a directory");
+    assertThat(failure(tools.execute("write", object()
+        .put("path", parentFile.resolve("child").toString()).put("content", "x"))).error().kind())
+        .isEqualTo(ToolErrorKind.NOT_A_DIRECTORY);
+
+    Path text = Files.writeString(directory.resolve("edit.txt"), "alpha\nbeta\n");
+    ObjectNode noop = object().put("old_text", "alpha").put("new_text", "alpha");
+    assertThat(success(tools.execute("edit", object().put("path", text.toString())
+        .set("edits", JSON.createArrayNode().add(noop)))).output().text())
+        .contains("No edits were applied");
+    ObjectNode missing = object().put("old_text", "missing").put("new_text", "new");
+    assertThat(failure(tools.execute("edit", object().put("path", text.toString())
+        .set("edits", JSON.createArrayNode().add(missing)))).error().kind())
+        .isEqualTo(ToolErrorKind.NO_MATCH);
+    assertThat(failure(tools.execute("edit", object().put("path", directory.toString())
+        .set("edits", JSON.createArrayNode().add(missing)))).error().kind())
+        .isEqualTo(ToolErrorKind.NOT_A_FILE);
+    Path binary = directory.resolve("edit.bin");
+    Files.write(binary, new byte[] {0, 1});
+    assertThat(failure(tools.execute("edit", object().put("path", binary.toString())
+        .set("edits", JSON.createArrayNode().add(missing)))).error().kind())
+        .isEqualTo(ToolErrorKind.BINARY);
+
+    Path empty = Files.createDirectory(directory.resolve("empty"));
+    assertThat(success(tools.execute("list_dir", object().put("path", empty.toString())))
+        .output().text()).isEqualTo("empty directory");
+    assertThat(failure(tools.execute("list_dir", object().put("path", text.toString())))
+        .error().kind()).isEqualTo(ToolErrorKind.NOT_A_DIRECTORY);
+    assertThat(failure(tools.execute("list_dir", object().put("path", "absent")))
+        .error().kind()).isEqualTo(ToolErrorKind.NOT_FOUND);
+  }
+
+  @Test
+  void displayDescriptionsPrefixSuccessfulToolOutput(@TempDir Path directory) throws Exception {
+    var tools = tools(directory);
+    Path file = directory.resolve("described.txt");
+    assertThat(success(tools.execute("write", object().put("path", file.toString())
+        .put("content", "body").put("display_description", "Creating fixture"))).output().text())
+        .startsWith("Creating fixture\nCreated");
+    assertThat(success(tools.execute("read", object().put("path", file.toString())
+        .put("display_description", "Reading fixture"))).output().text())
+        .startsWith("Reading fixture\nbody");
+    assertThat(success(tools.execute("list_dir", object().put("path", directory.toString())
+        .put("display_description", "Listing fixture"))).output().text())
+        .startsWith("Listing fixture\n");
+  }
+
+  private static FileTools tools(Path root) {
+    return new FileTools(new WorkspaceSandbox(root, root, root));
+  }
+
+  private static ObjectNode object() { return JSON.createObjectNode(); }
+
+  private static ToolResult.Success success(ToolResult result) {
+    assertThat(result).isInstanceOf(ToolResult.Success.class);
+    return (ToolResult.Success) result;
+  }
+
+  private static ToolResult.Failure failure(ToolResult result) {
+    assertThat(result).isInstanceOf(ToolResult.Failure.class);
+    return (ToolResult.Failure) result;
+  }
+}
