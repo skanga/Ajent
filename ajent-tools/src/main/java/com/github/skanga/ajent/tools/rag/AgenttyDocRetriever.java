@@ -15,18 +15,29 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
   private final KnowledgeSource mcp;
   private final boolean skillsEnabled;
   private final boolean memoryEnabled;
+  private final RagQueryExpander expander;
+  private final RagQueryExpander.Config expansionConfig;
   private final RagCorpus docs = new RagCorpus();
   private boolean docsBuilt;
 
   public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
                              MemoryKnowledgeSource memory, KnowledgeSource mcp,
                              boolean skillsEnabled, boolean memoryEnabled) {
+    this(docsRoot, skills, memory, mcp, skillsEnabled, memoryEnabled, null, null);
+  }
+
+  public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
+                             MemoryKnowledgeSource memory, KnowledgeSource mcp,
+                             boolean skillsEnabled, boolean memoryEnabled,
+                             RagQueryExpander expander, RagQueryExpander.Config expansionConfig) {
     this.docsRoot = docsRoot;
     this.skills = skills;
     this.memory = memory;
     this.mcp = mcp;
     this.skillsEnabled = skillsEnabled;
     this.memoryEnabled = memoryEnabled;
+    this.expander = expander;
+    this.expansionConfig = expansionConfig;
   }
 
   @Override public synchronized HostServices.DocResponse retrieve(HostServices.DocQuery query) {
@@ -49,15 +60,30 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
 
       int limit = query.limit();
       int pool = Math.max(limit * 5, 30);
-      RagContext context = RagContext.fromHits(query.query(), router.retrieve(query.query(), pool));
+      int variantCount = 0;
+      RagContext context;
+      if (expander != null && expansionConfig != null && haveDocs) {
+        List<String> queries = expander.expand(expansionConfig, query.query());
+        variantCount = Math.max(0, queries.size() - 1);
+        var fused = new ArrayList<>(docsSource.retrieveFused(queries, pool));
+        var rest = new KnowledgeRouter();
+        if (skillsEnabled && skills != null) rest.add(skills);
+        if (memoryEnabled && memory != null) rest.add(memory);
+        if (mcp != null) rest.add(mcp);
+        if (rest.sourceCount() > 0) fused.addAll(rest.retrieve(query.query(), pool));
+        context = RagContext.fromHits(query.query(), fused);
+      } else {
+        context = RagContext.fromHits(query.query(), router.retrieve(query.query(), pool));
+      }
       context = new RagPipeline()
           .add(new RagPipeline.RerankStage(Math.max(limit * 2, 8), RagReranker.Weights.DEFAULT))
           .add(new RagPipeline.MmrStage(limit, .75))
           .add(new RagPipeline.CompressStage(600))
           .run(context);
 
-      String mode = "BM25-only, reranked, confidence "
-          + String.format(Locale.ROOT, "%.2f", context.confidence());
+      String mode = "BM25-only, reranked";
+      if (variantCount > 0) mode += ", +" + variantCount + " query variants";
+      mode += ", confidence " + String.format(Locale.ROOT, "%.2f", context.confidence());
       if (context.confidence() < .25)
         mode += " (LOW — treat results as leads, verify with grep/read)";
       if (haveDocs && docsRoot != null) mode += " from " + docsRoot;

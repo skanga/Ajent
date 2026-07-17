@@ -63,4 +63,17 @@ final class AgenttyDocRetrieverTest {
     assertThat(retriever.retrieve(new HostServices.DocQuery("anything", 2)).error())
         .isEqualTo("search_docs failed: backend exploded");
   }
+
+  @Test void optInExpansionFusesDocsVariantsAndLabelsMode(@TempDir Path root) throws Exception {
+    Path docs = Files.createDirectories(root.resolve("docs"));
+    Files.writeString(docs.resolve("deploy.md"), "kubernetes manifests replicas orchestration");
+    var expander = new RagQueryExpander((config, prompt) ->
+        java.util.Optional.of("k8s replicas\ncontainer orchestration"));
+    var retriever = new AgenttyDocRetriever(docs, null, null, null, false, false, expander,
+        new RagQueryExpander.Config("localhost", 11434, "model", 4));
+    HostServices.DocResponse response = retriever.retrieve(new HostServices.DocQuery("kubernetes", 3));
+    assertThat(response.error()).isEmpty();
+    assertThat(response.hits()).isNotEmpty();
+    assertThat(response.mode()).contains("+2 query variants");
+  }
 }
