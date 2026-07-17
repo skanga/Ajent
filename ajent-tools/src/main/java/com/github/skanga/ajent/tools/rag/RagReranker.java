@@ -75,7 +75,7 @@ public final class RagReranker {
     ranked.sort(Comparator.comparingDouble(Ranked::score).reversed()
         .thenComparingInt(Ranked::position));
     return ranked.stream().limit(Math.min(outputLimit, size))
-        .map(value -> new RagCorpus.Hit(value.hit().chunk(), value.score())).toList();
+        .map(value -> new RagCorpus.Hit(value.hit().chunk(), value.score(), value.hit().source())).toList();
   }
 
   /** Returns the best contiguous sentence span without rewriting source bytes. */

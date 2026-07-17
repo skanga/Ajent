@@ -20,7 +20,9 @@ public final class RagCorpus {
       ".text", ".rst", ".org", ".adoc", ".asciidoc", ".csv", ".tsv", ".json", ".yaml",
       ".yml", ".html", ".htm", ".tex");
 
-  public record Hit(RagChunk chunk, double score) {}
+  public record Hit(RagChunk chunk, double score, KnowledgeSource source) {
+    public Hit(RagChunk chunk, double score) { this(chunk, score, null); }
+  }
   public record Document(String path, String body) {}
   private List<RagChunk> chunks = List.of();
   private Bm25Index bm25 = RagAlgorithms.buildBm25(List.of());

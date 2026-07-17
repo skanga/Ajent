@@ -23,7 +23,7 @@ public record RagContext(String query, List<ContextChunk> chunks, double confide
   private static double confidence(List<ContextChunk> chunks) {
     if (chunks.isEmpty()) return 0;
     double top = chunks.getFirst().hit().score();
-    if (chunks.size() == 1) return Math.clamp(top, 0, 1);
+    if (chunks.size() == 1) return Math.min(1, top);
     double sum = 0;
     double squareSum = 0;
     for (ContextChunk chunk : chunks) {

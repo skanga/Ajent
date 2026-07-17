@@ -111,7 +111,7 @@ final class RagRerankerTest {
     assertThat(low.confidence()).isLessThan(.3);
     assertThat(RagContext.fromHits("query", List.of()).confidence()).isZero();
     assertThat(RagContext.fromHits("query", List.of(hit("a", "text", 2))).confidence()).isEqualTo(1);
-    assertThat(RagContext.fromHits("query", List.of(hit("a", "text", -.5))).confidence()).isZero();
+    assertThat(RagContext.fromHits("query", List.of(hit("a", "text", -.5))).confidence()).isEqualTo(-.5);
   }
 
   private static RagCorpus.Hit hit(String path, String text, double score) {
