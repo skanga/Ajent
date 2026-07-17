@@ -14,6 +14,12 @@ import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
+import com.github.skanga.ajent.provider.stream.StopReason;
+import com.github.skanga.ajent.provider.stream.StreamEvent;
+import com.github.skanga.ajent.runtime.AgentLoop;
+import com.github.skanga.ajent.runtime.AgentState;
+import com.github.skanga.ajent.runtime.PermissionPort;
+import com.github.skanga.ajent.runtime.RuntimeMessage;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -30,6 +36,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -42,6 +54,27 @@ public final class AcpJsonRpcServer {
   private static final int INVALID_PARAMS = -32602;
   private static final int INTERNAL_ERROR = -32603;
   private static final int AUTH_REQUIRED = -32000;
+  private static final Client DISCONNECTED_CLIENT = new Client() {
+    @Override public void send(String frame) {}
+
+    @Override public CompletionStage<PermissionPort.Decision> requestPermission(
+        String sessionId, ToolUse call) {
+      return CompletableFuture.completedFuture(new PermissionPort.Decision(false, false));
+    }
+  };
+
+  @FunctionalInterface
+  public interface SessionFactory {
+    AgentLoop create(Thread thread, Profile profile, String model, PermissionPort permissions,
+                     BiConsumer<RuntimeMessage, AgentState> observer);
+  }
+
+  public interface Client {
+    void send(String frame);
+
+    CompletionStage<PermissionPort.Decision> requestPermission(
+        String sessionId, ToolUse call);
+  }
 
   private final Path threadsDirectory;
   private final Path sessionIndex;
@@ -52,6 +85,8 @@ public final class AcpJsonRpcServer {
   private final BooleanSupplier authenticated;
   private final Runnable logout;
   private final String version;
+  private final SessionFactory sessionFactory;
+  private final int contextMax;
   private final Map<String, Session> sessions = new LinkedHashMap<>();
 
   public AcpJsonRpcServer(
@@ -62,6 +97,20 @@ public final class AcpJsonRpcServer {
       BooleanSupplier authenticated,
       Runnable logout,
       String version) {
+    this(dataDirectory, ids, initialProfile, initialModel, authenticated, logout, version,
+        null, 0);
+  }
+
+  public AcpJsonRpcServer(
+      Path dataDirectory,
+      Supplier<ThreadId> ids,
+      Profile initialProfile,
+      String initialModel,
+      BooleanSupplier authenticated,
+      Runnable logout,
+      String version,
+      SessionFactory sessionFactory,
+      int contextMax) {
     Path root = Objects.requireNonNull(dataDirectory, "dataDirectory").toAbsolutePath();
     threadsDirectory = root.resolve("threads");
     sessionIndex = threadsDirectory.resolve("acp_sessions.json");
@@ -72,21 +121,29 @@ public final class AcpJsonRpcServer {
     this.authenticated = Objects.requireNonNull(authenticated, "authenticated");
     this.logout = Objects.requireNonNull(logout, "logout");
     this.version = Objects.requireNonNull(version, "version");
+    this.sessionFactory = sessionFactory;
+    if (contextMax < 0) throw new IllegalArgumentException("contextMax cannot be negative");
+    this.contextMax = contextMax;
   }
 
-  public synchronized List<String> handleLine(String line) {
+  public List<String> handleLine(String line) {
+    return handleLineAsync(line, DISCONNECTED_CLIENT).toCompletableFuture().join();
+  }
+
+  public synchronized CompletionStage<List<String>> handleLineAsync(String line, Client client) {
+    Objects.requireNonNull(client, "client");
     JsonNode request;
     try {
       request = JSON.readTree(line);
     } catch (JsonProcessingException exception) {
-      return List.of(encode(error(JSON.nullNode(), PARSE_ERROR, "Parse error")));
+      return completed(error(JSON.nullNode(), PARSE_ERROR, "Parse error"));
     }
     if (request == null || !request.isObject()
         || !"2.0".equals(request.path("jsonrpc").asText())
         || !request.path("method").isTextual()) {
       JsonNode id = request != null && request.isObject() && request.has("id")
           ? request.path("id") : JSON.nullNode();
-      return List.of(encode(error(id, INVALID_REQUEST, "Invalid Request")));
+      return completed(error(id, INVALID_REQUEST, "Invalid Request"));
     }
 
     boolean notification = !request.has("id");
@@ -94,12 +151,26 @@ public final class AcpJsonRpcServer {
     JsonNode parameters = request.path("params");
     if (parameters.isMissingNode() || parameters.isNull()) parameters = JSON.createObjectNode();
     if (!parameters.isObject()) {
-      return notification ? List.of()
-          : List.of(encode(error(id, INVALID_PARAMS, "params must be an object")));
+      return notification ? CompletableFuture.completedFuture(List.of())
+          : completed(error(id, INVALID_PARAMS, "params must be an object"));
     }
 
     var frames = new ArrayList<ObjectNode>();
     try {
+      if ("session/prompt".equals(request.path("method").textValue())) {
+        CompletionStage<JsonNode> prompt = prompt(parameters, client);
+        return prompt.handle((result, exception) -> {
+          if (notification) return List.of();
+          if (exception == null) return List.of(encode(success(id, result)));
+          java.lang.Throwable cause = unwrap(exception);
+          if (cause instanceof RpcFailure failure) {
+            return List.of(encode(error(id, failure.code, failure.getMessage())));
+          }
+          String message = cause.getMessage() == null ? cause.getClass().getSimpleName()
+              : cause.getMessage();
+          return List.of(encode(error(id, INTERNAL_ERROR, message)));
+        });
+      }
       JsonNode result = dispatch(request.path("method").textValue(), parameters, frames);
       if (!notification) frames.add(success(id, result));
     } catch (RpcFailure failure) {
@@ -107,16 +178,116 @@ public final class AcpJsonRpcServer {
     } catch (RuntimeException exception) {
       if (!notification) frames.add(error(id, INTERNAL_ERROR, safeMessage(exception)));
     }
-    return frames.stream().map(AcpJsonRpcServer::encode).toList();
+    return CompletableFuture.completedFuture(
+        frames.stream().map(AcpJsonRpcServer::encode).toList());
   }
 
   public void serve(BufferedReader input, PrintWriter output) throws IOException {
     Objects.requireNonNull(input, "input");
     Objects.requireNonNull(output, "output");
+    var client = new WireClient(output);
     String line;
     while ((line = input.readLine()) != null) {
-      for (String frame : handleLine(line)) output.println(frame);
-      output.flush();
+      if (client.acceptResponse(line)) continue;
+      handleLineAsync(line, client).whenComplete((frames, exception) -> {
+        if (exception != null) {
+          client.send(encode(error(JSON.nullNode(), INTERNAL_ERROR,
+              safeThrowable(unwrap(exception)))));
+        } else {
+          frames.forEach(client::send);
+        }
+      });
+    }
+    client.disconnect();
+    List<AgentLoop> active;
+    synchronized (this) {
+      active = sessions.values().stream().map(session -> session.loop)
+          .filter(Objects::nonNull).filter(loop -> !(loop.state().phase() instanceof
+              com.github.skanga.ajent.domain.SessionPhase.Idle)).toList();
+    }
+    active.forEach(loop -> loop.dispatch(new RuntimeMessage.Cancel()));
+  }
+
+  private static final class WireClient implements Client {
+    private final PrintWriter output;
+    private final Object outputLock = new Object();
+    private final AtomicLong requestIds = new AtomicLong();
+    private final Map<String, CompletableFuture<PermissionPort.Decision>> pending =
+        new ConcurrentHashMap<>();
+
+    private WireClient(PrintWriter output) {
+      this.output = output;
+    }
+
+    @Override public void send(String frame) {
+      synchronized (outputLock) {
+        output.println(frame);
+        output.flush();
+      }
+    }
+
+    @Override public CompletionStage<PermissionPort.Decision> requestPermission(
+        String sessionId, ToolUse call) {
+      String id = "ajent-permission-" + requestIds.incrementAndGet();
+      var result = new CompletableFuture<PermissionPort.Decision>();
+      pending.put(id, result);
+      ObjectNode request = JSON.createObjectNode();
+      request.put("jsonrpc", "2.0");
+      request.put("id", id);
+      request.put("method", "session/request_permission");
+      ObjectNode parameters = request.putObject("params");
+      parameters.put("sessionId", sessionId);
+      ObjectNode toolCall = parameters.putObject("toolCall");
+      toolCall.put("toolCallId", call.id().value());
+      toolCall.put("title", toolTitle(call));
+      toolCall.put("kind", toolKind(call.name().value()));
+      toolCall.set("rawInput", JSON.valueToTree(call.arguments()));
+      toolCall.set("locations", toolLocations(call));
+      ArrayNode options = parameters.putArray("options");
+      permissionOption(options, "allow_once", "Allow", "allow_once");
+      permissionOption(options, "allow_always", "Always allow", "allow_always");
+      permissionOption(options, "reject_once", "Reject", "reject_once");
+      send(encode(request));
+      return result;
+    }
+
+    private boolean acceptResponse(String line) {
+      JsonNode response;
+      try {
+        response = JSON.readTree(line);
+      } catch (JsonProcessingException exception) {
+        return false;
+      }
+      if (response == null || !response.isObject() || response.has("method")
+          || !response.path("id").isTextual()) return false;
+      String id = response.path("id").textValue();
+      CompletableFuture<PermissionPort.Decision> waiting = pending.remove(id);
+      if (waiting == null) return false;
+      if (response.has("error")) {
+        waiting.complete(new PermissionPort.Decision(false, false));
+        return true;
+      }
+      JsonNode outcome = response.path("result").path("outcome");
+      String option = "selected".equals(outcome.path("outcome").asText())
+          ? outcome.path("optionId").asText() : "";
+      waiting.complete(new PermissionPort.Decision(
+          "allow_once".equals(option) || "allow_always".equals(option),
+          "allow_always".equals(option)));
+      return true;
+    }
+
+    private void disconnect() {
+      pending.values().forEach(future ->
+          future.complete(new PermissionPort.Decision(false, false)));
+      pending.clear();
+    }
+
+    private static void permissionOption(
+        ArrayNode options, String id, String name, String kind) {
+      ObjectNode option = options.addObject();
+      option.put("optionId", id);
+      option.put("name", name);
+      option.put("kind", kind);
     }
   }
 
@@ -133,7 +304,7 @@ public final class AcpJsonRpcServer {
       case "session/delete" -> deleteSession(parameters);
       case "session/set_mode" -> setMode(parameters, frames);
       case "session/set_config_option" -> setConfigOption(parameters);
-      case "session/cancel" -> JSON.createObjectNode();
+      case "session/cancel" -> cancelSession(parameters);
       default -> throw new RpcFailure(METHOD_NOT_FOUND, "Method not found: " + method);
     };
   }
@@ -167,7 +338,7 @@ public final class AcpJsonRpcServer {
   private JsonNode authenticate() {
     if (!authenticated.getAsBoolean()) {
       throw new RpcFailure(AUTH_REQUIRED,
-          "ajent has no credentials â€” run `ajent login` first");
+          "ajent has no credentials — run `ajent login` first");
     }
     return JSON.createObjectNode();
   }
@@ -217,6 +388,93 @@ public final class AcpJsonRpcServer {
     ObjectNode result = JSON.createObjectNode();
     result.set("modes", modes(session.profile));
     return result;
+  }
+
+  private CompletionStage<JsonNode> prompt(JsonNode parameters, Client client) {
+    if (sessionFactory == null) {
+      throw new RpcFailure(METHOD_NOT_FOUND, "Method not found: session/prompt");
+    }
+    if (!authenticated.getAsBoolean()) {
+      throw new RpcFailure(AUTH_REQUIRED,
+          "ajent has no credentials — run `ajent login` first");
+    }
+    String id = requiredText(parameters, "sessionId");
+    Session session = sessions.get(id);
+    if (session == null) {
+      throw new RpcFailure(INVALID_PARAMS, "unknown sessionId: " + id);
+    }
+    String text = promptText(parameters.path("prompt"));
+    if (text.isEmpty()) throw new RpcFailure(INVALID_PARAMS, "prompt must contain text");
+    if (session.loop != null
+        && !(session.loop.state().phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle)) {
+      throw new RpcFailure(INVALID_PARAMS, "session already has an active prompt: " + id);
+    }
+    if (session.thread.messages().isEmpty()) {
+      session.thread = new Thread(session.thread.id(), title(text), session.thread.messages(),
+          session.thread.createdAt(), session.thread.updatedAt(), session.thread.compactions());
+    }
+
+    var result = new CompletableFuture<JsonNode>();
+    var projection = new TurnProjection(session, client, result);
+    projection.seed(session.thread);
+    PermissionPort permissions = call -> requestPermission(session, call);
+    try {
+      session.projection = projection;
+      if (session.loop == null) {
+        session.loop = Objects.requireNonNull(sessionFactory.create(session.thread,
+            session.profile, session.model, permissions,
+            (message, state) -> observeSession(session, message, state)),
+            "sessionFactory result");
+      } else {
+        projection.seed(session.loop.state());
+      }
+      session.loop.dispatch(new RuntimeMessage.Submit(text, List.of()));
+    } catch (RuntimeException exception) {
+      result.completeExceptionally(exception);
+    }
+    return result;
+  }
+
+  private PermissionPort.Decision requestPermission(Session session, ToolUse call) {
+    TurnProjection projection;
+    synchronized (this) {
+      projection = session.projection;
+    }
+    return projection == null ? new PermissionPort.Decision(false, false)
+        : projection.requestPermission(call);
+  }
+
+  private synchronized void observeSession(
+      Session session, RuntimeMessage message, AgentState state) {
+    if (session.projection != null) session.projection.observe(message, state);
+  }
+
+  private static String promptText(JsonNode prompt) {
+    if (!prompt.isArray()) throw new RpcFailure(INVALID_PARAMS, "prompt must be an array");
+    var text = new StringBuilder();
+    for (JsonNode block : prompt) {
+      if (!block.isObject()) throw new RpcFailure(INVALID_PARAMS, "invalid prompt block");
+      String type = block.path("type").asText();
+      if ("text".equals(type)) {
+        if (!block.path("text").isTextual()) {
+          throw new RpcFailure(INVALID_PARAMS, "text prompt block requires text");
+        }
+        text.append(block.path("text").textValue());
+      } else if ("resource_link".equals(type)) {
+        String name = block.path("name").asText();
+        String uri = block.path("uri").asText();
+        text.append("\n[Resource: ").append(name).append(" (").append(uri).append(")]\n");
+      } else if ("resource".equals(type)
+          && block.path("resource").path("text").isTextual()) {
+        text.append(block.path("resource").path("text").textValue()).append('\n');
+      }
+    }
+    return text.toString();
+  }
+
+  private static String title(String text) {
+    String oneLine = text.strip().replaceAll("\\s+", " ");
+    return oneLine.substring(0, Math.min(80, oneLine.length()));
   }
 
   private static void replay(String sessionId, Thread thread, List<ObjectNode> frames) {
@@ -346,6 +604,144 @@ public final class AcpJsonRpcServer {
     };
   }
 
+  private final class TurnProjection {
+    private final Session session;
+    private final Client client;
+    private final CompletableFuture<JsonNode> result;
+    private final Map<String, Class<?>> statuses = new LinkedHashMap<>();
+
+    private TurnProjection(
+        Session session, Client client, CompletableFuture<JsonNode> result) {
+      this.session = session;
+      this.client = client;
+      this.result = result;
+    }
+
+    private void seed(AgentState state) {
+      seed(state.thread());
+    }
+
+    private void seed(Thread thread) {
+      thread.messages().stream().filter(message -> message.role() == Role.ASSISTANT)
+          .flatMap(message -> message.toolCalls().stream()).forEach(call ->
+              statuses.put(call.id().value(), call.status().getClass()));
+    }
+
+    private void observe(RuntimeMessage message, AgentState state) {
+      synchronized (AcpJsonRpcServer.this) {
+        if (session.projection != this || result.isDone()) return;
+        session.thread = state.thread();
+        projectMessage(message, state);
+        projectTools(message, state);
+        projectCompletion(message, state);
+      }
+    }
+
+    private PermissionPort.Decision requestPermission(ToolUse call) {
+      client.send(encode(updateNotification(session.id, statusUpdate(call, "pending"))));
+      try {
+        return client.requestPermission(session.id, call).toCompletableFuture().join();
+      } catch (CompletionException exception) {
+        return new PermissionPort.Decision(false, false);
+      }
+    }
+
+    private void projectMessage(RuntimeMessage message, AgentState state) {
+      if (message instanceof RuntimeMessage.ProviderEvent(
+          long ignored, StreamEvent.TextDelta delta)) {
+        latestAssistant(state).ifPresent(assistant -> {
+          ObjectNode update = JSON.createObjectNode();
+          update.put("sessionUpdate", "agent_message_chunk");
+          ObjectNode content = update.putObject("content");
+          content.put("type", "text");
+          content.put("text", delta.text());
+          update.put("messageId", assistant.id().value());
+          send(update);
+        });
+      } else if (message instanceof RuntimeMessage.ProviderEvent(
+          long ignored, StreamEvent.Usage ignoredUsage)) {
+        ObjectNode update = JSON.createObjectNode();
+        update.put("sessionUpdate", "usage_update");
+        update.put("used", Math.max(0L, (long) state.tokensIn() + state.tokensOut()));
+        update.put("size", contextMax);
+        send(update);
+      }
+    }
+
+    private void projectTools(RuntimeMessage message, AgentState state) {
+      List<ToolUse> calls = state.thread().messages().stream()
+          .filter(candidate -> candidate.role() == Role.ASSISTANT)
+          .flatMap(candidate -> candidate.toolCalls().stream()).toList();
+      for (ToolUse call : calls) {
+        Class<?> previous = statuses.get(call.id().value());
+        if (previous == null) send(toolAnnouncement(call));
+        if (message instanceof RuntimeMessage.ProviderEvent(
+            long ignored, StreamEvent.ToolUseEnd ignoredEnd)
+            && call == calls.getLast()) {
+          ObjectNode metadata = JSON.createObjectNode();
+          metadata.put("sessionUpdate", "tool_call_update");
+          metadata.put("toolCallId", call.id().value());
+          metadata.put("title", toolTitle(call));
+          metadata.set("rawInput", JSON.valueToTree(call.arguments()));
+          metadata.set("locations", toolLocations(call));
+          send(metadata);
+        }
+        Class<?> current = call.status().getClass();
+        if (previous != null && previous != current) {
+          if (call.status() instanceof ToolStatus.Running) {
+            send(statusUpdate(call, "in_progress"));
+          } else if (call.status().isTerminal()) {
+            send(toolCompletion(call));
+          }
+        }
+        statuses.put(call.id().value(), current);
+      }
+    }
+
+    private void projectCompletion(RuntimeMessage message, AgentState state) {
+      if (!(state.phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle)) return;
+      String stop = null;
+      String failure = "";
+      if (message instanceof RuntimeMessage.Cancel) {
+        stop = "cancelled";
+      } else if (message instanceof RuntimeMessage.ProviderEvent(
+          long ignored, StreamEvent.Finished finished)) {
+        stop = finished.stopReason() == StopReason.MAX_TOKENS ? "max_tokens" : "end_turn";
+      } else if (message instanceof RuntimeMessage.ProviderEvent(
+          long ignored, StreamEvent.Error error)) {
+        stop = error.errorClass() == com.github.skanga.ajent.provider.ErrorClass.CANCELLED
+            ? "cancelled" : "refusal";
+        failure = error.message();
+      }
+      if (stop == null) return;
+      ObjectNode response = JSON.createObjectNode();
+      response.put("stopReason", stop);
+      if (!failure.isEmpty()) response.putObject("_meta").put("error", failure);
+      threads.save(state.thread());
+      index(session);
+      result.complete(response);
+    }
+
+    private void send(ObjectNode update) {
+      client.send(encode(updateNotification(session.id, update)));
+    }
+  }
+
+  private static java.util.Optional<Message> latestAssistant(AgentState state) {
+    if (state.thread().messages().isEmpty()) return java.util.Optional.empty();
+    Message message = state.thread().messages().getLast();
+    return message.role() == Role.ASSISTANT ? java.util.Optional.of(message)
+        : java.util.Optional.empty();
+  }
+
+  private static ObjectNode statusUpdate(ToolUse call, String status) {
+    ObjectNode update = JSON.createObjectNode();
+    update.put("sessionUpdate", "tool_call_update");
+    update.put("toolCallId", call.id().value());
+    update.put("status", status);
+    return update;
+  }
+
   private JsonNode listSessions(JsonNode parameters) {
     String filter = optionalText(parameters, "cwd");
     ObjectNode index = readIndex();
@@ -368,22 +764,45 @@ public final class AcpJsonRpcServer {
   }
 
   private JsonNode closeSession(JsonNode parameters) {
-    sessions.remove(requiredText(parameters, "sessionId"));
+    Session removed = sessions.remove(requiredText(parameters, "sessionId"));
+    closeLoop(removed);
     return JSON.createObjectNode();
   }
 
   private JsonNode deleteSession(JsonNode parameters) {
     String id = requiredText(parameters, "sessionId");
-    sessions.remove(id);
+    closeLoop(sessions.remove(id));
     threads.delete(new ThreadId(id));
     unindex(id);
     return JSON.createObjectNode();
   }
 
+  private JsonNode cancelSession(JsonNode parameters) {
+    Session session = sessions.get(requiredText(parameters, "sessionId"));
+    if (session != null && session.loop != null) session.loop.dispatch(new RuntimeMessage.Cancel());
+    return JSON.createObjectNode();
+  }
+
+  private static void closeLoop(Session session) {
+    if (session == null || session.loop == null) return;
+    AgentLoop loop = session.loop;
+    session.loop = null;
+    java.lang.Thread.startVirtualThread(() -> {
+      try {
+        loop.dispatch(new RuntimeMessage.Cancel());
+      } catch (IllegalStateException ignored) {
+        // Already closed.
+      }
+      loop.close();
+    });
+  }
+
   private JsonNode setMode(JsonNode parameters, List<ObjectNode> frames) {
     String id = requiredText(parameters, "sessionId");
     Session session = requireSession(id, "session/set_mode");
-    session.profile = profile(requiredText(parameters, "modeId"), session.profile);
+    Profile revised = profile(requiredText(parameters, "modeId"), session.profile);
+    if (revised != session.profile) closeIdleLoop(session);
+    session.profile = revised;
     ObjectNode update = JSON.createObjectNode();
     update.put("sessionUpdate", "current_mode_update");
     update.put("currentModeId", modeId(session.profile));
@@ -399,10 +818,19 @@ public final class AcpJsonRpcServer {
       throw new IllegalStateException("session/set_config_option: unknown configId '"
           + configId + "' (supported: model)");
     }
-    session.model = requiredText(parameters, "value");
+    String value = requiredText(parameters, "value");
+    if (!value.equals(session.model)) closeIdleLoop(session);
+    session.model = value;
     ObjectNode result = JSON.createObjectNode();
     result.putArray("configOptions");
     return result;
+  }
+
+  private static void closeIdleLoop(Session session) {
+    if (session.loop == null
+        || !(session.loop.state().phase() instanceof
+            com.github.skanga.ajent.domain.SessionPhase.Idle)) return;
+    closeLoop(session);
   }
 
   private Session requireSession(String id, String operation) {
@@ -543,7 +971,24 @@ public final class AcpJsonRpcServer {
     }
   }
 
+  private static CompletionStage<List<String>> completed(ObjectNode frame) {
+    return CompletableFuture.completedFuture(List.of(encode(frame)));
+  }
+
+  private static java.lang.Throwable unwrap(java.lang.Throwable exception) {
+    java.lang.Throwable current = exception;
+    while ((current instanceof CompletionException
+        || current instanceof java.util.concurrent.ExecutionException)
+        && current.getCause() != null) current = current.getCause();
+    return current;
+  }
+
   private static String safeMessage(RuntimeException exception) {
+    return exception.getMessage() == null ? exception.getClass().getSimpleName()
+        : exception.getMessage();
+  }
+
+  private static String safeThrowable(java.lang.Throwable exception) {
     return exception.getMessage() == null ? exception.getClass().getSimpleName()
         : exception.getMessage();
   }
@@ -553,7 +998,9 @@ public final class AcpJsonRpcServer {
     private String cwd;
     private Profile profile;
     private String model;
-    private final Thread thread;
+    private Thread thread;
+    private AgentLoop loop;
+    private TurnProjection projection;
 
     private Session(
         String id, String cwd, Profile profile, String model, Thread thread) {

@@ -16,6 +16,11 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>com.github.skanga.ajent</groupId>
+      <artifactId>ajent-runtime</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>

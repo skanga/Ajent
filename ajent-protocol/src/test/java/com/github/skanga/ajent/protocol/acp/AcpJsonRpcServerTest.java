@@ -1,12 +1,15 @@
 package com.github.skanga.ajent.protocol.acp;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.skanga.ajent.domain.Profile;
+import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
+import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.MessageId;
+import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
@@ -14,7 +17,14 @@ import com.github.skanga.ajent.domain.ToolCallId;
 import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
-import com.github.skanga.ajent.core.persistence.ThreadStore;
+import com.github.skanga.ajent.provider.stream.StopReason;
+import com.github.skanga.ajent.provider.stream.StreamEvent;
+import com.github.skanga.ajent.runtime.AgentLoop;
+import com.github.skanga.ajent.runtime.AgentReducer;
+import com.github.skanga.ajent.runtime.AgentState;
+import com.github.skanga.ajent.runtime.PermissionPort;
+import com.github.skanga.ajent.runtime.PermissionVerdict;
+import com.github.skanga.ajent.runtime.ToolCompletion;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -347,12 +357,370 @@ final class AcpJsonRpcServerTest {
     assertThat(rejected.has("rawOutput")).isFalse();
   }
 
+  @Test void promptRunsARealPermissionedTurnAndStreamsNativeUpdates(@TempDir Path directory)
+      throws Exception {
+    var providerCalls = new java.util.concurrent.atomic.AtomicInteger();
+    var toolCalls = new java.util.concurrent.atomic.AtomicInteger();
+    AcpJsonRpcServer.SessionFactory factory =
+        (thread, profile, model, permissions, observer) -> {
+      var reducer = new AgentReducer(new AgentReducer.Context(System::nanoTime,
+          java.time.Instant::now, MessageId::random, call -> PermissionVerdict.PROMPT));
+      return new AgentLoop(AgentState.initial(thread), reducer,
+          (turn, messages, cancellation, sink) -> {
+            if (providerCalls.incrementAndGet() == 1) {
+              sink.accept(new StreamEvent.TextDelta("Writing the file."));
+              sink.accept(new StreamEvent.ToolUseStart("write-1", "write"));
+              sink.accept(new StreamEvent.ToolUseDelta(
+                  "{\"path\":\"C:/workspace/file.txt\",\"content\":\"hello\"}"));
+              sink.accept(new StreamEvent.ToolUseEnd());
+              sink.accept(new StreamEvent.Usage(20, 5, 2, 3));
+              sink.accept(new StreamEvent.Finished(StopReason.TOOL_USE));
+            } else {
+              sink.accept(new StreamEvent.TextDelta("Done."));
+              sink.accept(new StreamEvent.Usage(30, 4, 1, 2));
+              sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+            }
+          }, call -> {
+            toolCalls.incrementAndGet();
+            return new ToolCompletion.Success("wrote file");
+          }, permissions, saved -> {}, observer);
+    };
+    var server = new AcpJsonRpcServer(directory, () -> new ThreadId("prompt-session"),
+        Profile.ASK, "model", () -> true, () -> {}, "test", factory, 200_000);
+    result(server, 1, "session/new", "{\"cwd\":\"C:/workspace\"}");
+    var updates = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    var permissionCalls = new java.util.concurrent.atomic.AtomicInteger();
+    AcpJsonRpcServer.Client client = new AcpJsonRpcServer.Client() {
+      @Override public void send(String frame) {
+        updates.add(parse(frame));
+      }
+
+      @Override public java.util.concurrent.CompletionStage<PermissionPort.Decision>
+          requestPermission(String sessionId, ToolUse call) {
+        permissionCalls.incrementAndGet();
+        assertThat(sessionId).isEqualTo("prompt-session");
+        assertThat(call.name().value()).isEqualTo("write");
+        return java.util.concurrent.CompletableFuture.completedFuture(
+            new PermissionPort.Decision(true, false));
+      }
+    };
+
+    List<String> responseFrames = server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{
+          "sessionId":"prompt-session","prompt":[
+            {"type":"text","text":"please write the file"}
+          ]}}
+        """, client).toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+    JsonNode response = parse(responseFrames.getLast());
+    assertThat(response.path("result").path("stopReason").textValue()).isEqualTo("end_turn");
+    assertThat(providerCalls).hasValue(2);
+    assertThat(toolCalls).hasValue(1);
+    assertThat(permissionCalls).hasValue(1);
+    List<JsonNode> projected = updates.stream().map(frame ->
+        frame.path("params").path("update")).toList();
+    assertThat(projected).extracting(update -> update.path("sessionUpdate").textValue())
+        .contains("agent_message_chunk", "tool_call", "tool_call_update", "usage_update");
+    assertThat(projected.stream().filter(update ->
+        "agent_message_chunk".equals(update.path("sessionUpdate").textValue()))
+        .map(update -> update.path("content").path("text").textValue()).toList())
+        .containsExactly("Writing the file.", "Done.");
+    assertThat(projected.stream().filter(update ->
+        "tool_call_update".equals(update.path("sessionUpdate").textValue()))
+        .map(update -> update.path("status").textValue()).filter(value -> value != null).toList())
+        .contains("in_progress", "completed");
+    JsonNode completed = projected.stream().filter(update ->
+        "completed".equals(update.path("status").textValue())).findFirst().orElseThrow();
+    assertThat(completed.path("rawOutput").path("text").textValue()).isEqualTo("wrote file");
+    assertThat(projected.stream().filter(update ->
+        "usage_update".equals(update.path("sessionUpdate").textValue())))
+        .hasSize(2).allSatisfy(update -> assertThat(update.path("size").intValue())
+            .isEqualTo(200_000));
+    ThreadLoadResult persisted = new ThreadStore(directory)
+        .load(directory.resolve("threads/prompt-session.json"));
+    assertThat(persisted).isInstanceOfSatisfying(ThreadLoadResult.Success.class, loaded ->
+        assertThat(loaded.thread().messages()).hasSize(3));
+  }
+
+  @Test void stdioRemainsDuplexWhilePermissionAndPromptAreOutstanding(@TempDir Path directory)
+      throws Exception {
+    var completions = new java.util.concurrent.atomic.AtomicInteger();
+    AcpJsonRpcServer.SessionFactory factory = (thread, profile, model, permissions, observer) ->
+        new AgentLoop(AgentState.initial(thread), new AgentReducer(new AgentReducer.Context(
+            System::nanoTime, java.time.Instant::now, MessageId::random,
+            call -> PermissionVerdict.PROMPT)),
+            (turn, messages, cancellation, sink) -> {
+              if (completions.incrementAndGet() == 1) {
+                sink.accept(new StreamEvent.ToolUseStart("write-stdio", "write"));
+                sink.accept(new StreamEvent.ToolUseDelta(
+                    "{\"path\":\"C:/workspace/file.txt\",\"content\":\"hello\"}"));
+                sink.accept(new StreamEvent.ToolUseEnd());
+                sink.accept(new StreamEvent.Finished(StopReason.TOOL_USE));
+              } else {
+                sink.accept(new StreamEvent.TextDelta("finished"));
+                sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+              }
+            }, call -> new ToolCompletion.Success("written"), permissions, saved -> {}, observer);
+    var server = new AcpJsonRpcServer(directory, () -> new ThreadId("stdio-session"),
+        Profile.ASK, "model", () -> true, () -> {}, "test", factory, 200_000);
+    var clientWriter = new java.io.PipedWriter();
+    var serverReader = new java.io.PipedReader(clientWriter);
+    var input = new java.io.BufferedReader(serverReader);
+    var responseLines = new java.util.concurrent.LinkedBlockingQueue<String>();
+    var output = new java.io.PrintWriter(new LineWriter(responseLines), true);
+    var requests = new java.io.PrintWriter(clientWriter, true);
+    var served = new java.util.concurrent.CompletableFuture<Void>();
+    java.lang.Thread.startVirtualThread(() -> {
+      try {
+        server.serve(input, output);
+        served.complete(null);
+      } catch (Exception exception) {
+        served.completeExceptionally(exception);
+      }
+    });
+
+    requests.println("""
+        {"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"C:/workspace"}}
+        """.strip());
+    assertThat(parse(readLine(responseLines)).path("result").path("sessionId").textValue())
+        .isEqualTo("stdio-session");
+    requests.println("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"session/prompt\","
+        + "\"params\":{\"sessionId\":\"stdio-session\",\"prompt\":["
+        + "{\"type\":\"text\",\"text\":\"write\"}]}}");
+
+    JsonNode permission = null;
+    JsonNode promptResult = null;
+    while (promptResult == null) {
+      JsonNode frame = parse(readLine(responseLines));
+      if ("session/request_permission".equals(frame.path("method").asText())) {
+        permission = frame;
+        requests.println("{\"jsonrpc\":\"2.0\",\"id\":"
+            + JSON.writeValueAsString(frame.path("id").textValue())
+            + ",\"result\":{\"outcome\":{\"outcome\":\"selected\","
+            + "\"optionId\":\"allow_once\"}}}");
+      } else if (frame.path("id").asInt() == 2) {
+        promptResult = frame;
+      }
+    }
+
+    assertThat(permission).isNotNull();
+    assertThat(permission.path("params").path("toolCall").path("toolCallId").textValue())
+        .isEqualTo("write-stdio");
+    assertThat(permission.path("params").path("options"))
+        .extracting(option -> option.path("optionId").textValue())
+        .containsExactly("allow_once", "allow_always", "reject_once");
+    assertThat(promptResult.path("result").path("stopReason").textValue())
+        .isEqualTo("end_turn");
+    clientWriter.close();
+    served.get(5, java.util.concurrent.TimeUnit.SECONDS);
+  }
+
+  @Test void cancelOwnsOnlyItsSessionWhileAnotherPromptCompletes(@TempDir Path directory)
+      throws Exception {
+    var blockedStarted = new java.util.concurrent.CountDownLatch(1);
+    var ids = new java.util.concurrent.atomic.AtomicInteger();
+    AcpJsonRpcServer.SessionFactory factory =
+        (thread, profile, model, permissions, observer) ->
+            new AgentLoop(AgentState.initial(thread), new AgentReducer(new AgentReducer.Context(
+                System::nanoTime, java.time.Instant::now, MessageId::random,
+                call -> PermissionVerdict.ALLOW)),
+                (turn, messages, cancellation, sink) -> {
+                  if ("session-1".equals(thread.id().value())) {
+                    blockedStarted.countDown();
+                    while (!cancellation.isCancelled()) {
+                      java.util.concurrent.locks.LockSupport.parkNanos(1_000_000);
+                    }
+                  } else {
+                    sink.accept(new StreamEvent.TextDelta("independent"));
+                    sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+                  }
+                }, call -> new ToolCompletion.Success("unused"), permissions,
+                saved -> {}, observer);
+    var server = new AcpJsonRpcServer(directory,
+        () -> new ThreadId("session-" + ids.incrementAndGet()), Profile.ASK, "model",
+        () -> true, () -> {}, "test", factory, 200_000);
+    result(server, 1, "session/new", "{\"cwd\":\"C:/one\"}");
+    result(server, 2, "session/new", "{\"cwd\":\"C:/two\"}");
+
+    var first = server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{
+          "sessionId":"session-1","prompt":[{"type":"text","text":"wait"}]}}
+        """, rejectingClient()).toCompletableFuture();
+    assertThat(blockedStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    JsonNode duplicate = parse(server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":30,"method":"session/prompt","params":{
+          "sessionId":"session-1","prompt":[{"type":"text","text":"again"}]}}
+        """, rejectingClient()).toCompletableFuture()
+        .get(5, java.util.concurrent.TimeUnit.SECONDS).getLast());
+    assertThat(duplicate.path("error").path("code").intValue()).isEqualTo(-32602);
+    List<String> second = server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{
+          "sessionId":"session-2","prompt":[{"type":"text","text":"finish"}]}}
+        """, rejectingClient()).toCompletableFuture()
+        .get(5, java.util.concurrent.TimeUnit.SECONDS);
+    assertThat(parse(second.getLast()).path("result").path("stopReason").textValue())
+        .isEqualTo("end_turn");
+
+    result(server, 5, "session/cancel", "{\"sessionId\":\"session-1\"}");
+    assertThat(parse(first.get(5, java.util.concurrent.TimeUnit.SECONDS).getLast())
+        .path("result").path("stopReason").textValue()).isEqualTo("cancelled");
+    assertThat(parse(second.getLast()).path("result").path("stopReason").textValue())
+        .isEqualTo("end_turn");
+    assertThat(result(server, 6, "session/cancel",
+        "{\"sessionId\":\"does-not-exist\"}")).isEmpty();
+  }
+
+  @Test void promptMapsModelModeMaxTokensRefusalAuthAndInvalidSession(@TempDir Path directory)
+      throws Exception {
+    var ids = new java.util.concurrent.atomic.AtomicInteger();
+    var selections = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    AcpJsonRpcServer.SessionFactory factory =
+        (thread, profile, model, permissions, observer) -> {
+          selections.add(profile + ":" + model);
+          return new AgentLoop(AgentState.initial(thread), new AgentReducer(
+              new AgentReducer.Context(System::nanoTime, java.time.Instant::now,
+                  MessageId::random, call -> PermissionVerdict.ALLOW)),
+              (turn, messages, cancellation, sink) -> {
+                if ("max-model".equals(model)) {
+                  sink.accept(new StreamEvent.Finished(StopReason.MAX_TOKENS));
+                } else {
+                  sink.accept(new StreamEvent.Error("provider refused",
+                      java.util.Optional.empty(),
+                      com.github.skanga.ajent.provider.ErrorClass.TERMINAL, false));
+                }
+              }, call -> new ToolCompletion.Success("unused"), permissions,
+              saved -> {}, observer);
+        };
+    var server = new AcpJsonRpcServer(directory,
+        () -> new ThreadId("mapped-" + ids.incrementAndGet()), Profile.ASK, "initial",
+        () -> true, () -> {}, "test", factory, 100_000);
+    result(server, 1, "session/new", "{\"cwd\":\"C:/max\"}");
+    result(server, 2, "session/set_mode",
+        "{\"sessionId\":\"mapped-1\",\"modeId\":\"minimal\"}");
+    result(server, 3, "session/set_config_option",
+        "{\"sessionId\":\"mapped-1\",\"configId\":\"model\",\"value\":\"max-model\"}");
+    JsonNode maximum = parse(server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{
+          "sessionId":"mapped-1","prompt":[{"type":"text","text":"long"}]}}
+        """, rejectingClient()).toCompletableFuture()
+        .get(5, java.util.concurrent.TimeUnit.SECONDS).getLast());
+    assertThat(maximum.path("result").path("stopReason").textValue()).isEqualTo("max_tokens");
+    assertThat(selections).containsExactly("MINIMAL:max-model");
+
+    result(server, 5, "session/new", "{\"cwd\":\"C:/error\"}");
+    result(server, 6, "session/set_config_option",
+        "{\"sessionId\":\"mapped-2\",\"configId\":\"model\",\"value\":\"error-model\"}");
+    JsonNode refusal = parse(server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":7,"method":"session/prompt","params":{
+          "sessionId":"mapped-2","prompt":[{"type":"text","text":"fail"}]}}
+        """, rejectingClient()).toCompletableFuture()
+        .get(5, java.util.concurrent.TimeUnit.SECONDS).getLast());
+    assertThat(refusal.path("result").path("stopReason").textValue()).isEqualTo("refusal");
+    assertThat(refusal.path("result").path("_meta").path("error").textValue())
+        .isEqualTo("provider refused");
+
+    JsonNode unknown = parse(server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":8,"method":"session/prompt","params":{
+          "sessionId":"absent","prompt":[{"type":"text","text":"x"}]}}
+        """, rejectingClient()).toCompletableFuture().get().getLast());
+    assertThat(unknown.path("error").path("code").intValue()).isEqualTo(-32602);
+    var unauthenticated = new AcpJsonRpcServer(directory, () -> new ThreadId("auth"), Profile.ASK,
+        "model", () -> false, () -> {}, "test", factory, 100_000);
+    result(unauthenticated, 9, "session/new", "{\"cwd\":\"C:/auth\"}");
+    JsonNode auth = parse(unauthenticated.handleLineAsync("""
+        {"jsonrpc":"2.0","id":10,"method":"session/prompt","params":{
+          "sessionId":"auth","prompt":[{"type":"text","text":"x"}]}}
+        """, rejectingClient()).toCompletableFuture().get().getLast());
+    assertThat(auth.path("error").path("code").intValue()).isEqualTo(-32000);
+  }
+
+  @Test void promptValidatesBlocksRuntimeNotificationsAndFactoryFailures(@TempDir Path directory)
+      throws Exception {
+    assertThatIllegalArgumentException().isThrownBy(() -> new AcpJsonRpcServer(directory,
+        () -> new ThreadId("bad"), Profile.ASK, "model", () -> true, () -> {}, "test",
+        (thread, profile, model, permissions, observer) -> null, -1));
+    var legacy = new AcpJsonRpcServer(directory, () -> new ThreadId("legacy"), Profile.ASK,
+        "model", () -> true, () -> {}, "test");
+    result(legacy, 1, "session/new", "{\"cwd\":\"C:/legacy\"}");
+    assertThat(call(legacy, 2, "session/prompt", """
+        {"sessionId":"legacy","prompt":[{"type":"text","text":"x"}]}
+        """).getLast().path("error").path("code").intValue()).isEqualTo(-32601);
+
+    var captured = new java.util.concurrent.atomic.AtomicReference<String>();
+    AcpJsonRpcServer.SessionFactory immediate =
+        (thread, profile, model, permissions, observer) ->
+            new AgentLoop(AgentState.initial(thread), new AgentReducer(new AgentReducer.Context(
+                System::nanoTime, java.time.Instant::now, MessageId::random,
+                call -> PermissionVerdict.ALLOW)),
+                (turn, messages, cancellation, sink) -> {
+                  captured.set(messages.reversed().stream()
+                      .filter(message -> message.role() == Role.USER).findFirst().orElseThrow()
+                      .text());
+                  sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+                }, call -> new ToolCompletion.Success("unused"), permissions,
+                saved -> {}, observer);
+    var server = new AcpJsonRpcServer(directory, () -> new ThreadId("blocks"), Profile.ASK,
+        "model", () -> true, () -> {}, "test", immediate, 10_000);
+    result(server, 3, "session/new", "{\"cwd\":\"C:/blocks\"}");
+    for (String invalid : List.of(
+        "{\"sessionId\":\"blocks\",\"prompt\":{}}",
+        "{\"sessionId\":\"blocks\",\"prompt\":[1]}",
+        "{\"sessionId\":\"blocks\",\"prompt\":[{\"type\":\"text\"}]}",
+        "{\"sessionId\":\"blocks\",\"prompt\":[]}")) {
+      assertThat(call(server, 4, "session/prompt", invalid).getLast()
+          .path("error").path("code").intValue()).isEqualTo(-32602);
+    }
+    JsonNode embedded = call(server, 5, "session/prompt", """
+        {"sessionId":"blocks","prompt":[
+          {"type":"text","text":"inspect"},
+          {"type":"resource_link","name":"guide","uri":"file:///guide.md"},
+          {"type":"resource","resource":{"text":"context"}},
+          {"type":"image","data":"ignored"}
+        ]}
+        """).getLast();
+    assertThat(embedded.path("result").path("stopReason").textValue()).isEqualTo("end_turn");
+    assertThat(captured.get()).isEqualTo(
+        "inspect\n[Resource: guide (file:///guide.md)]\ncontext\n");
+    List<String> notification = server.handleLineAsync("""
+        {"jsonrpc":"2.0","method":"session/prompt","params":{
+          "sessionId":"blocks","prompt":[{"type":"text","text":"notify"}]}}
+        """, rejectingClient()).toCompletableFuture()
+        .get(5, java.util.concurrent.TimeUnit.SECONDS);
+    assertThat(notification).isEmpty();
+
+    AcpJsonRpcServer.SessionFactory broken =
+        (thread, profile, model, permissions, observer) -> {
+          throw new IllegalStateException();
+        };
+    var failure = new AcpJsonRpcServer(directory, () -> new ThreadId("failure"), Profile.ASK,
+        "model", () -> true, () -> {}, "test", broken, 10_000);
+    result(failure, 6, "session/new", "{\"cwd\":\"C:/failure\"}");
+    JsonNode error = call(failure, 7, "session/prompt", """
+        {"sessionId":"failure","prompt":[{"type":"text","text":"fail"}]}
+        """).getLast();
+    assertThat(error.path("error").path("code").intValue()).isEqualTo(-32603);
+    assertThat(error.path("error").path("message").textValue())
+        .isEqualTo("IllegalStateException");
+  }
+
   private static JsonNode result(
       AcpJsonRpcServer server, int id, String method, String parameters) throws Exception {
     JsonNode response = call(server, id, method, parameters).getLast();
     assertThat(response.has("error")).as(response.toString()).isFalse();
     assertThat(response.path("id").intValue()).isEqualTo(id);
     return response.path("result");
+  }
+
+  private static AcpJsonRpcServer.Client rejectingClient() {
+    return new AcpJsonRpcServer.Client() {
+      @Override public void send(String ignored) {}
+
+      @Override public java.util.concurrent.CompletionStage<PermissionPort.Decision>
+          requestPermission(String sessionId, ToolUse call) {
+        return java.util.concurrent.CompletableFuture.completedFuture(
+            new PermissionPort.Decision(false, false));
+      }
+    };
   }
 
   private static List<JsonNode> call(
@@ -374,6 +742,38 @@ final class AcpJsonRpcServerTest {
     } catch (java.io.IOException exception) {
       throw new AssertionError(exception);
     }
+  }
+
+  private static String readLine(
+      java.util.concurrent.BlockingQueue<String> lines) throws Exception {
+    String line = lines.poll(5, java.util.concurrent.TimeUnit.SECONDS);
+    assertThat(line).isNotNull();
+    return line;
+  }
+
+  private static final class LineWriter extends java.io.Writer {
+    private final java.util.concurrent.BlockingQueue<String> lines;
+    private final StringBuilder pending = new StringBuilder();
+
+    private LineWriter(java.util.concurrent.BlockingQueue<String> lines) {
+      this.lines = lines;
+    }
+
+    @Override public synchronized void write(char[] buffer, int offset, int length) {
+      for (int index = offset; index < offset + length; index++) {
+        char value = buffer[index];
+        if (value == '\n') {
+          lines.add(pending.toString());
+          pending.setLength(0);
+        } else if (value != '\r') {
+          pending.append(value);
+        }
+      }
+    }
+
+    @Override public void flush() {}
+
+    @Override public void close() {}
   }
 
   private static void assertModes(JsonNode modes, String current) {
