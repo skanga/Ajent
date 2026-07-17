@@ -10,6 +10,8 @@ import com.github.skanga.ajent.tools.skills.SkillEngine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -75,5 +77,19 @@ final class AgenttyDocRetrieverTest {
     assertThat(response.error()).isEmpty();
     assertThat(response.hits()).isNotEmpty();
     assertThat(response.mode()).contains("+2 query variants");
+  }
+
+  @Test void optInNeuralStageRunsInsideCanonicalFunnel(@TempDir Path root) throws Exception {
+    Path docs = Files.createDirectories(root.resolve("docs"));
+    Files.writeString(docs.resolve("weak.md"), "deployment general notes");
+    Files.writeString(docs.resolve("strong.md"), "deployment exact production procedure");
+    var neural = new NeuralReranker((config, prompt) -> Optional.of(
+        prompt.contains("Passage: deployment exact") ? "10" : "1"));
+    var retriever = new AgenttyDocRetriever(docs, null, null, null, false, false, null, null,
+        neural, new NeuralReranker.Config("h", 1, "model", 2, Duration.ofSeconds(1)));
+    HostServices.DocResponse response = retriever.retrieve(new HostServices.DocQuery("deployment", 2));
+    assertThat(response.error()).isEmpty();
+    assertThat(response.mode()).contains("neural-reranked");
+    assertThat(response.hits().getFirst().path()).isEqualTo("strong.md");
   }
 }

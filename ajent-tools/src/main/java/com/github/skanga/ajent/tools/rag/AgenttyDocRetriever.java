@@ -17,19 +17,30 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
   private final boolean memoryEnabled;
   private final RagQueryExpander expander;
   private final RagQueryExpander.Config expansionConfig;
+  private final NeuralReranker neuralReranker;
+  private final NeuralReranker.Config neuralConfig;
   private final RagCorpus docs = new RagCorpus();
   private boolean docsBuilt;
 
   public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
                              MemoryKnowledgeSource memory, KnowledgeSource mcp,
                              boolean skillsEnabled, boolean memoryEnabled) {
-    this(docsRoot, skills, memory, mcp, skillsEnabled, memoryEnabled, null, null);
+    this(docsRoot, skills, memory, mcp, skillsEnabled, memoryEnabled, null, null, null, null);
   }
 
   public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
                              MemoryKnowledgeSource memory, KnowledgeSource mcp,
                              boolean skillsEnabled, boolean memoryEnabled,
                              RagQueryExpander expander, RagQueryExpander.Config expansionConfig) {
+    this(docsRoot, skills, memory, mcp, skillsEnabled, memoryEnabled, expander, expansionConfig,
+        null, null);
+  }
+
+  public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
+                             MemoryKnowledgeSource memory, KnowledgeSource mcp,
+                             boolean skillsEnabled, boolean memoryEnabled,
+                             RagQueryExpander expander, RagQueryExpander.Config expansionConfig,
+                             NeuralReranker neuralReranker, NeuralReranker.Config neuralConfig) {
     this.docsRoot = docsRoot;
     this.skills = skills;
     this.memory = memory;
@@ -38,6 +49,8 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
     this.memoryEnabled = memoryEnabled;
     this.expander = expander;
     this.expansionConfig = expansionConfig;
+    this.neuralReranker = neuralReranker;
+    this.neuralConfig = neuralConfig;
   }
 
   @Override public synchronized HostServices.DocResponse retrieve(HostServices.DocQuery query) {
@@ -75,13 +88,15 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
       } else {
         context = RagContext.fromHits(query.query(), router.retrieve(query.query(), pool));
       }
-      context = new RagPipeline()
-          .add(new RagPipeline.RerankStage(Math.max(limit * 2, 8), RagReranker.Weights.DEFAULT))
-          .add(new RagPipeline.MmrStage(limit, .75))
-          .add(new RagPipeline.CompressStage(600))
-          .run(context);
+      boolean neural = neuralReranker != null && neuralConfig != null;
+      var pipeline = new RagPipeline().add(new RagPipeline.RerankStage(
+          neural ? Math.max(limit * 3, 12) : Math.max(limit * 2, 8), RagReranker.Weights.DEFAULT));
+      if (neural) pipeline.add(new RagPipeline.NeuralRerankStage(neuralReranker,
+          Math.max(limit * 2, 8), neuralConfig));
+      context = pipeline.add(new RagPipeline.MmrStage(limit, .75))
+          .add(new RagPipeline.CompressStage(600)).run(context);
 
-      String mode = "BM25-only, reranked";
+      String mode = "BM25-only, " + (neural ? "neural-reranked" : "reranked");
       if (variantCount > 0) mode += ", +" + variantCount + " query variants";
       mode += ", confidence " + String.format(Locale.ROOT, "%.2f", context.confidence());
       if (context.confidence() < .25)

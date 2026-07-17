@@ -50,6 +50,16 @@ public final class RagPipeline {
     }
   }
 
+  public record NeuralRerankStage(NeuralReranker reranker, int outputLimit,
+                                  NeuralReranker.Config config) implements Stage {
+    @Override public String name() { return "neural_rerank"; }
+    @Override public RagContext process(RagContext context) {
+      List<RagCorpus.Hit> hits = context.chunks().stream().map(RagContext.ContextChunk::hit).toList();
+      return RagContext.fromHits(context.query(),
+          reranker.rerank(context.query(), hits, outputLimit, config));
+    }
+  }
+
   public record NormalizeQueryStage(NormalizeConfig config) implements Stage {
     public NormalizeQueryStage() { this(new NormalizeConfig(true, true)); }
     @Override public String name() { return "normalize"; }
