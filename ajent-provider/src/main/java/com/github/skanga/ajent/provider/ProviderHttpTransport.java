@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.provider.ollama.OllamaStreamDecoder;
 import com.github.skanga.ajent.provider.ollama.OllamaWire;
+import com.github.skanga.ajent.provider.anthropic.AnthropicRequest;
+import com.github.skanga.ajent.provider.anthropic.AnthropicStreamDecoder;
+import com.github.skanga.ajent.provider.anthropic.AnthropicWire;
 import com.github.skanga.ajent.provider.openai.OpenAiStreamDecoder;
 import com.github.skanga.ajent.provider.openai.OpenAiWire;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
@@ -47,6 +50,19 @@ public final class ProviderHttpTransport {
         sink, cancelled);
   }
 
+  public void streamAnthropic(
+      AnthropicRequest request, Consumer<StreamEvent> sink, BooleanSupplier cancelled) {
+    Objects.requireNonNull(request, "request");
+    if (request.auth().isEmpty()) {
+      sink.accept(new StreamEvent.Error(
+          "not authenticated â€” run 'ajent login' or set ANTHROPIC_API_KEY"));
+      return;
+    }
+    var decoder = new AnthropicStreamDecoder();
+    stream(AnthropicWire.buildHttpRequest(request), decoder::feed, decoder::end,
+        sink, cancelled, ProviderHttpTransport::anthropicHttpError);
+  }
+
   public void streamOllama(
       ChatRequest request, Consumer<StreamEvent> sink, BooleanSupplier cancelled) {
     var decoder = new OllamaStreamDecoder(toolNames(request), request.jsonProtocol());
@@ -60,8 +76,19 @@ public final class ProviderHttpTransport {
       java.util.function.Supplier<List<StreamEvent>> end,
       Consumer<StreamEvent> sink,
       BooleanSupplier cancelled) {
+    stream(request, feed, end, sink, cancelled, ProviderHttpTransport::httpError);
+  }
+
+  private void stream(
+      HttpRequest request,
+      java.util.function.Function<byte[], List<StreamEvent>> feed,
+      java.util.function.Supplier<List<StreamEvent>> end,
+      Consumer<StreamEvent> sink,
+      BooleanSupplier cancelled,
+      java.util.function.BiFunction<Integer, byte[], String> errorFormatter) {
     Objects.requireNonNull(sink, "sink");
     Objects.requireNonNull(cancelled, "cancelled");
+    Objects.requireNonNull(errorFormatter, "errorFormatter");
     if (cancelled.getAsBoolean()) {
       sink.accept(new StreamEvent.Error("cancelled"));
       return;
@@ -73,7 +100,7 @@ public final class ProviderHttpTransport {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
           byte[] errorBody = body.readNBytes(ERROR_BODY_MAX);
           sink.accept(new StreamEvent.Error(
-              httpError(response.statusCode(), errorBody), retryAfter(response),
+              errorFormatter.apply(response.statusCode(), errorBody), retryAfter(response),
               ProviderErrorPolicy.classifyHttpStatus(response.statusCode()), false));
           return;
         }
@@ -132,5 +159,12 @@ public final class ProviderHttpTransport {
     } catch (IOException ignored) {
       return "HTTP " + status + ": " + text;
     }
+  }
+
+  private static String anthropicHttpError(int status, byte[] body) {
+    String message = httpError(status, body);
+    return status == 401 || status == 403
+        ? message + "  (run 'ajent login' to re-authenticate)"
+        : message;
   }
 }

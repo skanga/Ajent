@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
+import com.github.skanga.ajent.provider.anthropic.AnthropicRequest;
 import com.github.skanga.ajent.provider.openai.Endpoint;
 import com.github.skanga.ajent.provider.stream.StopReason;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
@@ -58,6 +59,84 @@ class ProviderHttpTransportTest {
     assertThat(captured.get().method()).isEqualTo("POST");
     assertThat(captured.get().authorization()).isEqualTo("Bearer token");
     assertThat(JSON.readTree(captured.get().body()).path("model").textValue()).isEqualTo("model");
+  }
+
+  @Test
+  void postsAnthropicRequestAndStreamsItsTypedEvents() throws Exception {
+    var captured = new AtomicReference<Captured>();
+    start(exchange -> {
+      captured.set(capture(exchange));
+      byte[] response = ("event: message_start\n"
+          + "data: {\"message\":{\"usage\":{\"input_tokens\":3}}}\n\n"
+          + "event: content_block_start\n"
+          + "data: {\"content_block\":{\"type\":\"text\"}}\n\n"
+          + "event: content_block_delta\n"
+          + "data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude\"}}\n\n"
+          + "event: content_block_stop\ndata: {}\n\n"
+          + "event: message_delta\n"
+          + "data: {\"delta\":{\"stop_reason\":\"end_turn\"},"
+          + "\"usage\":{\"output_tokens\":2}}\n\n"
+          + "event: message_stop\ndata: {}\n\n").getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().add("content-type", "text/event-stream");
+      exchange.sendResponseHeaders(200, 0);
+      for (int offset = 0; offset < response.length; offset += 7) {
+        exchange.getResponseBody().write(response, offset, Math.min(7, response.length - offset));
+        exchange.getResponseBody().flush();
+      }
+      exchange.close();
+    });
+    var events = new ArrayList<StreamEvent>();
+
+    new ProviderHttpTransport(HttpClient.newHttpClient()).streamAnthropic(
+        anthropicRequest(new ProviderAuth.ApiKey("anthropic-key")),
+        events::add, () -> false);
+
+    assertThat(events).containsExactly(
+        new StreamEvent.Started(),
+        new StreamEvent.Usage(3, 0, 0, 0),
+        new StreamEvent.TextDelta("Claude"),
+        new StreamEvent.TextBlockClosed(),
+        new StreamEvent.Usage(0, 2, 0, 0),
+        new StreamEvent.Finished(StopReason.END_TURN));
+    assertThat(captured.get().apiKey()).isEqualTo("anthropic-key");
+    assertThat(captured.get().path()).isEqualTo("/v1/messages?beta=true");
+    assertThat(JSON.readTree(captured.get().body()).path("model").textValue())
+        .isEqualTo("claude-opus-4-6");
+  }
+
+  @Test
+  void anthropicErrorsCarryRetryHintsAndMissingAuthNeverSends() throws Exception {
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    start(exchange -> {
+      calls.incrementAndGet();
+      capture(exchange);
+      byte[] response = "{\"error\":{\"message\":\"expired\"}}"
+          .getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().add("retry-after", "11");
+      exchange.sendResponseHeaders(401, response.length);
+      exchange.getResponseBody().write(response);
+      exchange.close();
+    });
+    var transport = new ProviderHttpTransport(HttpClient.newHttpClient());
+    var events = new ArrayList<StreamEvent>();
+
+    transport.streamAnthropic(anthropicRequest(new ProviderAuth.Bearer("expired")),
+        events::add, () -> false);
+
+    assertThat(events).singleElement().satisfies(event -> {
+      var error = assertThat(event).asInstanceOf(
+          org.assertj.core.api.InstanceOfAssertFactories.type(StreamEvent.Error.class)).actual();
+      assertThat(error.message()).contains("HTTP 401", "expired", "ajent login");
+      assertThat(error.retryAfter()).contains(Duration.ofSeconds(11));
+      assertThat(error.errorClass()).isEqualTo(ErrorClass.AUTH);
+    });
+
+    var missing = new ArrayList<StreamEvent>();
+    transport.streamAnthropic(anthropicRequest(new ProviderAuth.Empty()),
+        missing::add, () -> false);
+    assertThat(missing).containsExactly(new StreamEvent.Error(
+        "not authenticated â€” run 'ajent login' or set ANTHROPIC_API_KEY"));
+    assertThat(calls).hasValue(1);
   }
 
   @Test
@@ -144,14 +223,26 @@ class ProviderHttpTransportTest {
         8192, jsonProtocol);
   }
 
+  private AnthropicRequest anthropicRequest(ProviderAuth auth) {
+    return new AnthropicRequest(
+        "claude-opus-4-6", "system",
+        List.of(new Message(Role.USER, "hello", List.of(), List.of())),
+        List.of(), 64_000, auth, 0, "",
+        java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort()
+            + "/v1/messages?beta=true"), "identity");
+  }
+
   private static Captured capture(HttpExchange exchange) throws IOException {
     return new Captured(
         exchange.getRequestMethod(),
         exchange.getRequestHeaders().getFirst("authorization"),
+        exchange.getRequestHeaders().getFirst("x-api-key"),
+        exchange.getRequestURI().toString(),
         new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
   }
 
-  private record Captured(String method, String authorization, String body) {}
+  private record Captured(
+      String method, String authorization, String apiKey, String path, String body) {}
 
   @FunctionalInterface
   private interface ThrowingHandler {
