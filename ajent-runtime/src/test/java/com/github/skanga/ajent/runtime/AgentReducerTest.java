@@ -8,6 +8,7 @@ import com.github.skanga.ajent.domain.SessionPhase;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.domain.ToolStatus;
+import com.github.skanga.ajent.domain.CompactionRecord;
 import com.github.skanga.ajent.domain.RetryState;
 import com.github.skanga.ajent.provider.ErrorClass;
 import com.github.skanga.ajent.provider.stream.StopReason;
@@ -32,6 +33,197 @@ final class AgentReducerTest {
     assertThat(step.effects()).satisfiesExactly(
         effect -> assertThat(effect).isInstanceOf(RuntimeEffect.Persist.class),
         effect -> assertThat(effect).isInstanceOf(RuntimeEffect.StartStream.class));
+  }
+
+  @Test void providerEffectsUseCompactedWireViewWithoutMutatingVisibleHistory() {
+    Instant now = Instant.parse("2026-07-17T00:00:00Z");
+    var raw = List.of(new com.github.skanga.ajent.domain.Message(new MessageId("old-user"),
+        Role.USER, "old request", List.of(), List.of(), "", "", List.of(), now,
+        Optional.empty(), Optional.empty(), false),
+        new com.github.skanga.ajent.domain.Message(new MessageId("old-assistant"), Role.ASSISTANT,
+            "old answer", List.of(), List.of(), "", "", List.of(), now, Optional.empty(),
+            Optional.empty(), false));
+    Thread compacted = new Thread(new ThreadId("thread"), "Test", raw, now, now,
+        List.of(new CompactionRecord(2, "preserved state", now)));
+
+    AgentReducer.Step step = reducer(PermissionVerdict.ALLOW).update(AgentState.initial(compacted),
+        new RuntimeMessage.Submit("continue", List.of()));
+
+    RuntimeEffect.StartStream stream = (RuntimeEffect.StartStream) step.effects().getLast();
+    assertThat(stream.messages().getFirst().isCompactSummary()).isTrue();
+    assertThat(stream.messages().getFirst().text()).contains("preserved state");
+    assertThat(stream.messages()).extracting(message -> message.text())
+        .containsSequence("continue", "");
+    assertThat(step.state().thread().messages()).hasSize(4)
+        .startsWith(raw.toArray(com.github.skanga.ajent.domain.Message[]::new));
+  }
+
+  @Test void manualCompactionIsIdleOnlyAndStreamsIntoAnOffTranscriptBuffer() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState empty = AgentState.initial(thread());
+    assertThat(reducer.update(empty, new RuntimeMessage.CompactContext()).state()).isEqualTo(empty);
+    AgentState busy = submit(reducer);
+    assertThat(reducer.update(busy, new RuntimeMessage.CompactContext()).state()).isEqualTo(busy);
+
+    AgentState withHistory = reducer.update(busy, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN))).state();
+    AgentReducer.Step started = reducer.update(withHistory, new RuntimeMessage.CompactContext());
+    assertThat(started.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(started.state().compaction().active()).isPresent();
+    assertThat(started.state().compaction().active().orElseThrow().targetIndex()).isEqualTo(2);
+    assertThat(started.state().status()).isEqualTo("compacting context…");
+    RuntimeEffect.StartStream stream = (RuntimeEffect.StartStream) started.effects().getFirst();
+    assertThat(stream.messages().getLast().text())
+        .isEqualTo(ConversationWire.COMPACTION_SUMMARY_PROMPT);
+
+    AgentState buffered = event(reducer, started.state(), started.state().activeTurnId(),
+        new StreamEvent.TextDelta("  concise summary  "));
+    assertThat(buffered.thread()).isEqualTo(withHistory.thread());
+    assertThat(buffered.compaction().active().orElseThrow().buffer())
+        .isEqualTo("  concise summary  ");
+    AgentState usage = event(reducer, buffered, buffered.activeTurnId(),
+        new StreamEvent.Usage(999, 888));
+    assertThat(usage.tokensIn()).isEqualTo(withHistory.tokensIn());
+    assertThat(usage.tokensOut()).isEqualTo(withHistory.tokensOut());
+  }
+
+  @Test void compactionFinishPersistsRecordWithoutDeletingTranscriptAndDrainsQueue() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN))).state();
+    state = reducer.update(state, new RuntimeMessage.CompactContext()).state();
+    long compactTurn = state.activeTurnId();
+    state = reducer.update(state, new RuntimeMessage.Submit("queued work", List.of())).state();
+    state = event(reducer, state, compactTurn, new StreamEvent.TextDelta("  state summary  "));
+    AgentReducer.Step finished = reducer.update(state, new RuntimeMessage.ProviderEvent(compactTurn,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+
+    assertThat(finished.state().thread().compactions()).singleElement().satisfies(record -> {
+      assertThat(record.upToIndex()).isEqualTo(2);
+      assertThat(record.summary()).isEqualTo("state summary");
+    });
+    assertThat(finished.state().thread().messages()).extracting(message -> message.text())
+        .containsExactly("hello", "", "queued work", "");
+    assertThat(finished.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(finished.state().compaction().active()).isEmpty();
+    assertThat(finished.effects()).anyMatch(RuntimeEffect.Persist.class::isInstance)
+        .anyMatch(RuntimeEffect.StartStream.class::isInstance);
+    RuntimeEffect.StartStream queued = (RuntimeEffect.StartStream) finished.effects().getLast();
+    assertThat(queued.messages().getFirst().isCompactSummary()).isTrue();
+    assertThat(queued.messages().getFirst().text()).contains("state summary");
+  }
+
+  @Test void emptyCompactionSummaryGetsNativeFallbackText() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN))).state();
+    state = reducer.update(state, new RuntimeMessage.CompactContext()).state();
+    AgentReducer.Step finished = reducer.update(state, new RuntimeMessage.ProviderEvent(
+        state.activeTurnId(), new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(finished.state().thread().compactions().getLast().summary())
+        .isEqualTo("[compaction produced no text]");
+  }
+
+  @Test void cancellingCompactionPreservesHistoryAndImmediatelyDrainsQueuedWork() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN))).state();
+    Thread before = state.thread();
+    state = reducer.update(state, new RuntimeMessage.CompactContext()).state();
+    state = reducer.update(state, new RuntimeMessage.Submit("after cancel", List.of())).state();
+    AgentReducer.Step cancelled = reducer.update(state, new RuntimeMessage.Cancel());
+    assertThat(cancelled.state().thread().compactions()).isEmpty();
+    assertThat(cancelled.state().thread().messages()).startsWith(
+        before.messages().toArray(com.github.skanga.ajent.domain.Message[]::new));
+    assertThat(cancelled.state().thread().messages().get(2).text()).isEqualTo("after cancel");
+    assertThat(cancelled.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(cancelled.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
+  }
+
+  @Test void transientCompactionFailureClearsOnlyBufferAndRetriesTheSameSummaryRequest() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN))).state();
+    state = reducer.update(state, new RuntimeMessage.CompactContext()).state();
+    long turn = state.activeTurnId();
+    state = event(reducer, state, turn, new StreamEvent.TextDelta("discard me"));
+    AgentReducer.Step failed = reducer.update(state, new RuntimeMessage.ProviderEvent(turn,
+        new StreamEvent.Error("connection reset", Optional.empty(), ErrorClass.TRANSIENT, false)));
+    assertThat(failed.state().compaction().active().orElseThrow().buffer()).isEmpty();
+    assertThat(failed.state().phase().active().orElseThrow().transientRetries()).isEqualTo(1);
+    assertThat(failed.state().status()).startsWith("compacting — retrying in 1s");
+    assertThat(failed.effects()).singleElement().isEqualTo(new RuntimeEffect.Schedule(
+        Duration.ofMillis(500), new RuntimeMessage.RetryStream(turn)));
+
+    AgentReducer.Step retry = reducer.update(failed.state(), new RuntimeMessage.RetryStream(turn));
+    RuntimeEffect.StartStream stream = (RuntimeEffect.StartStream) retry.effects().getFirst();
+    assertThat(stream.turnId()).isEqualTo(turn);
+    assertThat(stream.messages().getLast().text())
+        .isEqualTo(ConversationWire.COMPACTION_SUMMARY_PROMPT);
+  }
+
+  @Test void terminalCompactionFailureKeepsTranscriptAndDrainsQueuedWork() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN))).state();
+    Thread before = state.thread();
+    state = reducer.update(state, new RuntimeMessage.CompactContext()).state();
+    long turn = state.activeTurnId();
+    state = reducer.update(state, new RuntimeMessage.Submit("continue anyway", List.of())).state();
+    AgentReducer.Step failed = reducer.update(state, new RuntimeMessage.ProviderEvent(turn,
+        new StreamEvent.Error("model not found", Optional.empty(), ErrorClass.TERMINAL, false)));
+    assertThat(failed.state().compaction().active()).isEmpty();
+    assertThat(failed.state().thread().compactions()).isEmpty();
+    assertThat(failed.state().thread().messages()).startsWith(
+        before.messages().toArray(com.github.skanga.ajent.domain.Message[]::new));
+    assertThat(failed.state().thread().messages().get(2).text()).isEqualTo("continue anyway");
+    assertThat(failed.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(failed.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
+  }
+
+  @Test void postTurnThresholdAutoStartsTheSameCompactionPath() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, () -> 1_000L, 100);
+    AgentState state = submit(reducer);
+    AgentReducer.Step finished = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(finished.state().compaction().active()).isPresent();
+    assertThat(finished.state().status()).isEqualTo("compacting context…");
+    assertThat(finished.effects()).satisfiesExactly(
+        effect -> assertThat(effect).isInstanceOf(RuntimeEffect.Persist.class),
+        effect -> assertThat(effect).isInstanceOf(RuntimeEffect.StartStream.class));
+    RuntimeEffect.StartStream compact = (RuntimeEffect.StartStream) finished.effects().getLast();
+    assertThat(compact.messages().getLast().text())
+        .isEqualTo(ConversationWire.COMPACTION_SUMMARY_PROMPT);
+  }
+
+  @Test void rapidRefillBreakerDisablesAutoCompactionThenQuietTurnsReenableIt() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN))).state();
+    for (int compact = 0; compact < 3; compact++) {
+      state = reducer.update(state, new RuntimeMessage.CompactContext()).state();
+      long turn = state.activeTurnId();
+      state = event(reducer, state, turn, new StreamEvent.TextDelta("summary " + compact));
+      state = reducer.update(state, new RuntimeMessage.ProviderEvent(turn,
+          new StreamEvent.Finished(StopReason.END_TURN))).state();
+    }
+    assertThat(state.compaction().autoDisabled()).isTrue();
+    assertThat(state.status()).contains("auto-compact disabled");
+
+    for (int quiet = 0; quiet < 11; quiet++) {
+      AgentReducer.Step submitted = reducer.update(state,
+          new RuntimeMessage.Submit("quiet " + quiet, List.of()));
+      state = reducer.update(submitted.state(), new RuntimeMessage.ProviderEvent(
+          submitted.state().activeTurnId(), new StreamEvent.Finished(StopReason.END_TURN))).state();
+    }
+    assertThat(state.compaction().autoDisabled()).isFalse();
+    assertThat(state.compaction().recentCompacts()).isZero();
   }
 
   @Test void streamsTextUsageAndNaturalFinishThenIgnoresStaleEvents() {
@@ -513,16 +705,28 @@ final class AgentReducerTest {
   }
 
   private static AgentReducer reducer(PermissionVerdict verdict, java.util.function.LongSupplier clock) {
-    return reducer(call -> verdict, clock);
+    return reducer(call -> verdict, clock, 200_000);
+  }
+
+  private static AgentReducer reducer(PermissionVerdict verdict,
+                                      java.util.function.LongSupplier clock, int contextMax) {
+    return reducer(call -> verdict, clock, contextMax);
   }
 
   private static AgentReducer reducer(java.util.function.Function<
       com.github.skanga.ajent.domain.ToolUse, PermissionVerdict> permission,
       java.util.function.LongSupplier clock) {
+    return reducer(permission, clock, 200_000);
+  }
+
+  private static AgentReducer reducer(java.util.function.Function<
+      com.github.skanga.ajent.domain.ToolUse, PermissionVerdict> permission,
+      java.util.function.LongSupplier clock, int contextMax) {
     var ids = new AtomicInteger();
     return new AgentReducer(new AgentReducer.Context(clock,
         () -> Instant.parse("2026-07-17T00:00:00Z"),
-        () -> new MessageId("m-" + ids.incrementAndGet()), permission, () -> 1.0));
+        () -> new MessageId("m-" + ids.incrementAndGet()), permission, () -> 1.0,
+        () -> contextMax));
   }
 
   private static Thread thread() {

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.domain.ActiveTurn;
 import com.github.skanga.ajent.domain.CancellationSignal;
+import com.github.skanga.ajent.domain.CompactionRecord;
 import com.github.skanga.ajent.domain.ImageContent;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.MessageId;
@@ -30,6 +31,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -53,12 +55,20 @@ public final class AgentReducer {
   public record Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                         Supplier<MessageId> messageIds,
                         Function<ToolUse, PermissionVerdict> permissions,
-                        DoubleSupplier retryJitter) {
+                        DoubleSupplier retryJitter,
+                        IntSupplier contextMax) {
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                    Supplier<MessageId> messageIds,
                    Function<ToolUse, PermissionVerdict> permissions) {
       this(nanoClock, wallClock, messageIds, permissions,
-          () -> ThreadLocalRandom.current().nextDouble(0.80, 1.20));
+          () -> ThreadLocalRandom.current().nextDouble(0.80, 1.20), () -> 200_000);
+    }
+
+    public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
+                   Supplier<MessageId> messageIds,
+                   Function<ToolUse, PermissionVerdict> permissions,
+                   DoubleSupplier retryJitter) {
+      this(nanoClock, wallClock, messageIds, permissions, retryJitter, () -> 200_000);
     }
 
     public Context {
@@ -67,6 +77,7 @@ public final class AgentReducer {
       Objects.requireNonNull(messageIds, "messageIds");
       Objects.requireNonNull(permissions, "permissions");
       Objects.requireNonNull(retryJitter, "retryJitter");
+      Objects.requireNonNull(contextMax, "contextMax");
     }
   }
 
@@ -87,6 +98,7 @@ public final class AgentReducer {
       case RuntimeMessage.ToolCompleted completed -> toolCompleted(state, completed);
       case RuntimeMessage.PermissionResolved resolved -> permissionResolved(state, resolved);
       case RuntimeMessage.RetryStream retry -> retryStream(state, retry);
+      case RuntimeMessage.CompactContext ignored -> compactContext(state);
       case RuntimeMessage.Cancel ignored -> cancel(state);
     };
   }
@@ -113,7 +125,27 @@ public final class AgentReducer {
         state.tokensIn(), state.tokensOut(), "", Optional.empty(), state.queued(),
         state.sessionGrants()));
     return new Step(revised, List.of(new RuntimeEffect.Persist(thread),
-        new RuntimeEffect.StartStream(turnId, thread.messages(), cancellation)));
+        new RuntimeEffect.StartStream(turnId, wireMessages(thread), cancellation)));
+  }
+
+  private Step compactContext(AgentState state) {
+    if (!(state.phase() instanceof SessionPhase.Idle)
+        || state.compaction().active().isPresent() || state.thread().messages().isEmpty())
+      return done(state);
+    long turnId = state.turnCounter() + 1;
+    var cancellation = new CancellationSignal();
+    SessionPhase phase = SessionPhase.start(new SessionPhase.Idle(),
+        ActiveTurn.start(cancellation, context.nanoClock().getAsLong()));
+    var active = new AgentState.ActiveCompaction(state.thread().messages().size(), "");
+    var compaction = new AgentState.Compaction(Optional.of(active),
+        state.compaction().recentCompacts(), state.compaction().turnsSinceLastCompact(),
+        state.compaction().autoDisabled());
+    AgentState revised = withCompaction(copy(state, state.thread(), phase, turnId, turnId,
+        state.tokensIn(), state.tokensOut(), "compacting context…", Optional.empty(),
+        state.queued(), state.sessionGrants()), compaction);
+    return new Step(revised, List.of(new RuntimeEffect.StartStream(turnId,
+        ConversationWire.forCompaction(state.thread(), context.contextMax().getAsInt()),
+        cancellation)));
   }
 
   private Step providerEvent(AgentState state, RuntimeMessage.ProviderEvent envelope) {
@@ -121,6 +153,8 @@ public final class AgentReducer {
       return done(state);
     AgentState live = withActive(state, state.phase().active().orElseThrow()
         .withLastEventNanos(context.nanoClock().getAsLong()));
+    if (live.compaction().active().isPresent())
+      return compactionProviderEvent(live, envelope.event());
     return switch (envelope.event()) {
       case StreamEvent.Started ignored -> done(streamStarted(live));
       case StreamEvent.TextDelta delta -> done(appendText(recordDelta(live, delta.text()),
@@ -136,6 +170,62 @@ public final class AgentReducer {
       case StreamEvent.Finished finished -> finalizeStream(live, finished.stopReason());
       case StreamEvent.Error error -> streamError(live, error);
     };
+  }
+
+  private Step compactionProviderEvent(AgentState state, StreamEvent event) {
+    return switch (event) {
+      case StreamEvent.Started ignored -> done(streamStarted(state));
+      case StreamEvent.TextDelta delta -> done(appendCompaction(recordDelta(state, delta.text()),
+          delta.text()));
+      case StreamEvent.Heartbeat ignored -> done(heartbeat(state));
+      case StreamEvent.Finished ignored -> finishCompaction(state);
+      case StreamEvent.Error error -> streamError(state, error);
+      case StreamEvent.ToolUseStart ignored -> done(state);
+      case StreamEvent.ToolUseDelta ignored -> done(state);
+      case StreamEvent.ToolUseEnd ignored -> done(state);
+      case StreamEvent.Usage ignored -> done(state);
+    };
+  }
+
+  private AgentState appendCompaction(AgentState state, String text) {
+    AgentState.ActiveCompaction active = state.compaction().active().orElseThrow();
+    String buffer = appendUtf8Capped(active.buffer(), text, MAX_STREAMING_BYTES);
+    var revisedActive = new AgentState.ActiveCompaction(active.targetIndex(), buffer);
+    var revised = new AgentState.Compaction(Optional.of(revisedActive),
+        state.compaction().recentCompacts(), state.compaction().turnsSinceLastCompact(),
+        state.compaction().autoDisabled());
+    return withCompaction(state, revised);
+  }
+
+  private Step finishCompaction(AgentState state) {
+    AgentState.ActiveCompaction active = state.compaction().active().orElseThrow();
+    String summary = active.buffer().strip();
+    if (summary.isEmpty()) summary = "[compaction produced no text]";
+    int target = Math.min(active.targetIndex(), state.thread().messages().size());
+    var records = new ArrayList<>(state.thread().compactions());
+    records.add(new CompactionRecord(target, summary, context.wallClock().get()));
+    var thread = new com.github.skanga.ajent.domain.Thread(state.thread().id(),
+        state.thread().title(), state.thread().messages(), state.thread().createdAt(),
+        context.wallClock().get(), records);
+    int recent = state.compaction().turnsSinceLastCompact() <= 3
+        ? state.compaction().recentCompacts() + 1 : 1;
+    boolean disabled = recent >= 3;
+    var compaction = new AgentState.Compaction(Optional.empty(), recent, 0, disabled);
+    String status = disabled ? "auto-compact disabled (rapid refill); use /compact manually"
+        : state.queued().isEmpty() ? "context compacted" : "";
+    AgentState idle = withCompaction(copy(state, thread, new SessionPhase.Idle(), 0,
+        state.turnCounter(), state.tokensIn(), state.tokensOut(), status, Optional.empty(),
+        state.queued(), state.sessionGrants()), compaction);
+    var effects = new ArrayList<RuntimeEffect>();
+    effects.add(new RuntimeEffect.Persist(thread));
+    if (idle.queued().isEmpty()) return new Step(idle, effects);
+    RuntimeMessage.Submit head = idle.queued().getFirst();
+    AgentState ready = copy(idle, idle.thread(), idle.phase(), idle.activeTurnId(),
+        idle.turnCounter(), idle.tokensIn(), idle.tokensOut(), idle.status(), idle.toolDraft(),
+        idle.queued().subList(1, idle.queued().size()), idle.sessionGrants());
+    Step submitted = submit(ready, head);
+    effects.addAll(submitted.effects());
+    return new Step(submitted.state(), effects);
   }
 
   private Step finalizeStream(AgentState state,
@@ -158,13 +248,38 @@ public final class AgentReducer {
             "retrying (upstream cut off)…", Optional.empty(), revised.queued(),
             revised.sessionGrants());
         return new Step(revised, List.of(new RuntimeEffect.StartStream(revised.activeTurnId(),
-            revised.thread().messages(), retry.cancellation())));
+            wireMessages(revised.thread()), retry.cancellation())));
       }
       revised = clearTruncationSignals(failPendingTools(revised, MID_STRING_TOOL_ERROR));
     }
     List<ToolUse> calls = lastAssistant(revised).map(Message::toolCalls).orElse(List.of());
     if (!calls.isEmpty()) return kickTools(revised);
-    return finishTurn(revised, "");
+    return finishNaturalTurn(revised);
+  }
+
+  private Step finishNaturalTurn(AgentState state) {
+    int turns = Math.min(1_000_000, state.compaction().turnsSinceLastCompact() + 1);
+    boolean disabled = state.compaction().autoDisabled();
+    int recent = state.compaction().recentCompacts();
+    if (disabled && turns > 10) {
+      disabled = false;
+      recent = 0;
+    }
+    var policy = new AgentState.Compaction(state.compaction().active(), recent, turns, disabled);
+    Step finished = finishTurn(withCompaction(state, policy), "");
+    AgentState idle = finished.state();
+    int contextMax = context.contextMax().getAsInt();
+    int threshold = Math.max(0, contextMax - 13_000 - 4_000);
+    boolean shouldCompact = idle.phase() instanceof SessionPhase.Idle
+        && idle.compaction().active().isEmpty() && !idle.compaction().autoDisabled()
+        && contextMax > 0 && idle.queued().isEmpty() && !idle.thread().messages().isEmpty()
+        && Math.max(idle.tokensIn(), ConversationWire.estimateTokens(
+            ConversationWire.messages(idle.thread()))) > threshold;
+    if (!shouldCompact) return finished;
+    Step compacting = compactContext(idle);
+    var effects = new ArrayList<>(finished.effects());
+    effects.addAll(compacting.effects());
+    return new Step(compacting.state(), effects);
   }
 
   private record DraftFinalization(AgentState state, boolean truncated) {}
@@ -242,15 +357,21 @@ public final class AgentReducer {
     var ids = new java.util.HashSet<>(state.truncatedToolIds());
     ids.add(callId);
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
-        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(), ids,
-        state.sessionGrants());
+        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
+        state.compaction(), ids, state.sessionGrants());
   }
 
   private AgentState clearTruncationSignals(AgentState state) {
     if (state.truncatedToolIds().isEmpty()) return state;
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
         state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
-        Set.of(), state.sessionGrants());
+        state.compaction(), Set.of(), state.sessionGrants());
+  }
+
+  private static AgentState withCompaction(AgentState state, AgentState.Compaction compaction) {
+    return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
+        compaction, state.truncatedToolIds(), state.sessionGrants());
   }
 
   private AgentState failPendingTools(AgentState state, String error) {
@@ -332,6 +453,7 @@ public final class AgentReducer {
 
   private Step cancel(AgentState state) {
     if (state.phase() instanceof SessionPhase.Idle) return done(state);
+    if (state.compaction().active().isPresent()) return cancelCompaction(state);
     state.phase().active().orElseThrow().cancellation().cancel();
     AgentState settled = updateEveryTool(state, call -> call.status().isTerminal() ? call
         : new ToolUse(call.id(), call.name(), call.arguments(), new ToolStatus.Rejected()));
@@ -340,6 +462,22 @@ public final class AgentReducer {
         settled.tokensIn(), settled.tokensOut(), "cancelled", Optional.empty(), settled.queued(),
         settled.sessionGrants()));
     return new Step(revised, List.of(new RuntimeEffect.Persist(revised.thread())));
+  }
+
+  private Step cancelCompaction(AgentState state) {
+    state.phase().active().orElseThrow().cancellation().cancel();
+    var compaction = new AgentState.Compaction(Optional.empty(),
+        state.compaction().recentCompacts(), state.compaction().turnsSinceLastCompact(),
+        state.compaction().autoDisabled());
+    AgentState idle = withCompaction(copy(state, state.thread(), new SessionPhase.Idle(), 0,
+        state.turnCounter(), state.tokensIn(), state.tokensOut(), "cancelled", Optional.empty(),
+        state.queued(), state.sessionGrants()), compaction);
+    if (idle.queued().isEmpty()) return done(idle);
+    RuntimeMessage.Submit head = idle.queued().getFirst();
+    AgentState ready = copy(idle, idle.thread(), idle.phase(), idle.activeTurnId(),
+        idle.turnCounter(), idle.tokensIn(), idle.tokensOut(), idle.status(), idle.toolDraft(),
+        idle.queued().subList(1, idle.queued().size()), idle.sessionGrants());
+    return submit(ready, head);
   }
 
   private Step kickTools(AgentState state) {
@@ -398,7 +536,7 @@ public final class AgentReducer {
     AgentState revised = copy(state, thread, phase, turnId, turnId, state.tokensIn(),
         state.tokensOut(), "", Optional.empty(), state.queued(), state.sessionGrants());
     return new Step(revised, List.of(new RuntimeEffect.Persist(thread),
-        new RuntimeEffect.StartStream(turnId, thread.messages(), active.cancellation())));
+        new RuntimeEffect.StartStream(turnId, wireMessages(thread), active.cancellation())));
   }
 
   private Step finishTurn(AgentState state, String status) {
@@ -421,6 +559,7 @@ public final class AgentReducer {
   }
 
   private Step streamError(AgentState state, StreamEvent.Error error) {
+    if (state.compaction().active().isPresent()) return compactionError(state, error);
     ActiveTurn active = state.phase().active().orElseThrow();
     if (active.retryState() instanceof RetryState.Scheduled) return done(state);
     ErrorClass errorClass = error.errorClass();
@@ -472,6 +611,59 @@ public final class AgentReducer {
         ? "cancelled" : "error: " + error.message());
   }
 
+  private Step compactionError(AgentState state, StreamEvent.Error error) {
+    ActiveTurn active = state.phase().active().orElseThrow();
+    if (active.retryState() instanceof RetryState.Scheduled) return done(state);
+    ErrorClass errorClass = error.errorClass();
+    if (errorClass == ErrorClass.CANCELLED
+        && (error.fromStall() || active.retryState() instanceof RetryState.StallFired))
+      errorClass = ErrorClass.TRANSIENT;
+    long now = context.nanoClock().getAsLong();
+    int prior = active.transientRetries();
+    if (active.lastFailureNanos() != 0
+        && now - active.lastFailureNanos() >= ProviderErrorPolicy.RETRY_DECAY.toNanos())
+      prior = 0;
+    boolean canRetry = (errorClass == ErrorClass.TRANSIENT
+        || errorClass == ErrorClass.RATE_LIMIT) && prior < ProviderErrorPolicy.MAX_RETRIES;
+    if (canRetry) {
+      ErrorClass retryClass = errorClass;
+      int attempt = prior;
+      Duration delay = error.retryAfter().map(AgentReducer::clampRetryAfter).orElseGet(() ->
+          ProviderErrorPolicy.backoffWithJitter(retryClass, attempt,
+              context.retryJitter().getAsDouble()));
+      ActiveTurn scheduled = active.withTransientRetries(prior + 1).withLastFailureNanos(now)
+          .withRetryState(new RetryState.Scheduled());
+      AgentState revised = withActive(state, scheduled);
+      AgentState.ActiveCompaction compact = revised.compaction().active().orElseThrow();
+      var empty = new AgentState.ActiveCompaction(compact.targetIndex(), "");
+      revised = withCompaction(revised, new AgentState.Compaction(Optional.of(empty),
+          revised.compaction().recentCompacts(), revised.compaction().turnsSinceLastCompact(),
+          revised.compaction().autoDisabled()));
+      long seconds = Math.max(1, (delay.toMillis() + 999) / 1_000);
+      revised = copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+          revised.turnCounter(), revised.tokensIn(), revised.tokensOut(),
+          "compacting — retrying in " + seconds + "s", Optional.empty(), revised.queued(),
+          revised.sessionGrants());
+      return new Step(revised, List.of(new RuntimeEffect.Schedule(delay,
+          new RuntimeMessage.RetryStream(state.activeTurnId()))));
+    }
+
+    var compaction = new AgentState.Compaction(Optional.empty(),
+        state.compaction().recentCompacts(), state.compaction().turnsSinceLastCompact(),
+        state.compaction().autoDisabled());
+    String status = errorClass == ErrorClass.CANCELLED ? "compaction cancelled"
+        : "compaction failed: " + error.message() + " — retry with /compact";
+    AgentState idle = withCompaction(copy(state, state.thread(), new SessionPhase.Idle(), 0,
+        state.turnCounter(), state.tokensIn(), state.tokensOut(), status, Optional.empty(),
+        state.queued(), state.sessionGrants()), compaction);
+    if (idle.queued().isEmpty()) return done(idle);
+    RuntimeMessage.Submit head = idle.queued().getFirst();
+    AgentState ready = copy(idle, idle.thread(), idle.phase(), idle.activeTurnId(),
+        idle.turnCounter(), idle.tokensIn(), idle.tokensOut(), idle.status(), idle.toolDraft(),
+        idle.queued().subList(1, idle.queued().size()), idle.sessionGrants());
+    return submit(ready, head);
+  }
+
   private Step retryStream(AgentState state, RuntimeMessage.RetryStream retry) {
     if (state.activeTurnId() != retry.turnId() || state.phase() instanceof SessionPhase.Idle)
       return done(state);
@@ -479,7 +671,7 @@ public final class AgentReducer {
     if (!(active.retryState() instanceof RetryState.Scheduled)) return done(state);
     AgentState revised = withActive(state, active.withRetryState(new RetryState.Fresh()));
     return new Step(revised, List.of(new RuntimeEffect.StartStream(retry.turnId(),
-        revised.thread().messages(), active.cancellation())));
+        activeWireMessages(revised), active.cancellation())));
   }
 
   private AgentState streamStarted(AgentState state) {
@@ -519,6 +711,16 @@ public final class AgentReducer {
         state.tokensIn(), state.tokensOut(), state.status(), Optional.empty(), state.queued(),
         state.sessionGrants());
     return clearTruncationSignals(revised);
+  }
+
+  private List<Message> wireMessages(com.github.skanga.ajent.domain.Thread thread) {
+    return ConversationWire.forNormalTurn(thread, context.contextMax().getAsInt());
+  }
+
+  private List<Message> activeWireMessages(AgentState state) {
+    return state.compaction().active().isPresent()
+        ? ConversationWire.forCompaction(state.thread(), context.contextMax().getAsInt())
+        : wireMessages(state.thread());
   }
 
   private static Duration clampRetryAfter(Duration value) {
@@ -697,7 +899,7 @@ public final class AgentReducer {
                                  Optional<AgentState.ToolDraft> draft,
                                  List<RuntimeMessage.Submit> queued, Set<String> grants) {
     return new AgentState(thread, phase, activeTurnId, turnCounter, tokensIn, tokensOut, status,
-        draft, queued, state.truncatedToolIds(), grants);
+        draft, queued, state.compaction(), state.truncatedToolIds(), grants);
   }
 
   private static Step done(AgentState state) {
