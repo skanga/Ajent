@@ -1,12 +1,15 @@
 package com.github.skanga.ajent.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ConversationTest {
@@ -15,9 +18,20 @@ class ConversationTest {
     assertThat(new ThreadId("t").value()).isEqualTo("t");
     assertThat(new ToolCallId("call").value()).isEqualTo("call");
     assertThat(new ToolName("grep").value()).isEqualTo("grep");
+    assertThat(new ModelId("model").value()).isEqualTo("model");
     assertThatNullPointerException().isThrownBy(() -> new ThreadId(null));
     assertThatNullPointerException().isThrownBy(() -> new ToolCallId(null));
     assertThatNullPointerException().isThrownBy(() -> new ToolName(null));
+    assertThatNullPointerException().isThrownBy(() -> new ModelId(null));
+  }
+
+  @Test
+  void profilesPreserveAgenTTYOrdinalsAndSafelyDefaultUnknownValues() {
+    assertThat(Profile.fromPersistedOrdinal(0)).isEqualTo(Profile.WRITE);
+    assertThat(Profile.fromPersistedOrdinal(1)).isEqualTo(Profile.ASK);
+    assertThat(Profile.fromPersistedOrdinal(2)).isEqualTo(Profile.MINIMAL);
+    assertThat(Profile.fromPersistedOrdinal(-1)).isEqualTo(Profile.WRITE);
+    assertThat(Profile.fromPersistedOrdinal(3)).isEqualTo(Profile.WRITE);
   }
 
   @Test
@@ -90,5 +104,53 @@ class ConversationTest {
     assertThatNullPointerException().isThrownBy(() -> new ToolUse(new ToolCallId("x"), new ToolName("x"), Map.of(), null));
     assertThatNullPointerException().isThrownBy(() -> new Thread(null, "", List.of()));
     assertThatNullPointerException().isThrownBy(() -> new Thread(new ThreadId("x"), null, List.of()));
+  }
+
+  @Test
+  void persistedConversationMetadataIsImmutableAndCopySafe() {
+    var attachment = new Attachment(
+        Attachment.Kind.PASTE, new byte[] {0, 1}, "a.txt", "text/plain", "paste",
+        3, 4, 2);
+    var message = new Message(
+        new MessageId("m1"), Role.USER, "text", List.of(), List.of(attachment),
+        "thought", "signature", List.of(), Instant.ofEpochSecond(12),
+        Optional.of(new CheckpointId("cp")), Optional.of("error"), true);
+    var compaction = new CompactionRecord(1, "summary", Instant.ofEpochSecond(20));
+    var thread = new Thread(
+        new ThreadId("t"), "title", List.of(message), Instant.ofEpochSecond(1),
+        Instant.ofEpochSecond(2), List.of(compaction));
+
+    assertThat(message.id()).isEqualTo(new MessageId("m1"));
+    assertThat(message.attachments()).containsExactly(attachment).isUnmodifiable();
+    assertThat(message.checkpointId()).contains(new CheckpointId("cp"));
+    assertThat(message.error()).contains("error");
+    assertThat(message.isCompactSummary()).isTrue();
+    byte[] exposed = attachment.body();
+    exposed[0] = 9;
+    assertThat(attachment.body()).containsExactly(0, 1);
+    assertThat(thread.createdAt()).isEqualTo(Instant.ofEpochSecond(1));
+    assertThat(thread.updatedAt()).isEqualTo(Instant.ofEpochSecond(2));
+    assertThat(thread.compactions()).containsExactly(compaction).isUnmodifiable();
+    assertThat(message.withToolCalls(List.of()).id()).isEqualTo(message.id());
+  }
+
+  @Test
+  void persistedMetadataRejectsNegativeCountsAndNullComponents() {
+    assertThatIllegalArgumentException().isThrownBy(() -> new Attachment(
+        Attachment.Kind.PASTE, new byte[0], "", "", "", -1, 0, 0));
+    assertThatIllegalArgumentException().isThrownBy(() -> new Attachment(
+        Attachment.Kind.PASTE, new byte[0], "", "", "", 0, -1, 0));
+    assertThatIllegalArgumentException().isThrownBy(() -> new Attachment(
+        Attachment.Kind.PASTE, new byte[0], "", "", "", 0, 0, -1));
+    assertThatNullPointerException().isThrownBy(() -> new Attachment(
+        null, new byte[0], "", "", "", 0, 0, 0));
+    assertThatNullPointerException().isThrownBy(() -> new Attachment(
+        Attachment.Kind.PASTE, null, "", "", "", 0, 0, 0));
+    assertThatIllegalArgumentException().isThrownBy(() ->
+        new CompactionRecord(-1, "", Instant.EPOCH));
+    assertThatNullPointerException().isThrownBy(() ->
+        new CompactionRecord(0, null, Instant.EPOCH));
+    assertThatNullPointerException().isThrownBy(() ->
+        new CompactionRecord(0, "", null));
   }
 }

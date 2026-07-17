@@ -90,8 +90,7 @@ public final class SalvagedCallDeduplicator {
   private static Result replaceLast(
       List<Message> messages, Message last, List<ToolUse> revisedCalls, int count) {
     var revisedMessages = new ArrayList<>(messages);
-    revisedMessages.set(revisedMessages.size() - 1,
-        new Message(last.role(), last.text(), last.images(), revisedCalls));
+    revisedMessages.set(revisedMessages.size() - 1, last.withToolCalls(revisedCalls));
     return new Result(revisedMessages, count);
   }
 
