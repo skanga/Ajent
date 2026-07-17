@@ -6,7 +6,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.github.skanga.ajent.tools.fs.WorkspaceSandbox;
+import com.github.skanga.ajent.tools.memory.JsonlMemoryStore;
+import com.github.skanga.ajent.tools.memory.MemoryStore;
+import com.github.skanga.ajent.tools.skills.SkillEngine;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 final class KnowledgePipelineTest {
   @Test void corpusSourceStampsProvenanceAndSingleSourceRouterShortCircuits() {
@@ -119,6 +126,37 @@ final class KnowledgePipelineTest {
     assertThat(RagFilters.anyOf(java.util.Arrays.asList(RagFilters.metadataEquals("type", "tutorial"),
         RagFilters.metadataContains("category", "management"), null)))
         .rejects(api).accepts(tutorial, users);
+  }
+
+  @Test void skillsAndBothMemoryScopesAreLazyKnowledgeSources(@TempDir Path root) throws Exception {
+    Path home = Files.createDirectories(root.resolve("home"));
+    Path work = Files.createDirectories(root.resolve("work"));
+    Path skillFile = work.resolve(".agentty/skills/pdf/SKILL.md");
+    Files.createDirectories(skillFile.getParent());
+    Files.writeString(skillFile, "---\nname: pdf\ndescription: Extract tabular PDF data\n---\n"
+        + "Use pdfplumber for tables and OCR fallback.\n");
+    var engine = new SkillEngine(home, work, new WorkspaceSandbox(work, work, home));
+    var skills = new SkillsKnowledgeSource(engine);
+    assertThat(skills.retrieve("pdf tables", 3)).first().satisfies(hit -> {
+      assertThat(hit.source()).isSameAs(skills);
+      assertThat(hit.chunk().path()).isEqualTo("skill://pdf/SKILL.md");
+    });
+
+    var store = new JsonlMemoryStore(home, work);
+    store.append(new MemoryStore.AppendRequest("production database uses serializable isolation",
+        "user", false, List.of("postgres"), ""));
+    store.append(new MemoryStore.AppendRequest("project deploys through blue green releases",
+        "project", false, List.of("delivery"), ""));
+    var memories = new MemoryKnowledgeSource(store);
+    assertThat(memories.retrieve("serializable postgres", 3).getFirst()).satisfies(hit -> {
+      assertThat(hit.source()).isSameAs(memories);
+      assertThat(hit.chunk().path()).startsWith("memory://user/");
+    });
+    assertThat(memories.retrieve("blue green delivery", 3).getFirst().chunk().path())
+        .startsWith("memory://project/");
+    store.append(new MemoryStore.AppendRequest("unique canary rollout fact", "project", false,
+        List.of(), ""));
+    assertThat(memories.retrieve("unique canary", 3)).isNotEmpty();
   }
 
   private static RagCorpus corpus() {
