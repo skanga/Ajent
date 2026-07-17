@@ -14,6 +14,7 @@ public record AgentState(
     long turnCounter,
     int tokensIn,
     int tokensOut,
+    long lastTickNanos,
     String status,
     Optional<ToolDraft> toolDraft,
     List<RuntimeMessage.Submit> queued,
@@ -60,7 +61,7 @@ public record AgentState(
   }
 
   public static AgentState initial(Thread thread) {
-    return new AgentState(thread, new SessionPhase.Idle(), 0, 0, 0, 0, "",
+    return new AgentState(thread, new SessionPhase.Idle(), 0, 0, 0, 0, 0, "",
         Optional.empty(), List.of(), Compaction.initial(), Set.of(), Set.of());
   }
 }

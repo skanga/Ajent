@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 
 /** Structured virtual-thread interpreter for {@link AgentReducer}'s effects. */
 public final class AgentLoop implements AutoCloseable {
+  private static final long HEADLESS_TICK_MILLIS = 100;
   private final Object lock = new Object();
   private final AgentReducer reducer;
   private final ProviderPort provider;
@@ -42,6 +43,8 @@ public final class AgentLoop implements AutoCloseable {
     this.tasks = Objects.requireNonNull(tasks, "tasks");
     scheduler = Executors.newSingleThreadScheduledExecutor(
         java.lang.Thread.ofVirtual().name("ajent-retry-", 0).factory());
+    scheduler.scheduleWithFixedDelay(this::dispatchTickIfActive, HEADLESS_TICK_MILLIS,
+        HEADLESS_TICK_MILLIS, TimeUnit.MILLISECONDS);
   }
 
   public AgentState dispatch(RuntimeMessage message) {
@@ -106,6 +109,14 @@ public final class AgentLoop implements AutoCloseable {
       if (closed) return;
     }
     dispatch(message);
+  }
+
+  private void dispatchTickIfActive() {
+    synchronized (lock) {
+      if (closed || state.phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle)
+        return;
+    }
+    dispatchIfOpen(new RuntimeMessage.Tick());
   }
 
   @Override public void close() {

@@ -113,6 +113,30 @@ final class AgentLoopTest {
     assertThat(providerCalls).hasValue(2);
   }
 
+  @Test void suppliesPeriodicTicksWhileATurnIsActive() throws Exception {
+    var ticked = new CountDownLatch(1);
+    var finish = new CountDownLatch(1);
+    ProviderPort provider = (turn, messages, cancellation, sink) -> {
+      try {
+        finish.await(5, TimeUnit.SECONDS);
+      } catch (InterruptedException exception) {
+        java.lang.Thread.currentThread().interrupt();
+      }
+      sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+    };
+    try (var loop = new AgentLoop(AgentState.initial(thread()), reducer(PermissionVerdict.ALLOW),
+        provider, call -> new ToolCompletion.Success("unused"),
+        call -> new PermissionPort.Decision(true, false), thread -> {},
+        state -> {
+          if (!(state.phase() instanceof SessionPhase.Idle) && state.lastTickNanos() != 0)
+            ticked.countDown();
+        })) {
+      loop.dispatch(new RuntimeMessage.Submit("wait", List.of()));
+      assertThat(ticked.await(2, TimeUnit.SECONDS)).isTrue();
+      finish.countDown();
+    }
+  }
+
   private static AgentReducer reducer(PermissionVerdict verdict) {
     var ids = new AtomicInteger();
     return new AgentReducer(new AgentReducer.Context(System::nanoTime,

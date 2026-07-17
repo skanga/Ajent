@@ -28,5 +28,6 @@ public sealed interface RuntimeMessage {
   }
   record RetryStream(long turnId) implements RuntimeMessage {}
   record CompactContext() implements RuntimeMessage {}
+  record Tick() implements RuntimeMessage {}
   record Cancel() implements RuntimeMessage {}
 }

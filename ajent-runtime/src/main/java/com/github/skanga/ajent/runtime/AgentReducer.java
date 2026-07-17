@@ -39,6 +39,8 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class AgentReducer {
   private static final int MAX_STREAMING_BYTES = 8 * 1024 * 1024;
   private static final int MAX_TRUNCATION_RETRIES = 2;
+  private static final Duration TICK_REBASE_THRESHOLD = Duration.ofSeconds(2);
+  private static final Duration STREAM_STALL = Duration.ofSeconds(120);
   private static final String MAX_TOKENS_TOOL_ERROR =
       "Output token cap (max_tokens) was reached before the tool input finished streaming, "
           + "so the call was cut off. Even if the args parsed, the body is likely truncated. "
@@ -99,8 +101,35 @@ public final class AgentReducer {
       case RuntimeMessage.PermissionResolved resolved -> permissionResolved(state, resolved);
       case RuntimeMessage.RetryStream retry -> retryStream(state, retry);
       case RuntimeMessage.CompactContext ignored -> compactContext(state);
+      case RuntimeMessage.Tick ignored -> tick(state);
       case RuntimeMessage.Cancel ignored -> cancel(state);
     };
+  }
+
+  private Step tick(AgentState state) {
+    long now = context.nanoClock().getAsLong();
+    long previous = state.lastTickNanos() == 0 ? now : state.lastTickNanos();
+    long gap = Math.max(0, now - previous);
+    AgentState revised = withLastTick(state, now);
+    if (revised.phase().active().isEmpty()) return done(revised);
+
+    ActiveTurn active = revised.phase().active().orElseThrow();
+    if (gap >= TICK_REBASE_THRESHOLD.toNanos() && active.lastEventNanos() != 0) {
+      active = active.withLastEventNanos(active.lastEventNanos() + gap);
+      revised = withActive(revised, active);
+    }
+    if (!(revised.phase() instanceof SessionPhase.Streaming)
+        || !(active.retryState() instanceof RetryState.Fresh)
+        || active.lastEventNanos() == 0
+        || now - active.lastEventNanos() < STREAM_STALL.toNanos()) return done(revised);
+
+    long silentSeconds = Duration.ofNanos(now - active.lastEventNanos()).toSeconds();
+    active.cancellation().cancel();
+    revised = withActive(revised, active.withRetryState(new RetryState.StallFired()));
+    var error = new StreamEvent.Error("stream stalled — no events for " + silentSeconds + "s",
+        Optional.empty(), ErrorClass.TRANSIENT, true);
+    return new Step(revised, List.of(new RuntimeEffect.Schedule(Duration.ZERO,
+        new RuntimeMessage.ProviderEvent(revised.activeTurnId(), error))));
   }
 
   private Step submit(AgentState state, RuntimeMessage.Submit submit) {
@@ -357,20 +386,23 @@ public final class AgentReducer {
     var ids = new java.util.HashSet<>(state.truncatedToolIds());
     ids.add(callId);
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
-        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
+        state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
+        state.toolDraft(), state.queued(),
         state.compaction(), ids, state.sessionGrants());
   }
 
   private AgentState clearTruncationSignals(AgentState state) {
     if (state.truncatedToolIds().isEmpty()) return state;
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
-        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
+        state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
+        state.toolDraft(), state.queued(),
         state.compaction(), Set.of(), state.sessionGrants());
   }
 
   private static AgentState withCompaction(AgentState state, AgentState.Compaction compaction) {
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
-        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
+        state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
+        state.toolDraft(), state.queued(),
         compaction, state.truncatedToolIds(), state.sessionGrants());
   }
 
@@ -867,6 +899,12 @@ public final class AgentReducer {
         state.sessionGrants());
   }
 
+  private static AgentState withLastTick(AgentState state, long lastTickNanos) {
+    return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), lastTickNanos, state.status(), state.toolDraft(),
+        state.queued(), state.compaction(), state.truncatedToolIds(), state.sessionGrants());
+  }
+
   private Message message(Role role, String text, List<ImageContent> images, List<ToolUse> calls,
                           Instant now) {
     return new Message(context.messageIds().get(), role, text, images, List.of(), "", "", calls,
@@ -898,8 +936,9 @@ public final class AgentReducer {
                                  int tokensIn, int tokensOut, String status,
                                  Optional<AgentState.ToolDraft> draft,
                                  List<RuntimeMessage.Submit> queued, Set<String> grants) {
-    return new AgentState(thread, phase, activeTurnId, turnCounter, tokensIn, tokensOut, status,
-        draft, queued, state.compaction(), state.truncatedToolIds(), grants);
+    return new AgentState(thread, phase, activeTurnId, turnCounter, tokensIn, tokensOut,
+        state.lastTickNanos(), status, draft, queued, state.compaction(),
+        state.truncatedToolIds(), grants);
   }
 
   private static Step done(AgentState state) {

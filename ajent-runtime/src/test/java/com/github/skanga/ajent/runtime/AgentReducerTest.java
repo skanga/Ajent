@@ -366,6 +366,62 @@ final class AgentReducerTest {
     assertThat(retry.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
   }
 
+  @Test void tickTripsTheNativeStreamStallWatchdogExactlyOnce() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState state = submit(reducer);
+
+    AgentReducer.Step firstTick = reducer.update(state, new RuntimeMessage.Tick());
+    assertThat(firstTick.state().lastTickNanos()).isEqualTo(1_000L);
+    assertThat(firstTick.effects()).isEmpty();
+
+    state = firstTick.state();
+    for (int second = 1; second < 120; second++) {
+      clock.set(1_000L + Duration.ofSeconds(second).toNanos());
+      AgentReducer.Step healthy = reducer.update(state, new RuntimeMessage.Tick());
+      assertThat(healthy.effects()).isEmpty();
+      state = healthy.state();
+    }
+    clock.set(1_000L + Duration.ofSeconds(120).toNanos());
+    AgentReducer.Step stalled = reducer.update(state, new RuntimeMessage.Tick());
+
+    assertThat(stalled.state().phase().active().orElseThrow().retryState())
+        .isInstanceOf(RetryState.StallFired.class);
+    assertThat(stalled.state().phase().active().orElseThrow().cancellation().isCancelled())
+        .isTrue();
+    assertThat(stalled.effects()).singleElement().isEqualTo(new RuntimeEffect.Schedule(
+        Duration.ZERO, new RuntimeMessage.ProviderEvent(1,
+            new StreamEvent.Error("stream stalled — no events for 120s", Optional.empty(),
+                ErrorClass.TRANSIENT, true))));
+
+    clock.incrementAndGet();
+    assertThat(reducer.update(stalled.state(), new RuntimeMessage.Tick()).effects()).isEmpty();
+  }
+
+  @Test void longTickGapRebasesActivityAndWatchdogOnlyCoversFreshStreaming() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.PROMPT, clock::get);
+    AgentState state = reducer.update(submit(reducer), new RuntimeMessage.Tick()).state();
+
+    clock.set(1_000L + Duration.ofSeconds(121).toNanos());
+    AgentState rebased = reducer.update(state, new RuntimeMessage.Tick()).state();
+    assertThat(rebased.phase().active().orElseThrow().retryState())
+        .isInstanceOf(RetryState.Fresh.class);
+    assertThat(rebased.phase().active().orElseThrow().lastEventNanos())
+        .isEqualTo(1_000L + Duration.ofSeconds(121).toNanos());
+
+    AgentState awaiting = event(reducer, rebased, 1,
+        new StreamEvent.ToolUseStart("permission", "write"));
+    awaiting = event(reducer, awaiting, 1,
+        new StreamEvent.ToolUseDelta("{\"path\":\"x\",\"content\":\"y\"}"));
+    awaiting = event(reducer, awaiting, 1, new StreamEvent.ToolUseEnd());
+    awaiting = event(reducer, awaiting, 1, new StreamEvent.Finished(StopReason.TOOL_USE));
+    assertThat(awaiting.phase()).isInstanceOf(SessionPhase.AwaitingPermission.class);
+    clock.addAndGet(Duration.ofSeconds(120).toNanos());
+    assertThat(reducer.update(awaiting, new RuntimeMessage.Tick()).state().phase())
+        .isInstanceOf(SessionPhase.AwaitingPermission.class);
+  }
+
   @Test void heartbeatAndFirstDeltaResetTransientBudgetButNotMidStreamFailures() {
     var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
     AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
