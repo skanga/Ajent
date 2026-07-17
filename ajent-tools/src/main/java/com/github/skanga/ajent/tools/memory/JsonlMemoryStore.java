@@ -155,6 +155,11 @@ public final class JsonlMemoryStore implements MemoryStore {
     try { return List.copyOf(load(path)); } catch (IOException exception) { return List.of(); }
   }
 
+  public synchronized List<StoredRecord> loadRecent(String scope) {
+    List<StoredRecord> all = loadAll(scope);
+    return all.size() <= 50 ? all : List.copyOf(all.subList(all.size() - 50, all.size()));
+  }
+
   public Path pathFor(String scope) {
     return switch (scope) {
       case "user" -> home == null ? null : home.resolve(".agentty/memory.jsonl");
