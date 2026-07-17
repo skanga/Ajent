@@ -1,6 +1,8 @@
 package com.github.skanga.ajent.provider.stream;
 
 import java.util.Objects;
+import java.time.Duration;
+import java.util.Optional;
 
 public sealed interface StreamEvent {
   record TextDelta(String text) implements StreamEvent {
@@ -25,7 +27,14 @@ public sealed interface StreamEvent {
     public Finished { stopReason = Objects.requireNonNull(stopReason, "stopReason"); }
   }
 
-  record Error(String message) implements StreamEvent {
-    public Error { message = Objects.requireNonNull(message, "message"); }
+  record Error(String message, Optional<Duration> retryAfter) implements StreamEvent {
+    public Error(String message) {
+      this(message, Optional.empty());
+    }
+
+    public Error {
+      message = Objects.requireNonNull(message, "message");
+      retryAfter = Objects.requireNonNull(retryAfter, "retryAfter");
+    }
   }
 }

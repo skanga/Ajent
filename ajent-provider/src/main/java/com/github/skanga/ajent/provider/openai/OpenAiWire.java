@@ -10,11 +10,19 @@ import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.provider.ToolSpecification;
+import com.github.skanga.ajent.provider.ChatRequest;
+import com.github.skanga.ajent.provider.auth.ProviderAuth;
+import com.github.skanga.ajent.provider.ollama.OllamaWire;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.http.HttpRequest;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 
 public final class OpenAiWire {
   private static final ObjectMapper JSON = new ObjectMapper();
+  private static final String USER_AGENT = "ajent/0.1.0-SNAPSHOT";
 
   private OpenAiWire() {}
 
@@ -48,6 +56,66 @@ public final class OpenAiWire {
       }
     }
     return result;
+  }
+
+  public static ObjectNode buildRequestBody(ChatRequest request) {
+    ObjectNode body = JSON.createObjectNode();
+    body.put("model", request.model());
+    body.put("stream", true);
+    ArrayNode messages = JSON.createArrayNode();
+    if (!request.systemPrompt().isEmpty()) {
+      ObjectNode system = messages.addObject();
+      system.put("role", "system");
+      system.put("content", request.systemPrompt());
+    }
+    if (request.endpoint().nativeApi()) {
+      body.putObject("options").put("num_predict", request.maxTokens());
+      messages.addAll(OllamaWire.buildMessages(request.messages(), false));
+    } else {
+      body.put("max_tokens", request.maxTokens());
+      body.putObject("stream_options").put("include_usage", true);
+      messages.addAll(buildMessages(new Thread(
+          new com.github.skanga.ajent.domain.ThreadId(""), "", request.messages())));
+    }
+    body.set("messages", messages);
+    if (!request.tools().isEmpty()) body.set("tools", buildTools(request.tools()));
+    return body;
+  }
+
+  public static HttpRequest buildHttpRequest(ChatRequest request) {
+    try {
+      String body = JSON.writeValueAsString(buildRequestBody(request));
+      HttpRequest.Builder builder = HttpRequest.newBuilder(endpointUri(
+              request.endpoint(), request.endpoint().path()))
+          .header("accept", "application/json")
+          .header("content-type", "application/json")
+          .header("user-agent", USER_AGENT)
+          .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+      addAuthorization(builder, request.auth());
+      return builder.build();
+    } catch (JsonProcessingException exception) {
+      throw new IllegalArgumentException("Unable to serialize OpenAI request", exception);
+    }
+  }
+
+  public static URI endpointUri(Endpoint endpoint, String path) {
+    try {
+      int port = endpoint.useTls() && endpoint.port() == 443 ? -1
+          : !endpoint.useTls() && endpoint.port() == 80 ? -1 : endpoint.port();
+      return new URI(endpoint.useTls() ? "https" : "http", null, endpoint.host(),
+          port, path, null, null);
+    } catch (URISyntaxException exception) {
+      throw new IllegalArgumentException("Invalid provider endpoint", exception);
+    }
+  }
+
+  public static void addAuthorization(HttpRequest.Builder builder, ProviderAuth auth) {
+    String value = switch (auth) {
+      case ProviderAuth.Empty ignored -> "";
+      case ProviderAuth.Bearer bearer -> bearer.token();
+      case ProviderAuth.ApiKey apiKey -> apiKey.value();
+    };
+    if (!value.isEmpty()) builder.header("authorization", "Bearer " + value);
   }
 
   private static ObjectNode primaryMessage(Message message, boolean hasImages, boolean hasTools) {

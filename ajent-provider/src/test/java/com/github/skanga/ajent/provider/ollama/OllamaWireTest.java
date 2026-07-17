@@ -12,7 +12,10 @@ import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class OllamaWireTest {
   private static final ObjectMapper JSON = new ObjectMapper();
@@ -88,11 +91,49 @@ class OllamaWireTest {
   }
 
   @Test
+  void optionEnvironmentOverridesMatchAgenTTYParsingAndPrecedence() {
+    var request = new OllamaRequestOptions(16_384, 32_768, true);
+    assertThat(OllamaWire.buildOptions(request, Map.of(
+        "AGENTTY_OLLAMA_NUM_CTX", "12288trailing",
+        "AGENTTY_OLLAMA_NUM_PREDICT", "3000x",
+        "AGENTTY_OLLAMA_TEMPERATURE", "0.15ignored")))
+        .containsEntry("num_ctx", 12_288)
+        .containsEntry("num_predict", 3_000)
+        .containsEntry("temperature", 0.15);
+    assertThat(OllamaWire.buildOptions(request, Map.of(
+        "AGENTTY_OLLAMA_NUM_CTX", "invalid",
+        "AGENTTY_OLLAMA_TEMPERATURE", "nope")))
+        .containsEntry("num_ctx", 32_768)
+        .containsEntry("temperature", 0.2);
+  }
+
+  @Test
   void slimSystemPromptHasMemoryEnvironmentAndNoHostedClaudeSections() {
     String prompt = OllamaWire.systemPrompt();
-    assertThat(prompt).containsIgnoringCase("ajent").containsIgnoringCase("agentty")
+    assertThat(prompt).containsIgnoringCase("ajent")
         .contains("CONVERSATION MEMORY", "ENVIRONMENT")
         .doesNotContain("<file-editing>", "<learned-memory");
+  }
+
+  @Test
+  void systemPromptMatchesReferenceContentAndLoadsBoundedMemoryTiers(
+      @TempDir Path directory) throws Exception {
+    Path home = Files.createDirectories(directory.resolve("home"));
+    Path project = Files.createDirectories(directory.resolve("project"));
+    Files.writeString(home.resolve("CLAUDE.md"), "user guidance");
+    Files.writeString(project.resolve("CLAUDE.md"), "project guidance");
+    Files.writeString(project.resolve("CLAUDE.local.md"), "local guidance");
+
+    String prompt = OllamaWire.systemPrompt(project, home, "Windows 11");
+
+    assertThat(prompt)
+        .startsWith("You are ajent, a terminal coding assistant.")
+        .contains("ALWAYS use earlier messages", "There is NO `git` or `mv` tool",
+            "call `search_docs` FIRST", "GitHub-flavoured markdown",
+            "- os: Windows", "- shell: cmd.exe", "- cwd: " + project,
+            "<user-memory>\nuser guidance", "<project-memory>\nproject guidance",
+            "<local-memory>\nlocal guidance")
+        .doesNotContain("agentty-compatible", "<learned-memory");
   }
 
   private static Message message(Role role, String text) {

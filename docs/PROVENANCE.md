@@ -13,8 +13,8 @@ Reference-derived work currently includes:
 | XML-in-JSON repair | `include/agentty/runtime/app/update/param_tag_repair.hpp`, `tests/param_tag_repair_test.cpp` |
 | Model display labels | `include/agentty/ui/render/model_label.hpp`, `tests/model_label_test.cpp` |
 | Conversation records and Anthropic message blocks | `include/agentty/domain/conversation.hpp`, `src/llm/anthropic/transport.cpp`, `tests/tool_result_budget_test.cpp` |
-| OpenAI-compatible endpoints, wire messages, streamed events, salvage, and framing | `include/agentty/provider/openai/transport.hpp`, `include/agentty/provider/wire.hpp`, `src/provider/openai/transport.cpp`, `src/provider/selection.cpp`, `tests/openai_transport_test.cpp` |
-| Ollama native/JSON-protocol messages, options, streamed events, response extraction, and argument repair | `include/agentty/provider/ollama/transport.hpp`, `src/provider/ollama/transport.cpp`, `tests/ollama_transport_test.cpp` |
+| OpenAI-compatible endpoints, HTTP request/list-model transport, wire messages, streamed events, salvage, and framing | `include/agentty/provider/openai/transport.hpp`, `include/agentty/provider/wire.hpp`, `src/provider/openai/transport.cpp`, `src/provider/selection.cpp`, `tests/openai_transport_test.cpp` |
+| Ollama native/JSON-protocol HTTP transport, prompt/memory tiers, messages, options, model probing, streamed events, response extraction, and argument repair | `include/agentty/provider/ollama/transport.hpp`, `src/provider/ollama/transport.cpp`, `tests/ollama_transport_test.cpp` |
 | Tool effects and path-aware scheduling | `include/agentty/tool/effects.hpp`, `include/agentty/tool/spec.hpp`, `src/runtime/app/cmd_factory.cpp`, `tests/scheduler_path_test.cpp` |
 | Agent doom-loop breaker | `src/runtime/app/cmd_factory.cpp`, `tests/doom_loop_test.cpp` |
 | Salvaged-call re-leak reducer | `src/runtime/app/cmd_factory.cpp`, `tests/salvage_dedup_test.cpp` |

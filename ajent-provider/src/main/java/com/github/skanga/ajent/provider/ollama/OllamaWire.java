@@ -2,13 +2,21 @@ package com.github.skanga.ajent.provider.ollama;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
+import com.github.skanga.ajent.provider.ChatRequest;
+import com.github.skanga.ajent.provider.ToolSpecification;
+import com.github.skanga.ajent.provider.openai.OpenAiWire;
+import java.net.http.HttpRequest;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.io.IOException;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,12 +74,21 @@ public final class OllamaWire {
   }
 
   public static Map<String, Object> buildOptions(OllamaRequestOptions request) {
-    int context = request.contextWindow() > 0
+    return buildOptions(request, System.getenv());
+  }
+
+  public static Map<String, Object> buildOptions(
+      OllamaRequestOptions request, Map<String, String> environment) {
+    int context = leadingInteger(environment.get("AGENTTY_OLLAMA_NUM_CTX"));
+    if (context <= 0) context = request.contextWindow() > 0
         ? Math.clamp(request.contextWindow(), CONTEXT_FLOOR, CONTEXT_CEILING)
         : CONTEXT_FLOOR;
-    int prediction = request.maxTokens() > 0 ? request.maxTokens() : 4_096;
-    prediction = Math.min(prediction, context / 2);
-    prediction = Math.max(prediction, Math.min(2_048, context));
+    int prediction = leadingInteger(environment.get("AGENTTY_OLLAMA_NUM_PREDICT"));
+    if (prediction <= 0) {
+      prediction = request.maxTokens() > 0 ? request.maxTokens() : 4_096;
+      prediction = Math.min(prediction, context / 2);
+      prediction = Math.max(prediction, Math.min(2_048, context));
+    }
     Map<String, Object> options = new LinkedHashMap<>();
     options.put("num_ctx", context);
     options.put("num_predict", prediction);
@@ -79,27 +96,138 @@ public final class OllamaWire {
       options.put("temperature", 0.2);
       options.put("top_p", 0.9);
     }
+    Double temperature = leadingDouble(environment.get("AGENTTY_OLLAMA_TEMPERATURE"));
+    if (temperature != null) options.put("temperature", temperature);
     return Map.copyOf(options);
   }
 
+  public static ObjectNode buildRequestBody(ChatRequest request) {
+    boolean jsonProtocol = request.jsonProtocol() && !request.tools().isEmpty();
+    ObjectNode body = JSON.createObjectNode();
+    body.put("model", request.model());
+    body.put("stream", true);
+    body.put("keep_alive", "10m");
+    body.set("options", JSON.valueToTree(buildOptions(new OllamaRequestOptions(
+        request.maxTokens(), request.contextWindow(), jsonProtocol))));
+    ArrayNode messages = body.putArray("messages");
+    String systemPrompt = request.systemPrompt();
+    if (jsonProtocol) systemPrompt += jsonProtocolAddendum(request.tools());
+    if (!systemPrompt.isEmpty()) {
+      ObjectNode system = messages.addObject();
+      system.put("role", "system");
+      system.put("content", systemPrompt);
+    }
+    messages.addAll(buildMessages(request.messages(), jsonProtocol));
+    if (!request.tools().isEmpty() && !jsonProtocol) {
+      body.set("tools", OpenAiWire.buildTools(request.tools()));
+    }
+    if (jsonProtocol) body.set("format", jsonProtocolSchema(request.tools()));
+    return body;
+  }
+
+  public static HttpRequest buildHttpRequest(ChatRequest request) {
+    try {
+      String body = JSON.writeValueAsString(buildRequestBody(request));
+      HttpRequest.Builder builder = HttpRequest.newBuilder(
+              OpenAiWire.endpointUri(request.endpoint(), "/api/chat"))
+          .header("accept", "application/json")
+          .header("content-type", "application/json")
+          .header("user-agent", "ajent/0.1.0-SNAPSHOT")
+          .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+      OpenAiWire.addAuthorization(builder, request.auth());
+      return builder.build();
+    } catch (JsonProcessingException exception) {
+      throw new IllegalArgumentException("Unable to serialize Ollama request", exception);
+    }
+  }
+
   public static String systemPrompt() {
-    String operatingSystem = System.getProperty("os.name", "unknown");
-    String shell = operatingSystem.toLowerCase().contains("win") ? "cmd.exe" : "sh";
-    return """
-        You are Ajent, an agentty-compatible terminal coding assistant. You are helpful,
-        direct, and act on requests instead of asking which option to pick. Keep replies concise.
+    return systemPrompt(Path.of("").toAbsolutePath(),
+        Path.of(System.getProperty("user.home", "")), System.getProperty("os.name", "unknown"));
+  }
+
+  public static String systemPrompt(Path workingDirectory, Path home, String operatingSystem) {
+    String lowerOs = operatingSystem.toLowerCase(java.util.Locale.ROOT);
+    String osName = lowerOs.contains("win") ? "Windows"
+        : lowerOs.contains("mac") ? "macOS" : "Linux";
+    String shell = "Windows".equals(osName) ? "cmd.exe" : "sh";
+    String prompt = """
+        You are ajent, a terminal coding assistant. You are helpful, direct, and act on requests instead of asking which option to pick. Keep replies concise.
 
         CONVERSATION MEMORY
-        - The full conversation so far is in the messages above. Use earlier messages for follow-ups.
+        - The full conversation so far is in the messages above. ALWAYS use earlier messages to answer follow-up questions (names, files, decisions the user already gave you).
+        - If the user told you a fact earlier (e.g. their name), recall it from the conversation; never say you don't have it.
 
         TOOLS
-        - Call a tool only when the request needs an action. Never claim an action ran without a result.
+        - Tools let you read/edit files and run commands. Call a tool ONLY when the task needs it. For greetings, chit-chat, or questions you can answer from the conversation, reply in plain text — do NOT call a tool.
+        - When a task DOES need an action (rename/move/delete a file, run a shell command, read or edit code), you MUST actually call the tool. NEVER describe the command in prose or a code block and claim it ran — that does nothing. NEVER say a file was created, renamed, or deleted unless a tool you called returned that result.
+        - To run a shell command (mv, rm, mkdir, git, etc.) call the `bash` tool with a `command` argument. There is NO `git` or `mv` tool — use `bash`. To edit an existing file use `edit`; use `write` only to create a new file.
+        - Emit tool calls through the tool-call channel, NOT as JSON or a ```code block``` in your reply.
+        - Make ONE tool call at a time and wait for its result. Never invent a tool result.
+        - Never call remember/forget/wipe_memory unless the user asks you to remember or forget something.
+        - For questions about the user's OWN docs, manuals, specs, or notes (anything you can't reliably answer from general knowledge), call `search_docs` FIRST to retrieve the relevant passages, then answer from what it returns. Do NOT guess from memory when the answer should come from their documents.
+
+        OUTPUT
+        - Output is rendered as GitHub-flavoured markdown in a terminal. Use fenced code blocks for code. Keep tables small.
 
         ENVIRONMENT
-        - Working directory: %s
-        - Operating system: %s
-        - Shell: %s
-        """.formatted(Path.of("").toAbsolutePath(), operatingSystem, shell);
+        - os: %s
+        - shell: %s
+        - cwd: %s
+        """.formatted(osName, shell, workingDirectory);
+    return prompt + memoryBlocks(home, workingDirectory);
+  }
+
+  private static String memoryBlocks(Path home, Path project) {
+    String user = readBounded(home.resolve("CLAUDE.md"));
+    String workspace = readBounded(project.resolve("CLAUDE.md"));
+    String local = readBounded(project.resolve("CLAUDE.local.md"));
+    if (user.isEmpty() && workspace.isEmpty() && local.isEmpty()) return "";
+    StringBuilder result = new StringBuilder("\n\n<memory>\n"
+        + "Project-specific guidance the user has authored. Treat these as "
+        + "persistent context for THIS workspace and user.\n");
+    appendMemory(result, "user-memory", user);
+    appendMemory(result, "project-memory", workspace);
+    appendMemory(result, "local-memory", local);
+    return result.append("</memory>").toString();
+  }
+
+  private static void appendMemory(StringBuilder target, String tag, String content) {
+    if (!content.isEmpty()) {
+      target.append('<').append(tag).append(">\n").append(content)
+          .append("\n</").append(tag).append(">\n");
+    }
+  }
+
+  private static String readBounded(Path path) {
+    if (!Files.isRegularFile(path)) return "";
+    try {
+      byte[] bytes = Files.readAllBytes(path);
+      return new String(bytes, 0, Math.min(bytes.length, 64 * 1024), StandardCharsets.UTF_8);
+    } catch (IOException ignored) {
+      return "";
+    }
+  }
+
+  private static int leadingInteger(String value) {
+    if (value == null || value.isEmpty() || !Character.isDigit(value.charAt(0))) return 0;
+    long result = 0;
+    for (int index = 0; index < value.length() && Character.isDigit(value.charAt(index)); index++) {
+      result = Math.min(Integer.MAX_VALUE, result * 10 + value.charAt(index) - '0');
+    }
+    return (int) result;
+  }
+
+  private static Double leadingDouble(String value) {
+    if (value == null) return null;
+    var matcher = java.util.regex.Pattern.compile(
+        "^[\\s]*[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?").matcher(value);
+    if (!matcher.find()) return null;
+    try {
+      return Double.parseDouble(matcher.group());
+    } catch (NumberFormatException ignored) {
+      return null;
+    }
   }
 
   private static void addJsonProtocolHistory(
@@ -124,6 +252,63 @@ public final class OllamaWire {
       toolResult.put("role", "user");
       toolResult.put("content", "TOOL RESULT (" + tool.name().value() + "):\n" + toolOutput(tool));
     }
+  }
+
+  private static String jsonProtocolAddendum(List<ToolSpecification> tools) {
+    StringBuilder result = new StringBuilder("""
+
+
+        ## How to act (IMPORTANT — read carefully)
+        You do NOT have a function-calling API. To use a tool you MUST reply with ONE single JSON object and NOTHING else — no prose before or after it, no markdown fences. The JSON object has exactly these fields:
+          - "thoughts": array of short strings, your reasoning
+          - "tool_name": the EXACT name of one tool from the list below
+          - "tool_args": an object of arguments for that tool
+
+        Example (run a shell command):
+        {"thoughts":["I need to list files"],"tool_name":"bash","tool_args":{"command":"ls -la"}}
+
+        Rules:
+        - Output the JSON object ALONE, valid JSON, double quotes.
+        - Use ONE tool per reply, then wait for its result in the next message before the next step.
+        - The tool's result comes back as a user message beginning `TOOL RESULT (toolname):` — read it, then emit your NEXT JSON object (another tool call, or a "response" object when the task is done).
+        - `tool_name` must be one of the listed names, never an action verb like read/write/run.
+        - Tools act on LOCAL files and commands only. `read` opens a local file by path — it does NOT fetch a URL. To get a web page use `web_fetch` with a `url`; to search the web use `web_search`. Never pass an http(s):// address to `read`.
+        - If a tool result is an ERROR, do NOT re-issue the same call — it will fail again. Fix the arguments (a path that doesn't exist, or the wrong tool), or answer the user with what you already have.
+        - If you do NOT need a tool (a greeting, or a question you can answer from the conversation), set "tool_name" to "response" and put your reply text in "tool_args": {"text": "..."}.
+
+        ## Available tools
+        """);
+    for (ToolSpecification tool : tools) {
+      result.append("- ").append(tool.name());
+      if (!tool.description().isEmpty()) {
+        String description = tool.description().lines().findFirst().orElse("");
+        result.append(": ").append(description, 0, Math.min(160, description.length()));
+      }
+      JsonNode properties = tool.inputSchema().path("properties");
+      if (properties.isObject() && !properties.isEmpty()) {
+        var names = new java.util.ArrayList<String>();
+        properties.fieldNames().forEachRemaining(names::add);
+        result.append("  (args: ").append(String.join(", ", names)).append(')');
+      }
+      result.append('\n');
+    }
+    return result.toString();
+  }
+
+  private static ObjectNode jsonProtocolSchema(List<ToolSpecification> tools) {
+    ObjectNode schema = JSON.createObjectNode();
+    schema.put("type", "object");
+    ObjectNode properties = schema.putObject("properties");
+    properties.putObject("thoughts").put("type", "array")
+        .putObject("items").put("type", "string");
+    ObjectNode toolName = properties.putObject("tool_name");
+    toolName.put("type", "string");
+    ArrayNode names = toolName.putArray("enum");
+    tools.forEach(tool -> names.add(tool.name()));
+    names.add("response");
+    properties.putObject("tool_args").put("type", "object");
+    schema.putArray("required").add("tool_name").add("tool_args");
+    return schema;
   }
 
   private static String toolOutput(ToolUse tool) {
