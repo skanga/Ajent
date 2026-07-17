@@ -6,9 +6,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Message;
+import com.github.skanga.ajent.domain.MessageId;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
+import com.github.skanga.ajent.domain.ToolCallId;
+import com.github.skanga.ajent.domain.ToolName;
+import com.github.skanga.ajent.domain.ToolStatus;
+import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
 import java.nio.file.Path;
 import java.util.List;
@@ -216,6 +221,132 @@ final class AcpJsonRpcServerTest {
         .path("error").path("message").textValue()).isEqualTo("IllegalStateException");
   }
 
+  @Test void loadReplaysOnlyTheNewestMessagesAndBoundedFinalToolCards(@TempDir Path directory)
+      throws Exception {
+    var messages = new java.util.ArrayList<Message>();
+    for (int index = 0; index < 205; index++) {
+      messages.add(message("u" + index, Role.USER, "message-" + index, List.of()));
+    }
+    var tool = new ToolUse(new ToolCallId("tool-1"), new ToolName("write"),
+        java.util.Map.of("path", "C:/workspace/file.txt", "line", 12),
+        new ToolStatus.Failed("permission denied"));
+    messages.add(message("assistant", Role.ASSISTANT, "I tried.", List.of(tool)));
+    assertThat(new ThreadStore(directory).save(
+        new Thread(new ThreadId("history"), "History", messages))).isTrue();
+    var server = new AcpJsonRpcServer(directory, () -> new ThreadId("unused"), Profile.ASK,
+        "model", () -> true, () -> {}, "test");
+
+    List<JsonNode> frames = call(server, 1, "session/load", """
+        {"sessionId":"history","cwd":"C:/workspace"}
+        """);
+
+    assertThat(frames).hasSize(203);
+    assertThat(frames.getFirst().path("method").textValue()).isEqualTo("session/update");
+    JsonNode firstUpdate = frames.getFirst().path("params").path("update");
+    assertThat(firstUpdate.path("sessionUpdate").textValue()).isEqualTo("user_message_chunk");
+    assertThat(firstUpdate.path("messageId").textValue()).isEqualTo("u6");
+    assertThat(firstUpdate.path("content").path("type").textValue()).isEqualTo("text");
+    assertThat(firstUpdate.path("content").path("text").textValue()).isEqualTo("message-6");
+    assertThat(frames).noneMatch(frame -> "u5".equals(
+        frame.path("params").path("update").path("messageId").textValue()));
+
+    JsonNode assistant = frames.get(frames.size() - 4).path("params").path("update");
+    assertThat(assistant.path("sessionUpdate").textValue()).isEqualTo("agent_message_chunk");
+    assertThat(assistant.path("messageId").textValue()).isEqualTo("assistant");
+    assertThat(assistant.path("content").path("text").textValue()).isEqualTo("I tried.");
+    JsonNode announcement = frames.get(frames.size() - 3).path("params").path("update");
+    assertThat(announcement.path("sessionUpdate").textValue()).isEqualTo("tool_call");
+    assertThat(announcement.path("toolCallId").textValue()).isEqualTo("tool-1");
+    assertThat(announcement.path("title").textValue()).isEqualTo("write C:/workspace/file.txt");
+    assertThat(announcement.path("kind").textValue()).isEqualTo("edit");
+    assertThat(announcement.path("status").textValue()).isEqualTo("pending");
+    assertThat(announcement.path("content")).isEmpty();
+    assertThat(announcement.path("locations")).singleElement().satisfies(location -> {
+      assertThat(location.path("path").textValue()).isEqualTo("C:/workspace/file.txt");
+      assertThat(location.path("line").intValue()).isEqualTo(12);
+    });
+    assertThat(announcement.path("rawInput").path("path").textValue())
+        .isEqualTo("C:/workspace/file.txt");
+    JsonNode completion = frames.get(frames.size() - 2).path("params").path("update");
+    assertThat(completion.path("sessionUpdate").textValue()).isEqualTo("tool_call_update");
+    assertThat(completion.path("toolCallId").textValue()).isEqualTo("tool-1");
+    assertThat(completion.path("status").textValue()).isEqualTo("failed");
+    assertThat(completion.path("content").get(0).path("type").textValue()).isEqualTo("content");
+    assertThat(completion.path("content").get(0).path("content").path("text").textValue())
+        .isEqualTo("permission denied");
+    assertThat(completion.path("rawOutput").path("text").textValue())
+        .isEqualTo("permission denied");
+    assertThat(frames.getLast().path("result")).isEmpty();
+  }
+
+  @Test void loadReplaysAtMostOneHundredToolsPerAssistantMessage(@TempDir Path directory)
+      throws Exception {
+    var tools = new java.util.ArrayList<ToolUse>();
+    for (int index = 0; index < 101; index++) {
+      tools.add(new ToolUse(new ToolCallId("tool-" + index), new ToolName("bash"),
+          java.util.Map.of("command", "command-" + index), new ToolStatus.Done("ok")));
+    }
+    assertThat(new ThreadStore(directory).save(new Thread(new ThreadId("many-tools"),
+        "Many tools", List.of(message("assistant", Role.ASSISTANT, "", tools))))).isTrue();
+    var server = new AcpJsonRpcServer(directory, () -> new ThreadId("unused"), Profile.ASK,
+        "model", () -> true, () -> {}, "test");
+
+    List<JsonNode> frames = call(server, 1, "session/load", """
+        {"sessionId":"many-tools","cwd":"C:/workspace"}
+        """);
+
+    assertThat(frames).hasSize(201);
+    assertThat(frames.subList(0, 200)).extracting(frame ->
+        frame.path("params").path("update").path("toolCallId").textValue())
+        .contains("tool-0", "tool-99")
+        .doesNotContain("tool-100");
+    assertThat(frames.getLast().path("result")).isEmpty();
+  }
+
+  @Test void loadReplaysNativeToolKindsTitlesLocationsAndEmptyResults(@TempDir Path directory)
+      throws Exception {
+    String[] names = {"read", "edit", "grep", "glob", "list_dir", "git_status",
+        "git_diff", "git_log", "skill", "diagnostics", "git_commit", "find_definition",
+        "search_docs", "repo_map", "web_fetch", "web_search", "todo", "task", "custom"};
+    var tools = new java.util.ArrayList<ToolUse>();
+    for (int index = 0; index < names.length; index++) {
+      java.util.Map<String, Object> arguments = switch (names[index]) {
+        case "read", "list_dir", "git_diff", "diagnostics" ->
+            java.util.Map.of("path", "path-" + index);
+        case "grep" -> java.util.Map.of("pattern", "needle");
+        default -> java.util.Map.of();
+      };
+      ToolStatus status = index == names.length - 1
+          ? new ToolStatus.Rejected() : new ToolStatus.Done("");
+      tools.add(new ToolUse(new ToolCallId("tool-" + index), new ToolName(names[index]),
+          arguments, status));
+    }
+    assertThat(new ThreadStore(directory).save(new Thread(new ThreadId("tool-shapes"),
+        "Tool shapes", List.of(message("assistant", Role.ASSISTANT, "", tools))))).isTrue();
+    var server = new AcpJsonRpcServer(directory, () -> new ThreadId("unused"), Profile.ASK,
+        "model", () -> true, () -> {}, "test");
+
+    List<JsonNode> frames = call(server, 1, "session/load", """
+        {"sessionId":"tool-shapes","cwd":"C:/workspace"}
+        """);
+    List<JsonNode> announcements = frames.stream()
+        .map(frame -> frame.path("params").path("update"))
+        .filter(update -> "tool_call".equals(update.path("sessionUpdate").textValue()))
+        .toList();
+
+    assertThat(announcements).extracting(update -> update.path("kind").textValue())
+        .contains("read", "edit", "search", "execute", "fetch", "think", "other");
+    assertThat(announcements).extracting(update -> update.path("title").textValue())
+        .contains("read path-0", "edit", "grep needle", "glob");
+    assertThat(announcements.stream().filter(update ->
+        "tool-4".equals(update.path("toolCallId").textValue())).findFirst().orElseThrow()
+        .path("locations").get(0).path("path").textValue()).isEqualTo("path-4");
+    JsonNode rejected = frames.get(frames.size() - 2).path("params").path("update");
+    assertThat(rejected.path("status").textValue()).isEqualTo("failed");
+    assertThat(rejected.has("content")).isFalse();
+    assertThat(rejected.has("rawOutput")).isFalse();
+  }
+
   private static JsonNode result(
       AcpJsonRpcServer server, int id, String method, String parameters) throws Exception {
     JsonNode response = call(server, id, method, parameters).getLast();
@@ -249,5 +380,12 @@ final class AcpJsonRpcServerTest {
     assertThat(modes.path("currentModeId").textValue()).isEqualTo(current);
     assertThat(modes.path("availableModes")).extracting(mode -> mode.path("id").textValue())
         .containsExactly("ask", "write", "minimal");
+  }
+
+  private static Message message(
+      String id, Role role, String text, List<ToolUse> toolCalls) {
+    return new Message(new MessageId(id), role, text, List.of(), List.of(), "", "",
+        toolCalls, java.time.Instant.EPOCH, java.util.Optional.empty(),
+        java.util.Optional.empty(), false, false);
   }
 }

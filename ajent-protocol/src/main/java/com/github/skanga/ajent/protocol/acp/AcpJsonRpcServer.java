@@ -7,9 +7,13 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
+import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Profile;
+import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
+import com.github.skanga.ajent.domain.ToolStatus;
+import com.github.skanga.ajent.domain.ToolUse;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -122,8 +126,8 @@ public final class AcpJsonRpcServer {
       case "authenticate" -> authenticate();
       case "logout" -> logout();
       case "session/new" -> newSession(parameters);
-      case "session/load" -> loadSession(parameters);
-      case "session/resume" -> resumeSession(parameters);
+      case "session/load" -> loadSession(parameters, frames);
+      case "session/resume" -> resumeSession(parameters, frames);
       case "session/list" -> listSessions(parameters);
       case "session/close" -> closeSession(parameters);
       case "session/delete" -> deleteSession(parameters);
@@ -188,13 +192,14 @@ public final class AcpJsonRpcServer {
     return result;
   }
 
-  private JsonNode loadSession(JsonNode parameters) {
+  private JsonNode loadSession(JsonNode parameters, List<ObjectNode> frames) {
     String id = requiredText(parameters, "sessionId");
     String cwd = requiredText(parameters, "cwd");
     if (id.isEmpty()) throw new IllegalStateException("session/load: missing sessionId");
     Session live = sessions.get(id);
     if (live != null) {
       if (!cwd.isEmpty()) live.cwd = cwd;
+      replay(id, live.thread, frames);
       return JSON.createObjectNode();
     }
     ThreadLoadResult loaded = threads.load(threadsDirectory.resolve(id + ".json"));
@@ -202,15 +207,143 @@ public final class AcpJsonRpcServer {
       throw new IllegalStateException("session/load: no such session: " + id);
     }
     sessions.put(id, new Session(id, cwd, initialProfile, initialModel, success.thread()));
+    replay(id, success.thread(), frames);
     return JSON.createObjectNode();
   }
 
-  private JsonNode resumeSession(JsonNode parameters) {
-    loadSession(parameters);
+  private JsonNode resumeSession(JsonNode parameters, List<ObjectNode> frames) {
+    loadSession(parameters, frames);
     Session session = requireSession(requiredText(parameters, "sessionId"), "session/resume");
     ObjectNode result = JSON.createObjectNode();
     result.set("modes", modes(session.profile));
     return result;
+  }
+
+  private static void replay(String sessionId, Thread thread, List<ObjectNode> frames) {
+    int start = Math.max(0, thread.messages().size() - 200);
+    for (int index = start; index < thread.messages().size(); index++) {
+      Message message = thread.messages().get(index);
+      if (message.role() == Role.USER) {
+        if (!message.text().isEmpty()) {
+          frames.add(messageChunk(sessionId, message, "user_message_chunk"));
+        }
+      } else if (message.role() == Role.ASSISTANT) {
+        if (!message.text().isEmpty()) {
+          frames.add(messageChunk(sessionId, message, "agent_message_chunk"));
+        }
+        int maximum = Math.min(100, message.toolCalls().size());
+        for (int toolIndex = 0; toolIndex < maximum; toolIndex++) {
+          ToolUse tool = message.toolCalls().get(toolIndex);
+          frames.add(updateNotification(sessionId, toolAnnouncement(tool)));
+          frames.add(updateNotification(sessionId, toolCompletion(tool)));
+        }
+      }
+    }
+  }
+
+  private static ObjectNode messageChunk(String sessionId, Message message, String kind) {
+    ObjectNode update = JSON.createObjectNode();
+    update.put("sessionUpdate", kind);
+    ObjectNode content = update.putObject("content");
+    content.put("type", "text");
+    content.put("text", message.text());
+    update.put("messageId", message.id().value());
+    return updateNotification(sessionId, update);
+  }
+
+  private static ObjectNode toolAnnouncement(ToolUse tool) {
+    ObjectNode update = JSON.createObjectNode();
+    update.put("sessionUpdate", "tool_call");
+    update.put("toolCallId", tool.id().value());
+    update.put("title", toolTitle(tool));
+    update.put("kind", toolKind(tool.name().value()));
+    update.put("status", "pending");
+    update.putArray("content");
+    update.set("locations", toolLocations(tool));
+    update.set("rawInput", JSON.valueToTree(tool.arguments()));
+    return update;
+  }
+
+  private static ObjectNode toolCompletion(ToolUse tool) {
+    ObjectNode update = JSON.createObjectNode();
+    update.put("sessionUpdate", "tool_call_update");
+    update.put("toolCallId", tool.id().value());
+    boolean failed = tool.status() instanceof ToolStatus.Failed
+        || tool.status() instanceof ToolStatus.Rejected;
+    update.put("status", failed ? "failed" : "completed");
+    String output = tool.status().output();
+    if (!output.isEmpty()) {
+      ArrayNode content = update.putArray("content");
+      ObjectNode item = content.addObject();
+      item.put("type", "content");
+      ObjectNode text = item.putObject("content");
+      text.put("type", "text");
+      text.put("text", output);
+      update.putObject("rawOutput").put("text", output);
+    }
+    return update;
+  }
+
+  private static ObjectNode updateNotification(String sessionId, ObjectNode update) {
+    ObjectNode notification = JSON.createObjectNode();
+    notification.put("jsonrpc", "2.0");
+    notification.put("method", "session/update");
+    ObjectNode parameters = notification.putObject("params");
+    parameters.put("sessionId", sessionId);
+    parameters.set("update", update);
+    return notification;
+  }
+
+  private static String toolTitle(ToolUse tool) {
+    String name = tool.name().value();
+    if ("read".equals(name) || "edit".equals(name) || "write".equals(name)) {
+      String path = stringArgument(tool, "path");
+      if (!path.isEmpty()) return name + " " + path;
+    }
+    if ("bash".equals(name)) {
+      String command = stringArgument(tool, "command");
+      if (!command.isEmpty()) return "bash: " + command.substring(0, Math.min(80, command.length()));
+    }
+    if ("grep".equals(name) || "glob".equals(name)) {
+      String pattern = stringArgument(tool, "pattern");
+      if (!pattern.isEmpty()) return name + " " + pattern;
+    }
+    return name;
+  }
+
+  private static ArrayNode toolLocations(ToolUse tool) {
+    ArrayNode locations = JSON.createArrayNode();
+    String name = tool.name().value();
+    if (!("read".equals(name) || "edit".equals(name) || "write".equals(name)
+        || "list_dir".equals(name) || "git_diff".equals(name)
+        || "diagnostics".equals(name))) return locations;
+    String path = stringArgument(tool, "path");
+    if (path.isEmpty()) return locations;
+    ObjectNode location = locations.addObject();
+    location.put("path", path);
+    Object line = tool.arguments().get("line");
+    if (line instanceof Byte || line instanceof Short || line instanceof Integer
+        || line instanceof Long || line instanceof java.math.BigInteger) {
+      location.put("line", ((Number) line).longValue());
+    }
+    return locations;
+  }
+
+  private static String stringArgument(ToolUse tool, String name) {
+    Object value = tool.arguments().get(name);
+    return value instanceof String text ? text : "";
+  }
+
+  private static String toolKind(String name) {
+    return switch (name) {
+      case "read", "list_dir", "git_status", "git_diff", "git_log", "skill" -> "read";
+      case "edit", "write" -> "edit";
+      case "bash", "diagnostics", "git_commit" -> "execute";
+      case "grep", "glob", "find_definition", "search_docs", "repo_map" -> "search";
+      case "web_fetch", "web_search" -> "fetch";
+      case "todo", "task" -> "think";
+      default -> "other";
+    };
   }
 
   private JsonNode listSessions(JsonNode parameters) {
@@ -254,13 +387,7 @@ public final class AcpJsonRpcServer {
     ObjectNode update = JSON.createObjectNode();
     update.put("sessionUpdate", "current_mode_update");
     update.put("currentModeId", modeId(session.profile));
-    ObjectNode notification = JSON.createObjectNode();
-    notification.put("jsonrpc", "2.0");
-    notification.put("method", "session/update");
-    ObjectNode payload = notification.putObject("params");
-    payload.put("sessionId", id);
-    payload.set("update", update);
-    frames.add(notification);
+    frames.add(updateNotification(id, update));
     return JSON.createObjectNode();
   }
 
