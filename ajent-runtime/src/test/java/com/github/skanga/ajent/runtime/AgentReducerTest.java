@@ -8,10 +8,14 @@ import com.github.skanga.ajent.domain.SessionPhase;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.domain.ToolStatus;
+import com.github.skanga.ajent.domain.RetryState;
+import com.github.skanga.ajent.provider.ErrorClass;
 import com.github.skanga.ajent.provider.stream.StopReason;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -149,6 +153,101 @@ final class AgentReducerTest {
         .isEqualTo(failed.state());
   }
 
+  @Test void transientFailureSchedulesAgenTTYBackoffAndDedupeThenRetriesSameTurn() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState active = submit(reducer);
+    AgentReducer.Step failed = reducer.update(active, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("connection reset", Optional.empty(), ErrorClass.TRANSIENT, false)));
+
+    assertThat(failed.state().phase().active().orElseThrow().retryState())
+        .isInstanceOf(RetryState.Scheduled.class);
+    assertThat(failed.state().phase().active().orElseThrow().transientRetries()).isEqualTo(1);
+    assertThat(failed.effects()).singleElement().isEqualTo(new RuntimeEffect.Schedule(
+        Duration.ofMillis(500), new RuntimeMessage.RetryStream(1)));
+    assertThat(reducer.update(failed.state(), new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("late cancelled"))).effects()).isEmpty();
+
+    AgentReducer.Step retry = reducer.update(failed.state(), new RuntimeMessage.RetryStream(1));
+    assertThat(retry.state().activeTurnId()).isEqualTo(1);
+    assertThat(retry.state().phase().active().orElseThrow().retryState())
+        .isInstanceOf(RetryState.Fresh.class);
+    assertThat(retry.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
+  }
+
+  @Test void heartbeatAndFirstDeltaResetTransientBudgetButNotMidStreamFailures() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("offline", Optional.empty(), ErrorClass.TRANSIENT, false))).state();
+    state = reducer.update(state, new RuntimeMessage.RetryStream(1)).state();
+    clock.set(2_000L);
+    state = event(reducer, state, 1, new StreamEvent.Heartbeat());
+    assertThat(state.phase().active().orElseThrow().transientRetries()).isZero();
+
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("partial", "write"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{\"path\":"));
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("timeout", Optional.empty(), ErrorClass.TRANSIENT, false))).state();
+    assertThat(state.phase().active().orElseThrow().midStreamFailures()).isEqualTo(1);
+    state = reducer.update(state, new RuntimeMessage.RetryStream(1)).state();
+    state = event(reducer, state, 1, new StreamEvent.Heartbeat());
+    assertThat(state.phase().active().orElseThrow().transientRetries()).isZero();
+    assertThat(state.phase().active().orElseThrow().midStreamFailures()).isEqualTo(1);
+  }
+
+  @Test void retryAfterIsClampedAndCommittedOutputOrTerminalErrorsNeverRetry() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentReducer.Step bounded = reducer.update(submit(reducer),
+        new RuntimeMessage.ProviderEvent(1, new StreamEvent.Error("rate limited",
+            Optional.of(Duration.ofHours(1)), ErrorClass.RATE_LIMIT, false)));
+    assertThat(bounded.effects()).singleElement().isEqualTo(new RuntimeEffect.Schedule(
+        Duration.ofMinutes(10), new RuntimeMessage.RetryStream(1)));
+
+    AgentState committed = event(reducer, submit(reducer), 1, new StreamEvent.TextDelta("visible"));
+    AgentReducer.Step noDuplicate = reducer.update(committed, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("offline", Optional.empty(), ErrorClass.TRANSIENT, false)));
+    assertThat(noDuplicate.state().phase()).isInstanceOf(SessionPhase.Idle.class);
+    assertThat(noDuplicate.effects()).noneMatch(RuntimeEffect.Schedule.class::isInstance);
+
+    AgentReducer.Step terminal = reducer.update(submit(reducer), new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("model not found", Optional.empty(), ErrorClass.TERMINAL, false)));
+    assertThat(terminal.state().phase()).isInstanceOf(SessionPhase.Idle.class);
+  }
+
+  @Test void retryBudgetDecaysAfterNinetySecondsAndCancelInvalidatesScheduledRetry() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("offline", Optional.empty(), ErrorClass.TRANSIENT, false))).state();
+    state = reducer.update(state, new RuntimeMessage.RetryStream(1)).state();
+    clock.set(1_000L + Duration.ofSeconds(91).toNanos());
+    AgentReducer.Step decayed = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("offline", Optional.empty(), ErrorClass.TRANSIENT, false)));
+    assertThat(decayed.state().phase().active().orElseThrow().transientRetries()).isEqualTo(1);
+
+    AgentState cancelled = reducer.update(decayed.state(), new RuntimeMessage.Cancel()).state();
+    AgentReducer.Step lateRetry = reducer.update(cancelled, new RuntimeMessage.RetryStream(1));
+    assertThat(lateRetry.state()).isEqualTo(cancelled);
+    assertThat(lateRetry.effects()).isEmpty();
+  }
+
+  @Test void naturalFinishDrainsQueuedTurnsInFifoOrder() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.Submit("second", List.of())).state();
+    state = reducer.update(state, new RuntimeMessage.Submit("third", List.of())).state();
+    AgentReducer.Step drained = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(drained.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(drained.state().thread().messages()).extracting(message -> message.text())
+        .containsExactly("hello", "", "second", "");
+    assertThat(drained.state().queued()).extracting(RuntimeMessage.Submit::text)
+        .containsExactly("third");
+    assertThat(drained.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
+  }
+
   @Test void policyDenialBecomesAToolErrorWithoutExecuting() {
     AgentReducer reducer = reducer(PermissionVerdict.DENY);
     AgentState state = toolFinished(reducer);
@@ -281,10 +380,20 @@ final class AgentReducerTest {
 
   private static AgentReducer reducer(java.util.function.Function<
       com.github.skanga.ajent.domain.ToolUse, PermissionVerdict> permission) {
+    return reducer(permission, () -> 1_000L);
+  }
+
+  private static AgentReducer reducer(PermissionVerdict verdict, java.util.function.LongSupplier clock) {
+    return reducer(call -> verdict, clock);
+  }
+
+  private static AgentReducer reducer(java.util.function.Function<
+      com.github.skanga.ajent.domain.ToolUse, PermissionVerdict> permission,
+      java.util.function.LongSupplier clock) {
     var ids = new AtomicInteger();
-    return new AgentReducer(new AgentReducer.Context(() -> 1_000L,
+    return new AgentReducer(new AgentReducer.Context(clock,
         () -> Instant.parse("2026-07-17T00:00:00Z"),
-        () -> new MessageId("m-" + ids.incrementAndGet()), permission));
+        () -> new MessageId("m-" + ids.incrementAndGet()), permission, () -> 1.0));
   }
 
   private static Thread thread() {

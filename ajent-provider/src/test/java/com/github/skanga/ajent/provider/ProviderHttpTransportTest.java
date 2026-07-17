@@ -101,6 +101,7 @@ class ProviderHttpTransportTest {
           org.assertj.core.api.InstanceOfAssertFactories.type(StreamEvent.Error.class)).actual();
       assertThat(error.message()).contains("429", "busy");
       assertThat(error.retryAfter()).contains(Duration.ofSeconds(7));
+      assertThat(error.errorClass()).isEqualTo(ErrorClass.RATE_LIMIT);
     });
 
     var authEvents = new ArrayList<StreamEvent>();

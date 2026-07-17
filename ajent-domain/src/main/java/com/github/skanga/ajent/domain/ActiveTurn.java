@@ -67,6 +67,11 @@ public record ActiveTurn(
         lastFailureNanos, bytes, firstNanos, sampleNanos, sampleBytes, retryState);
   }
 
+  public ActiveTurn restartStream(long nowNanos) {
+    return new ActiveTurn(cancellation, nowNanos, nowNanos, truncationRetries, transientRetries,
+        midStreamFailures, lastFailureNanos, 0, 0, 0, 0, new RetryState.Fresh());
+  }
+
   private ActiveTurn copy(long eventNanos, int truncation, int transientCount, int midStream,
                           long failureNanos, long deltaBytes, long deltaStart, long sampleNanos,
                           long sampleBytes, RetryState retry) {

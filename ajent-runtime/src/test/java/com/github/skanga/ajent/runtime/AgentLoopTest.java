@@ -9,6 +9,7 @@ import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.provider.stream.StopReason;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
+import com.github.skanga.ajent.provider.ErrorClass;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -86,6 +87,30 @@ final class AgentLoopTest {
     loop.close();
     assertThatIllegalStateException().isThrownBy(
         () -> loop.dispatch(new RuntimeMessage.Submit("late", List.of())));
+  }
+
+  @Test void interpretsScheduledRetryWithoutBlockingWorkers() throws Exception {
+    var idle = new CountDownLatch(1);
+    var providerCalls = new AtomicInteger();
+    ProviderPort provider = (turn, messages, cancellation, sink) -> {
+      if (providerCalls.incrementAndGet() == 1) {
+        sink.accept(new StreamEvent.Error("connection reset", java.util.Optional.empty(),
+            ErrorClass.TRANSIENT, false));
+      } else {
+        sink.accept(new StreamEvent.TextDelta("recovered"));
+        sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+      }
+    };
+    try (var loop = new AgentLoop(AgentState.initial(thread()), reducer(PermissionVerdict.ALLOW),
+        provider, call -> new ToolCompletion.Success("unused"),
+        call -> new PermissionPort.Decision(true, false), thread -> {},
+        state -> { if (state.phase() instanceof SessionPhase.Idle
+            && state.status().isEmpty()) idle.countDown(); })) {
+      loop.dispatch(new RuntimeMessage.Submit("question", List.of()));
+      assertThat(idle.await(5, TimeUnit.SECONDS)).isTrue();
+      assertThat(loop.state().thread().messages().getLast().text()).isEqualTo("recovered");
+    }
+    assertThat(providerCalls).hasValue(2);
   }
 
   private static AgentReducer reducer(PermissionVerdict verdict) {

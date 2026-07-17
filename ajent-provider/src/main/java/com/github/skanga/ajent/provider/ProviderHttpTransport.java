@@ -73,7 +73,8 @@ public final class ProviderHttpTransport {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
           byte[] errorBody = body.readNBytes(ERROR_BODY_MAX);
           sink.accept(new StreamEvent.Error(
-              httpError(response.statusCode(), errorBody), retryAfter(response)));
+              httpError(response.statusCode(), errorBody), retryAfter(response),
+              ProviderErrorPolicy.classifyHttpStatus(response.statusCode()), false));
           return;
         }
         byte[] buffer = new byte[READ_BUFFER_SIZE];
@@ -91,9 +92,14 @@ public final class ProviderHttpTransport {
       }
     } catch (InterruptedException exception) {
       java.lang.Thread.currentThread().interrupt();
-      sink.accept(new StreamEvent.Error("http: interrupted"));
-    } catch (IOException | RuntimeException exception) {
-      sink.accept(new StreamEvent.Error("http: " + exception.getMessage()));
+      sink.accept(new StreamEvent.Error("http: interrupted", Optional.empty(),
+          ErrorClass.CANCELLED, false));
+    } catch (IOException exception) {
+      sink.accept(new StreamEvent.Error("http: " + exception.getMessage(), Optional.empty(),
+          ErrorClass.TRANSIENT, false));
+    } catch (RuntimeException exception) {
+      sink.accept(new StreamEvent.Error("http: " + exception.getMessage(), Optional.empty(),
+          ErrorClass.TERMINAL, false));
     }
   }
 

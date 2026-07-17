@@ -26,5 +26,6 @@ public sealed interface RuntimeMessage {
       implements RuntimeMessage {
     public PermissionResolved { callId = Objects.requireNonNull(callId, "callId"); }
   }
+  record RetryStream(long turnId) implements RuntimeMessage {}
   record Cancel() implements RuntimeMessage {}
 }

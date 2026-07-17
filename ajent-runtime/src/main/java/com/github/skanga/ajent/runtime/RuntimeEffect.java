@@ -5,6 +5,7 @@ import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ToolUse;
 import java.util.List;
+import java.time.Duration;
 
 public sealed interface RuntimeEffect {
   record Persist(Thread thread) implements RuntimeEffect {}
@@ -14,4 +15,5 @@ public sealed interface RuntimeEffect {
   }
   record ExecuteTool(long turnId, ToolUse call) implements RuntimeEffect {}
   record RequestPermission(long turnId, ToolUse call) implements RuntimeEffect {}
+  record Schedule(Duration delay, RuntimeMessage message) implements RuntimeEffect {}
 }

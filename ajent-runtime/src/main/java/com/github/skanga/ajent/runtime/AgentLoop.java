@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /** Structured virtual-thread interpreter for {@link AgentReducer}'s effects. */
@@ -16,6 +18,7 @@ public final class AgentLoop implements AutoCloseable {
   private final PersistencePort persistence;
   private final Consumer<AgentState> observer;
   private final ExecutorService tasks;
+  private final ScheduledExecutorService scheduler;
   private AgentState state;
   private boolean closed;
 
@@ -37,6 +40,8 @@ public final class AgentLoop implements AutoCloseable {
     this.persistence = Objects.requireNonNull(persistence, "persistence");
     this.observer = Objects.requireNonNull(observer, "observer");
     this.tasks = Objects.requireNonNull(tasks, "tasks");
+    scheduler = Executors.newSingleThreadScheduledExecutor(
+        java.lang.Thread.ofVirtual().name("ajent-retry-", 0).factory());
   }
 
   public AgentState dispatch(RuntimeMessage message) {
@@ -90,6 +95,9 @@ public final class AgentLoop implements AutoCloseable {
         dispatchIfOpen(new RuntimeMessage.PermissionResolved(request.call().id().value(),
             decision.approved(), decision.always()));
       });
+      case RuntimeEffect.Schedule schedule -> scheduler.schedule(
+          () -> dispatchIfOpen(schedule.message()), schedule.delay().toNanos(),
+          TimeUnit.NANOSECONDS);
     }
   }
 
@@ -106,6 +114,7 @@ public final class AgentLoop implements AutoCloseable {
       closed = true;
       state.phase().active().ifPresent(active -> active.cancellation().cancel());
     }
+    scheduler.shutdownNow();
     tasks.close();
   }
 }

@@ -13,10 +13,14 @@ import com.github.skanga.ajent.domain.ToolCallId;
 import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
+import com.github.skanga.ajent.domain.RetryState;
 import com.github.skanga.ajent.core.scheduling.ToolScheduler;
+import com.github.skanga.ajent.provider.ErrorClass;
+import com.github.skanga.ajent.provider.ProviderErrorPolicy;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +29,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** Pure headless agent reducer: {@code (state, message) -> (state, effects)}. */
 public final class AgentReducer {
@@ -35,12 +41,21 @@ public final class AgentReducer {
 
   public record Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                         Supplier<MessageId> messageIds,
-                        Function<ToolUse, PermissionVerdict> permissions) {
+                        Function<ToolUse, PermissionVerdict> permissions,
+                        DoubleSupplier retryJitter) {
+    public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
+                   Supplier<MessageId> messageIds,
+                   Function<ToolUse, PermissionVerdict> permissions) {
+      this(nanoClock, wallClock, messageIds, permissions,
+          () -> ThreadLocalRandom.current().nextDouble(0.80, 1.20));
+    }
+
     public Context {
       Objects.requireNonNull(nanoClock, "nanoClock");
       Objects.requireNonNull(wallClock, "wallClock");
       Objects.requireNonNull(messageIds, "messageIds");
       Objects.requireNonNull(permissions, "permissions");
+      Objects.requireNonNull(retryJitter, "retryJitter");
     }
   }
 
@@ -60,6 +75,7 @@ public final class AgentReducer {
       case RuntimeMessage.ProviderEvent event -> providerEvent(state, event);
       case RuntimeMessage.ToolCompleted completed -> toolCompleted(state, completed);
       case RuntimeMessage.PermissionResolved resolved -> permissionResolved(state, resolved);
+      case RuntimeMessage.RetryStream retry -> retryStream(state, retry);
       case RuntimeMessage.Cancel ignored -> cancel(state);
     };
   }
@@ -94,15 +110,19 @@ public final class AgentReducer {
     AgentState live = withActive(state, state.phase().active().orElseThrow()
         .withLastEventNanos(context.nanoClock().getAsLong()));
     return switch (envelope.event()) {
-      case StreamEvent.TextDelta delta -> done(appendText(live, delta.text()));
+      case StreamEvent.Started ignored -> done(streamStarted(live));
+      case StreamEvent.TextDelta delta -> done(appendText(recordDelta(live, delta.text()),
+          delta.text()));
       case StreamEvent.ToolUseStart start -> done(startTool(live, start));
-      case StreamEvent.ToolUseDelta delta -> done(appendToolArguments(live, delta.partialJson()));
+      case StreamEvent.ToolUseDelta delta -> done(appendToolArguments(
+          recordDelta(live, delta.partialJson()), delta.partialJson()));
       case StreamEvent.ToolUseEnd ignored -> done(endTool(live));
+      case StreamEvent.Heartbeat ignored -> done(heartbeat(live));
       case StreamEvent.Usage usage -> done(copy(live, live.thread(), live.phase(),
           live.activeTurnId(), live.turnCounter(), usage.inputTokens(), usage.outputTokens(),
           live.status(), live.toolDraft(), live.queued(), live.sessionGrants()));
       case StreamEvent.Finished ignored -> finalizeStream(live);
-      case StreamEvent.Error error -> streamError(live, error.message());
+      case StreamEvent.Error error -> streamError(live, error);
     };
   }
 
@@ -228,11 +248,122 @@ public final class AgentReducer {
     AgentState revised = copy(state, state.thread(), idle, 0, state.turnCounter(),
         state.tokensIn(), state.tokensOut(), status, Optional.empty(), state.queued(),
         state.sessionGrants());
-    return new Step(revised, List.of(new RuntimeEffect.Persist(revised.thread())));
+    var effects = new ArrayList<RuntimeEffect>();
+    effects.add(new RuntimeEffect.Persist(revised.thread()));
+    if (revised.queued().isEmpty()) return new Step(revised, effects);
+    RuntimeMessage.Submit head = revised.queued().getFirst();
+    AgentState ready = copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+        revised.turnCounter(), revised.tokensIn(), revised.tokensOut(), revised.status(),
+        revised.toolDraft(), revised.queued().subList(1, revised.queued().size()),
+        revised.sessionGrants());
+    Step submitted = submit(ready, head);
+    effects.addAll(submitted.effects());
+    return new Step(submitted.state(), effects);
   }
 
-  private Step streamError(AgentState state, String error) {
-    return finishTurn(state, "error: " + error);
+  private Step streamError(AgentState state, StreamEvent.Error error) {
+    ActiveTurn active = state.phase().active().orElseThrow();
+    if (active.retryState() instanceof RetryState.Scheduled) return done(state);
+    ErrorClass errorClass = error.errorClass();
+    if (errorClass == ErrorClass.CANCELLED
+        && (error.fromStall() || active.retryState() instanceof RetryState.StallFired))
+      errorClass = ErrorClass.TRANSIENT;
+
+    Optional<Message> assistant = lastAssistant(state);
+    boolean committed = assistant.map(message -> !message.text().isEmpty()
+        || message.toolCalls().stream().anyMatch(call ->
+            call.status() instanceof ToolStatus.Done
+                || call.status() instanceof ToolStatus.Running)).orElse(false);
+    long now = context.nanoClock().getAsLong();
+    int priorTransient = active.transientRetries();
+    if (active.lastFailureNanos() != 0
+        && now - active.lastFailureNanos() >= ProviderErrorPolicy.RETRY_DECAY.toNanos())
+      priorTransient = 0;
+    boolean midStream = active.retryState() instanceof RetryState.StallFired
+        || active.firstDeltaNanos() != 0;
+    int retryCap = ProviderErrorPolicy.maxRetries(errorClass, midStream);
+    int priorBudget = midStream ? active.midStreamFailures() : priorTransient;
+    boolean canRetry = (errorClass == ErrorClass.TRANSIENT
+        || errorClass == ErrorClass.RATE_LIMIT) && priorBudget < retryCap && !committed;
+    if (canRetry) {
+      ErrorClass retryClass = errorClass;
+      int retryAttempt = priorTransient;
+      Duration delay = error.retryAfter().map(AgentReducer::clampRetryAfter).orElseGet(() ->
+          ProviderErrorPolicy.backoffWithJitter(retryClass, retryAttempt,
+              context.retryJitter().getAsDouble()));
+      ActiveTurn scheduled = active.withTransientRetries(priorTransient + 1)
+          .withMidStreamFailures(midStream ? active.midStreamFailures() + 1
+              : active.midStreamFailures())
+          .withLastFailureNanos(now).withRetryState(new RetryState.Scheduled());
+      AgentState revised = withActive(state, scheduled);
+      revised = replaceUncommittedAssistant(revised);
+      long seconds = Math.max(1, (delay.toMillis() + 999) / 1_000);
+      String status = errorClass.label() + " — retrying in " + seconds + "s (attempt "
+          + (priorBudget + 1) + "/" + retryCap + ")…";
+      revised = copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+          revised.turnCounter(), revised.tokensIn(), revised.tokensOut(), status,
+          Optional.empty(), revised.queued(), revised.sessionGrants());
+      return new Step(revised, List.of(new RuntimeEffect.Schedule(delay,
+          new RuntimeMessage.RetryStream(state.activeTurnId()))));
+    }
+
+    AgentState terminal = errorClass == ErrorClass.CANCELLED ? state
+        : updateLastAssistant(state, message -> withError(message, error.message()));
+    return finishTurn(terminal, errorClass == ErrorClass.CANCELLED
+        ? "cancelled" : "error: " + error.message());
+  }
+
+  private Step retryStream(AgentState state, RuntimeMessage.RetryStream retry) {
+    if (state.activeTurnId() != retry.turnId() || state.phase() instanceof SessionPhase.Idle)
+      return done(state);
+    ActiveTurn active = state.phase().active().orElseThrow();
+    if (!(active.retryState() instanceof RetryState.Scheduled)) return done(state);
+    AgentState revised = withActive(state, active.withRetryState(new RetryState.Fresh()));
+    return new Step(revised, List.of(new RuntimeEffect.StartStream(retry.turnId(),
+        revised.thread().messages(), active.cancellation())));
+  }
+
+  private AgentState streamStarted(AgentState state) {
+    long now = context.nanoClock().getAsLong();
+    AgentState revised = withActive(state,
+        state.phase().active().orElseThrow().restartStream(now));
+    return copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+        revised.turnCounter(), revised.tokensIn(), revised.tokensOut(), "",
+        revised.toolDraft(), revised.queued(), revised.sessionGrants());
+  }
+
+  private AgentState heartbeat(AgentState state) {
+    ActiveTurn active = state.phase().active().orElseThrow()
+        .withLastEventNanos(context.nanoClock().getAsLong()).withTransientRetries(0);
+    return withActive(state, active);
+  }
+
+  private AgentState recordDelta(AgentState state, String delta) {
+    if (delta.isEmpty()) return state;
+    ActiveTurn active = state.phase().active().orElseThrow();
+    long now = context.nanoClock().getAsLong();
+    long first = active.firstDeltaNanos() == 0 ? now : active.firstDeltaNanos();
+    if (active.firstDeltaNanos() == 0) active = active.withTransientRetries(0);
+    active = active.withLiveDelta(active.liveDeltaBytes()
+        + delta.getBytes(StandardCharsets.UTF_8).length, first,
+        active.rateLastSampleNanos(), active.rateLastSampleBytes());
+    return withActive(state, active);
+  }
+
+  private AgentState replaceUncommittedAssistant(AgentState state) {
+    var messages = new ArrayList<>(state.thread().messages());
+    if (!messages.isEmpty() && messages.getLast().role() == Role.ASSISTANT)
+      messages.removeLast();
+    messages.add(message(Role.ASSISTANT, "", List.of(), List.of(), context.wallClock().get()));
+    var thread = withMessages(state.thread(), messages, context.wallClock().get());
+    return copy(state, thread, state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.status(), Optional.empty(), state.queued(),
+        state.sessionGrants());
+  }
+
+  private static Duration clampRetryAfter(Duration value) {
+    long seconds = Math.clamp(value.getSeconds(), 1, 600);
+    return Duration.ofSeconds(seconds);
   }
 
   private AgentState startTool(AgentState state, StreamEvent.ToolUseStart start) {
@@ -376,6 +507,13 @@ public final class AgentReducer {
     return new Message(message.id(), message.role(), text, message.images(), message.attachments(),
         message.thinking(), message.thinkingSignature(), message.toolCalls(), message.timestamp(),
         message.checkpointId(), message.error(), message.isCompactSummary());
+  }
+
+  private static Message withError(Message message, String error) {
+    return new Message(message.id(), message.role(), message.text(), message.images(),
+        message.attachments(), message.thinking(), message.thinkingSignature(),
+        message.toolCalls(), message.timestamp(), message.checkpointId(), Optional.of(error),
+        message.isCompactSummary());
   }
 
   private static com.github.skanga.ajent.domain.Thread withMessages(
