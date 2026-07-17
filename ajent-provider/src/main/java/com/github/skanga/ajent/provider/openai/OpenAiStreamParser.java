@@ -73,8 +73,10 @@ public final class OpenAiStreamParser {
     }
     JsonNode usage = root.path("usage");
     if (usage.isObject()) {
+      int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt();
       context.events.add(new StreamEvent.Usage(
-          usage.path("prompt_tokens").asInt(), usage.path("completion_tokens").asInt()));
+          usage.path("prompt_tokens").asInt(), usage.path("completion_tokens").asInt(),
+          0, cachedTokens));
     }
     JsonNode choices = root.path("choices");
     if (!choices.isArray() || choices.isEmpty()) return;

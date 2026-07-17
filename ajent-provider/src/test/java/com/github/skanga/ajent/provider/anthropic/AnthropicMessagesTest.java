@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.domain.ImageContent;
 import com.github.skanga.ajent.domain.Message;
+import com.github.skanga.ajent.domain.MessageId;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
@@ -14,11 +15,33 @@ import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class AnthropicMessagesTest {
+  @Test
+  void replaysSignedThinkingFirstOnlyWhenThinkingIsEnabled() {
+    Instant now = Instant.parse("2026-07-17T00:00:00Z");
+    var assistant = new Message(new MessageId("thinking"), Role.ASSISTANT, "answer", List.of(),
+        List.of(), "private reasoning", "opaque-signature", List.of(), now, Optional.empty(),
+        Optional.empty(), false);
+    var thread = new Thread(new ThreadId("t"), "", List.of(assistant));
+
+    JsonNode enabled = parse(AnthropicMessages.toJson(thread, true));
+    assertThat(enabled.get(0).path("content").get(0).path("type").asText())
+        .isEqualTo("thinking");
+    assertThat(enabled.get(0).path("content").get(0).path("thinking").asText())
+        .isEqualTo("private reasoning");
+    assertThat(enabled.get(0).path("content").get(0).path("signature").asText())
+        .isEqualTo("opaque-signature");
+    assertThat(enabled.get(0).path("content").get(1).path("type").asText()).isEqualTo("text");
+
+    JsonNode disabled = parse(AnthropicMessages.toJson(thread, false));
+    assertThat(disabled.get(0).path("content").get(0).path("type").asText()).isEqualTo("text");
+  }
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @Test

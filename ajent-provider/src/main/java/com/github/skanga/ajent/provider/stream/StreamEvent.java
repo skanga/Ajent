@@ -13,6 +13,15 @@ public sealed interface StreamEvent {
     public TextDelta { text = Objects.requireNonNull(text, "text"); }
   }
 
+  record TextBlockClosed() implements StreamEvent {}
+
+  record ThinkingDelta(String text, String signature) implements StreamEvent {
+    public ThinkingDelta {
+      text = Objects.requireNonNull(text, "text");
+      signature = Objects.requireNonNull(signature, "signature");
+    }
+  }
+
   record ToolUseStart(String id, String name) implements StreamEvent {
     public ToolUseStart {
       id = Objects.requireNonNull(id, "id");
@@ -26,7 +35,12 @@ public sealed interface StreamEvent {
 
   record ToolUseEnd() implements StreamEvent {}
   record Heartbeat() implements StreamEvent {}
-  record Usage(int inputTokens, int outputTokens) implements StreamEvent {}
+  record Usage(int inputTokens, int outputTokens, int cacheCreationInputTokens,
+               int cacheReadInputTokens) implements StreamEvent {
+    public Usage(int inputTokens, int outputTokens) {
+      this(inputTokens, outputTokens, 0, 0);
+    }
+  }
 
   record Finished(StopReason stopReason) implements StreamEvent {
     public Finished { stopReason = Objects.requireNonNull(stopReason, "stopReason"); }

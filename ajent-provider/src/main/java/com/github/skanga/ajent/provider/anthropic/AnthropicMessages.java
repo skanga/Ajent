@@ -27,13 +27,17 @@ public final class AnthropicMessages {
   private AnthropicMessages() {}
 
   public static String toJson(Thread thread) {
+    return toJson(thread, false);
+  }
+
+  public static String toJson(Thread thread, boolean includeThinking) {
     ArrayNode wire = JSON.createArrayNode();
     for (Message message : thread.messages()) {
       boolean hasImages = message.role() == Role.USER && message.images().stream()
           .anyMatch(image -> !image.isEmpty());
       boolean hasTools = message.role() == Role.ASSISTANT && !message.toolCalls().isEmpty();
       if (!message.text().isEmpty() || hasImages || hasTools) {
-        wire.add(primaryMessage(message, hasImages, hasTools));
+        wire.add(primaryMessage(message, hasImages, hasTools, includeThinking));
       }
       if (hasTools) wire.add(toolResults(message.toolCalls()));
     }
@@ -45,10 +49,20 @@ public final class AnthropicMessages {
     }
   }
 
-  private static ObjectNode primaryMessage(Message message, boolean hasImages, boolean hasTools) {
+  private static ObjectNode primaryMessage(Message message, boolean hasImages, boolean hasTools,
+                                           boolean includeThinking) {
     ObjectNode wireMessage = JSON.createObjectNode();
     wireMessage.put("role", message.role() == Role.USER ? "user" : "assistant");
     ArrayNode content = wireMessage.putArray("content");
+    boolean hasThinking = includeThinking && message.role() == Role.ASSISTANT
+        && !message.thinkingSignature().isEmpty()
+        && (!message.text().isEmpty() || hasTools);
+    if (hasThinking) {
+      ObjectNode thinking = content.addObject();
+      thinking.put("type", "thinking");
+      thinking.put("thinking", message.thinking());
+      thinking.put("signature", message.thinkingSignature());
+    }
     if (hasImages) {
       for (ImageContent image : message.images()) if (!image.isEmpty()) content.add(imageBlock(image));
     }

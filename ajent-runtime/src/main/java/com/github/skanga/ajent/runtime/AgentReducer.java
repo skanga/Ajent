@@ -218,14 +218,14 @@ public final class AgentReducer {
       case StreamEvent.Started ignored -> done(streamStarted(live));
       case StreamEvent.TextDelta delta -> done(appendText(recordDelta(live, delta.text()),
           delta.text()));
+      case StreamEvent.TextBlockClosed ignored -> done(closeTextBlock(live));
+      case StreamEvent.ThinkingDelta delta -> done(appendThinking(heartbeat(live), delta));
       case StreamEvent.ToolUseStart start -> done(startTool(live, start));
       case StreamEvent.ToolUseDelta delta -> done(appendToolArguments(
           recordDelta(live, delta.partialJson()), delta.partialJson()));
       case StreamEvent.ToolUseEnd ignored -> done(endTool(live));
       case StreamEvent.Heartbeat ignored -> done(heartbeat(live));
-      case StreamEvent.Usage usage -> done(copy(live, live.thread(), live.phase(),
-          live.activeTurnId(), live.turnCounter(), usage.inputTokens(), usage.outputTokens(),
-          live.status(), live.toolDraft(), live.queued(), live.sessionGrants()));
+      case StreamEvent.Usage usage -> done(applyUsage(live, usage));
       case StreamEvent.Finished finished -> finalizeStream(live, finished.stopReason());
       case StreamEvent.Error error -> streamError(live, error);
     };
@@ -236,6 +236,8 @@ public final class AgentReducer {
       case StreamEvent.Started ignored -> done(streamStarted(state));
       case StreamEvent.TextDelta delta -> done(appendCompaction(recordDelta(state, delta.text()),
           delta.text()));
+      case StreamEvent.TextBlockClosed ignored -> done(state);
+      case StreamEvent.ThinkingDelta ignored -> done(heartbeat(state));
       case StreamEvent.Heartbeat ignored -> done(heartbeat(state));
       case StreamEvent.Finished ignored -> finishCompaction(state);
       case StreamEvent.Error error -> streamError(state, error);
@@ -244,6 +246,33 @@ public final class AgentReducer {
       case StreamEvent.ToolUseEnd ignored -> done(state);
       case StreamEvent.Usage ignored -> done(state);
     };
+  }
+
+  private AgentState applyUsage(AgentState state, StreamEvent.Usage usage) {
+    int input = state.tokensIn();
+    if (usage.inputTokens() != 0 || usage.cacheCreationInputTokens() != 0
+        || usage.cacheReadInputTokens() != 0) {
+      input = usage.inputTokens() + usage.cacheCreationInputTokens()
+          + usage.cacheReadInputTokens();
+    }
+    int output = usage.outputTokens() == 0 ? state.tokensOut() : usage.outputTokens();
+    return copy(state, state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        input, output, state.status(), state.toolDraft(), state.queued(), state.sessionGrants());
+  }
+
+  private AgentState appendThinking(AgentState state, StreamEvent.ThinkingDelta delta) {
+    return updateLastAssistant(state, message -> new Message(message.id(), message.role(),
+        message.text(), message.images(), message.attachments(), message.thinking() + delta.text(),
+        delta.signature().isEmpty() ? message.thinkingSignature() : delta.signature(),
+        message.toolCalls(), message.timestamp(), message.checkpointId(), message.error(),
+        message.textBlockClosed(), message.isCompactSummary()));
+  }
+
+  private AgentState closeTextBlock(AgentState state) {
+    return updateLastAssistant(state, message -> new Message(message.id(), message.role(),
+        message.text(), message.images(), message.attachments(), message.thinking(),
+        message.thinkingSignature(), message.toolCalls(), message.timestamp(),
+        message.checkpointId(), message.error(), true, message.isCompactSummary()));
   }
 
   private AgentState appendCompaction(AgentState state, String text) {
@@ -949,20 +978,21 @@ public final class AgentReducer {
   private Message message(Role role, String text, List<ImageContent> images, List<ToolUse> calls,
                           Instant now) {
     return new Message(context.messageIds().get(), role, text, images, List.of(), "", "", calls,
-        now, Optional.empty(), Optional.empty(), false);
+        now, Optional.empty(), Optional.empty(), false, false);
   }
 
   private static Message withText(Message message, String text) {
     return new Message(message.id(), message.role(), text, message.images(), message.attachments(),
         message.thinking(), message.thinkingSignature(), message.toolCalls(), message.timestamp(),
-        message.checkpointId(), message.error(), message.isCompactSummary());
+        message.checkpointId(), message.error(), message.textBlockClosed(),
+        message.isCompactSummary());
   }
 
   private static Message withError(Message message, String error) {
     return new Message(message.id(), message.role(), message.text(), message.images(),
         message.attachments(), message.thinking(), message.thinkingSignature(),
         message.toolCalls(), message.timestamp(), message.checkpointId(), Optional.of(error),
-        message.isCompactSummary());
+        message.textBlockClosed(), message.isCompactSummary());
   }
 
   private static com.github.skanga.ajent.domain.Thread withMessages(

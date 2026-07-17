@@ -14,14 +14,15 @@ class OpenAiStreamParserTest {
     String stream = data("{\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}")
         + data("{\"choices\":[{\"delta\":{\"content\":\"lo!\"}}]}")
         + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}")
-        + data("{\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3}}")
+        + data("{\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3,"
+            + "\"prompt_tokens_details\":{\"cached_tokens\":7}}}")
         + data("[DONE]");
     var events = parseSse(stream);
     assertThat(text(events)).isEqualTo("Hello!");
     assertThat(events).filteredOn(StreamEvent.Finished.class::isInstance)
         .containsExactly(new StreamEvent.Finished(StopReason.END_TURN));
     assertThat(events).filteredOn(StreamEvent.Usage.class::isInstance)
-        .containsExactly(new StreamEvent.Usage(12, 3));
+        .containsExactly(new StreamEvent.Usage(12, 3, 0, 7));
 
     var error = parseSse(data(
         "{\"error\":{\"message\":\"rate limit exceeded\",\"type\":\"rate_limit\"}}"));

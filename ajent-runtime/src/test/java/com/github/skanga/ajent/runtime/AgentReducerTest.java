@@ -244,6 +244,52 @@ final class AgentReducerTest {
         new StreamEvent.TextDelta("late"))).state()).isEqualTo(finished.state());
   }
 
+  @Test void thinkingAndTextBlockClosePreserveReplayAndLivenessSemantics() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState state = submit(reducer);
+    state = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("offline", Optional.empty(), ErrorClass.TRANSIENT, false))).state();
+    state = reducer.update(state, new RuntimeMessage.RetryStream(1)).state();
+    clock.set(2_000L);
+
+    state = event(reducer, state, 1, new StreamEvent.ThinkingDelta("reason ", ""));
+    state = event(reducer, state, 1, new StreamEvent.ThinkingDelta("more", "signature-1"));
+    state = event(reducer, state, 1, new StreamEvent.ThinkingDelta("", "signature-2"));
+    assertThat(state.thread().messages().getLast().thinking()).isEqualTo("reason more");
+    assertThat(state.thread().messages().getLast().thinkingSignature()).isEqualTo("signature-2");
+    assertThat(state.phase().active().orElseThrow().lastEventNanos()).isEqualTo(2_000L);
+    assertThat(state.phase().active().orElseThrow().transientRetries()).isZero();
+
+    state = event(reducer, state, 1, new StreamEvent.TextBlockClosed());
+    assertThat(state.thread().messages().getLast().textBlockClosed()).isTrue();
+  }
+
+  @Test void cacheUsageIsPartOfContextAndZeroFieldsRetainPriorTotals() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = event(reducer, submit(reducer), 1, new StreamEvent.Usage(10, 3, 4, 5));
+    assertThat(state.tokensIn()).isEqualTo(19);
+    assertThat(state.tokensOut()).isEqualTo(3);
+    state = event(reducer, state, 1, new StreamEvent.Usage(0, 0, 0, 0));
+    assertThat(state.tokensIn()).isEqualTo(19);
+    assertThat(state.tokensOut()).isEqualTo(3);
+  }
+
+  @Test void compactionTreatsThinkingAndTextCloseAsLivenessOnly() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.Finished(StopReason.END_TURN));
+    state = reducer.update(state, new RuntimeMessage.CompactContext()).state();
+    com.github.skanga.ajent.domain.Message before = state.thread().messages().getLast();
+    clock.set(2_000L);
+    state = event(reducer, state, state.activeTurnId(),
+        new StreamEvent.ThinkingDelta("hidden", "opaque"));
+    state = event(reducer, state, state.activeTurnId(), new StreamEvent.TextBlockClosed());
+    assertThat(state.thread().messages().getLast()).isEqualTo(before);
+    assertThat(state.phase().active().orElseThrow().lastEventNanos()).isEqualTo(2_000L);
+  }
+
   @Test void completeToolCallExecutesThenContinuesTheSameAgentTurn() {
     AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
     AgentState state = submit(reducer);

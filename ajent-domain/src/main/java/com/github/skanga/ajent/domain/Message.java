@@ -9,10 +9,18 @@ public record Message(
     MessageId id, Role role, String text, List<ImageContent> images,
     List<Attachment> attachments, String thinking, String thinkingSignature,
     List<ToolUse> toolCalls, Instant timestamp, Optional<CheckpointId> checkpointId,
-    Optional<String> error, boolean isCompactSummary) {
+    Optional<String> error, boolean textBlockClosed, boolean isCompactSummary) {
+  public Message(MessageId id, Role role, String text, List<ImageContent> images,
+                 List<Attachment> attachments, String thinking, String thinkingSignature,
+                 List<ToolUse> toolCalls, Instant timestamp, Optional<CheckpointId> checkpointId,
+                 Optional<String> error, boolean isCompactSummary) {
+    this(id, role, text, images, attachments, thinking, thinkingSignature, toolCalls, timestamp,
+        checkpointId, error, false, isCompactSummary);
+  }
+
   public Message(Role role, String text, List<ImageContent> images, List<ToolUse> toolCalls) {
     this(MessageId.random(), role, text, images, List.of(), "", "", toolCalls,
-        Instant.now(), Optional.empty(), Optional.empty(), false);
+        Instant.now(), Optional.empty(), Optional.empty(), false, false);
   }
 
   public Message {
@@ -31,6 +39,6 @@ public record Message(
 
   public Message withToolCalls(List<ToolUse> revisedToolCalls) {
     return new Message(id, role, text, images, attachments, thinking, thinkingSignature,
-        revisedToolCalls, timestamp, checkpointId, error, isCompactSummary);
+        revisedToolCalls, timestamp, checkpointId, error, textBlockClosed, isCompactSummary);
   }
 }
