@@ -137,11 +137,51 @@ final class AgentLoopTest {
     }
   }
 
+  @Test void interpretsOAuthRefreshAndResumesTheParkedStream() throws Exception {
+    var idle = new CountDownLatch(1);
+    var providerCalls = new AtomicInteger();
+    var refreshCalls = new AtomicInteger();
+    ProviderPort provider = (turn, messages, cancellation, sink) -> {
+      if (providerCalls.incrementAndGet() == 1) {
+        sink.accept(new StreamEvent.Error("expired", java.util.Optional.empty(),
+            ErrorClass.AUTH, false));
+      } else {
+        sink.accept(new StreamEvent.TextDelta("refreshed"));
+        sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+      }
+    };
+    OAuthRefreshPort refresh = token -> {
+      refreshCalls.incrementAndGet();
+      assertThat(token).isEqualTo("refresh-token");
+      return new OAuthRefreshPort.Result.Success();
+    };
+    try (var loop = new AgentLoop(AgentState.initial(thread()), reducerWithRefreshToken(),
+        provider, call -> new ToolCompletion.Success("unused"),
+        call -> new PermissionPort.Decision(true, false), thread -> {}, state -> {
+          if (state.phase() instanceof SessionPhase.Idle
+              && state.thread().messages().getLast().text().equals("refreshed")) idle.countDown();
+        }, refresh)) {
+      loop.dispatch(new RuntimeMessage.Submit("question", List.of()));
+      assertThat(idle.await(5, TimeUnit.SECONDS)).isTrue();
+    }
+    assertThat(providerCalls).hasValue(2);
+    assertThat(refreshCalls).hasValue(1);
+  }
+
   private static AgentReducer reducer(PermissionVerdict verdict) {
     var ids = new AtomicInteger();
     return new AgentReducer(new AgentReducer.Context(System::nanoTime,
         () -> Instant.parse("2026-07-17T00:00:00Z"),
         () -> new MessageId("loop-" + ids.incrementAndGet()), call -> verdict));
+  }
+
+  private static AgentReducer reducerWithRefreshToken() {
+    var ids = new AtomicInteger();
+    return new AgentReducer(new AgentReducer.Context(System::nanoTime,
+        () -> Instant.parse("2026-07-17T00:00:00Z"),
+        () -> new MessageId("loop-refresh-" + ids.incrementAndGet()),
+        call -> PermissionVerdict.ALLOW, () -> 1.0, () -> 200_000,
+        () -> java.util.Optional.of("refresh-token")));
   }
 
   private static Thread thread() {

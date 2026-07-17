@@ -15,5 +15,6 @@ public sealed interface RuntimeEffect {
   }
   record ExecuteTool(long turnId, ToolUse call) implements RuntimeEffect {}
   record RequestPermission(long turnId, ToolUse call) implements RuntimeEffect {}
+  record RefreshOAuth(long turnId, String refreshToken) implements RuntimeEffect {}
   record Schedule(Duration delay, RuntimeMessage message) implements RuntimeEffect {}
 }

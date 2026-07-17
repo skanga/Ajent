@@ -27,6 +27,9 @@ public sealed interface RuntimeMessage {
     public PermissionResolved { callId = Objects.requireNonNull(callId, "callId"); }
   }
   record RetryStream(long turnId) implements RuntimeMessage {}
+  record TokenRefreshed(long turnId, OAuthRefreshPort.Result result) implements RuntimeMessage {
+    public TokenRefreshed { result = Objects.requireNonNull(result, "result"); }
+  }
   record CompactContext() implements RuntimeMessage {}
   record Tick() implements RuntimeMessage {}
   record Cancel() implements RuntimeMessage {}

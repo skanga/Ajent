@@ -60,19 +60,30 @@ public final class AgentReducer {
                         Supplier<MessageId> messageIds,
                         Function<ToolUse, PermissionVerdict> permissions,
                         DoubleSupplier retryJitter,
-                        IntSupplier contextMax) {
+                        IntSupplier contextMax,
+                        Supplier<Optional<String>> oauthRefreshToken) {
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                    Supplier<MessageId> messageIds,
                    Function<ToolUse, PermissionVerdict> permissions) {
       this(nanoClock, wallClock, messageIds, permissions,
-          () -> ThreadLocalRandom.current().nextDouble(0.80, 1.20), () -> 200_000);
+          () -> ThreadLocalRandom.current().nextDouble(0.80, 1.20), () -> 200_000,
+          Optional::empty);
     }
 
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                    Supplier<MessageId> messageIds,
                    Function<ToolUse, PermissionVerdict> permissions,
                    DoubleSupplier retryJitter) {
-      this(nanoClock, wallClock, messageIds, permissions, retryJitter, () -> 200_000);
+      this(nanoClock, wallClock, messageIds, permissions, retryJitter, () -> 200_000,
+          Optional::empty);
+    }
+
+    public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
+                   Supplier<MessageId> messageIds,
+                   Function<ToolUse, PermissionVerdict> permissions,
+                   DoubleSupplier retryJitter, IntSupplier contextMax) {
+      this(nanoClock, wallClock, messageIds, permissions, retryJitter, contextMax,
+          Optional::empty);
     }
 
     public Context {
@@ -82,6 +93,7 @@ public final class AgentReducer {
       Objects.requireNonNull(permissions, "permissions");
       Objects.requireNonNull(retryJitter, "retryJitter");
       Objects.requireNonNull(contextMax, "contextMax");
+      Objects.requireNonNull(oauthRefreshToken, "oauthRefreshToken");
     }
   }
 
@@ -102,6 +114,7 @@ public final class AgentReducer {
       case RuntimeMessage.ToolCompleted completed -> toolCompleted(state, completed);
       case RuntimeMessage.PermissionResolved resolved -> permissionResolved(state, resolved);
       case RuntimeMessage.RetryStream retry -> retryStream(state, retry);
+      case RuntimeMessage.TokenRefreshed refreshed -> tokenRefreshed(state, refreshed);
       case RuntimeMessage.CompactContext ignored -> compactContext(state);
       case RuntimeMessage.Tick ignored -> tick(state);
       case RuntimeMessage.Cancel ignored -> cancel(state);
@@ -329,7 +342,8 @@ public final class AgentReducer {
               call.status() instanceof ToolStatus.Done
                   || call.status() instanceof ToolStatus.Running)).orElse(false);
       if (!committed && active.truncationRetries() < MAX_TRUNCATION_RETRIES) {
-        ActiveTurn retry = active.withTruncationRetries(active.truncationRetries() + 1);
+        ActiveTurn retry = active.withTruncationRetries(active.truncationRetries() + 1)
+            .withCancellation(new CancellationSignal());
         revised = replaceUncommittedAssistant(withActive(revised, retry));
         revised = copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
             revised.turnCounter(), revised.tokensIn(), revised.tokensOut(),
@@ -447,7 +461,7 @@ public final class AgentReducer {
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
         state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
         state.toolDraft(), state.queued(),
-        state.compaction(), ids, state.sessionGrants());
+        state.compaction(), state.oauthRefreshInFlight(), ids, state.sessionGrants());
   }
 
   private AgentState clearTruncationSignals(AgentState state) {
@@ -455,14 +469,15 @@ public final class AgentReducer {
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
         state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
         state.toolDraft(), state.queued(),
-        state.compaction(), Set.of(), state.sessionGrants());
+        state.compaction(), state.oauthRefreshInFlight(), Set.of(), state.sessionGrants());
   }
 
   private static AgentState withCompaction(AgentState state, AgentState.Compaction compaction) {
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
         state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
         state.toolDraft(), state.queued(),
-        compaction, state.truncatedToolIds(), state.sessionGrants());
+        compaction, state.oauthRefreshInFlight(), state.truncatedToolIds(),
+        state.sessionGrants());
   }
 
   private AgentState failPendingTools(AgentState state, String error) {
@@ -629,14 +644,17 @@ public final class AgentReducer {
   }
 
   private Step continueStream(AgentState state) {
-    ActiveTurn active = state.phase().active().orElseThrow();
+    ActiveTurn active = state.phase().active().orElseThrow()
+        .withCancellation(new CancellationSignal())
+        .withLastEventNanos(context.nanoClock().getAsLong())
+        .withRetryState(new RetryState.Fresh());
     long turnId = state.turnCounter() + 1;
     Instant now = context.wallClock().get();
     var messages = new ArrayList<>(state.thread().messages());
     messages.add(message(Role.ASSISTANT, "", List.of(), List.of(), now));
     var thread = withMessages(state.thread(), messages, now);
     SessionPhase phase = new SessionPhase.Streaming(active);
-    AgentState revised = copy(state, thread, phase, turnId, turnId, state.tokensIn(),
+    AgentState revised = copy(withActive(state, active), thread, phase, turnId, turnId, state.tokensIn(),
         state.tokensOut(), "", Optional.empty(), state.queued(), state.sessionGrants());
     return new Step(revised, List.of(new RuntimeEffect.Persist(thread),
         new RuntimeEffect.StartStream(turnId, wireMessages(thread), active.cancellation())));
@@ -680,6 +698,23 @@ public final class AgentReducer {
     if (active.lastFailureNanos() != 0
         && now - active.lastFailureNanos() >= ProviderErrorPolicy.RETRY_DECAY.toNanos())
       priorTransient = 0;
+    if (errorClass == ErrorClass.AUTH && !committed && !state.oauthRefreshInFlight()
+        && priorTransient < ProviderErrorPolicy.MAX_RETRIES) {
+      Optional<String> refreshToken = context.oauthRefreshToken().get()
+          .filter(token -> !token.isEmpty());
+      if (refreshToken.isPresent()) {
+        ActiveTurn parked = active.withTransientRetries(priorTransient + 1)
+            .withLastFailureNanos(now).withRetryState(new RetryState.Scheduled());
+        AgentState revised = replaceUncommittedAssistant(withActive(state, parked));
+        revised = withOAuthRefreshInFlight(revised, true);
+        revised = copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+            revised.turnCounter(), revised.tokensIn(), revised.tokensOut(),
+            "auth expired — refreshing token…", Optional.empty(), revised.queued(),
+            revised.sessionGrants());
+        return new Step(revised, List.of(new RuntimeEffect.RefreshOAuth(
+            revised.activeTurnId(), refreshToken.orElseThrow())));
+      }
+    }
     boolean midStream = active.retryState() instanceof RetryState.StallFired
         || active.firstDeltaNanos() != 0;
     int retryCap = ProviderErrorPolicy.maxRetries(errorClass, midStream);
@@ -767,14 +802,78 @@ public final class AgentReducer {
     return submit(ready, head);
   }
 
+  private Step tokenRefreshed(AgentState state, RuntimeMessage.TokenRefreshed refreshed) {
+    if (!state.oauthRefreshInFlight()) return done(state);
+    boolean parked = refreshed.turnId() == state.activeTurnId()
+        && state.phase().active().map(ActiveTurn::retryState)
+            .filter(RetryState.Scheduled.class::isInstance).isPresent();
+    AgentState revised = withOAuthRefreshInFlight(state, false);
+    return switch (refreshed.result()) {
+      case OAuthRefreshPort.Result.Success ignored -> {
+        revised = copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+            revised.turnCounter(), revised.tokensIn(), revised.tokensOut(),
+            "OAuth token refreshed", revised.toolDraft(), revised.queued(),
+            revised.sessionGrants());
+        if (parked) {
+          yield new Step(revised, List.of(new RuntimeEffect.Schedule(Duration.ZERO,
+              new RuntimeMessage.RetryStream(refreshed.turnId()))));
+        }
+        if (revised.phase() instanceof SessionPhase.Idle && !revised.queued().isEmpty()) {
+          RuntimeMessage.Submit head = revised.queued().getFirst();
+          AgentState ready = copy(revised, revised.thread(), revised.phase(),
+              revised.activeTurnId(), revised.turnCounter(), revised.tokensIn(),
+              revised.tokensOut(), revised.status(), revised.toolDraft(),
+              revised.queued().subList(1, revised.queued().size()), revised.sessionGrants());
+          yield submit(ready, head);
+        }
+        yield done(revised);
+      }
+      case OAuthRefreshPort.Result.Failure failure -> parked
+          ? authRefreshFailed(revised, failure.error())
+          : done(copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
+              revised.turnCounter(), revised.tokensIn(), revised.tokensOut(),
+              "error: token refresh failed: " + failure.error(), revised.toolDraft(),
+              revised.queued(), revised.sessionGrants()));
+    };
+  }
+
+  private Step authRefreshFailed(AgentState state, String error) {
+    String status = "error: token refresh failed: " + error;
+    AgentState revised = updateLastAssistant(state, message -> withError(message, status));
+    revised = updateEveryTool(revised, call -> call.status().isTerminal() ? call
+        : new ToolUse(call.id(), call.name(), call.arguments(),
+            failed(call, "auth refresh failed")));
+    revised = dropEmptyAssistant(revised);
+    revised = copy(revised, revised.thread(), new SessionPhase.Idle(), 0,
+        revised.turnCounter(), revised.tokensIn(), revised.tokensOut(), status, Optional.empty(),
+        revised.queued(), revised.sessionGrants());
+    return new Step(revised, List.of(new RuntimeEffect.Persist(revised.thread())));
+  }
+
+  private AgentState dropEmptyAssistant(AgentState state) {
+    List<Message> current = state.thread().messages();
+    if (current.isEmpty()) return state;
+    Message last = current.getLast();
+    if (last.role() != Role.ASSISTANT || !last.text().isEmpty() || !last.toolCalls().isEmpty())
+      return state;
+    var messages = new ArrayList<>(current);
+    messages.removeLast();
+    var thread = withMessages(state.thread(), messages, context.wallClock().get());
+    return copy(state, thread, state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.status(), state.toolDraft(), state.queued(),
+        state.sessionGrants());
+  }
+
   private Step retryStream(AgentState state, RuntimeMessage.RetryStream retry) {
     if (state.activeTurnId() != retry.turnId() || state.phase() instanceof SessionPhase.Idle)
       return done(state);
     ActiveTurn active = state.phase().active().orElseThrow();
     if (!(active.retryState() instanceof RetryState.Scheduled)) return done(state);
-    AgentState revised = withActive(state, active.withRetryState(new RetryState.Fresh()));
+    ActiveTurn fresh = active.withRetryState(new RetryState.Fresh())
+        .withCancellation(new CancellationSignal());
+    AgentState revised = withActive(state, fresh);
     return new Step(revised, List.of(new RuntimeEffect.StartStream(retry.turnId(),
-        activeWireMessages(revised), active.cancellation())));
+        activeWireMessages(revised), fresh.cancellation())));
   }
 
   private AgentState streamStarted(AgentState state) {
@@ -972,7 +1071,15 @@ public final class AgentReducer {
   private static AgentState withLastTick(AgentState state, long lastTickNanos) {
     return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
         state.tokensIn(), state.tokensOut(), lastTickNanos, state.status(), state.toolDraft(),
-        state.queued(), state.compaction(), state.truncatedToolIds(), state.sessionGrants());
+        state.queued(), state.compaction(), state.oauthRefreshInFlight(),
+        state.truncatedToolIds(), state.sessionGrants());
+  }
+
+  private static AgentState withOAuthRefreshInFlight(AgentState state, boolean inFlight) {
+    return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
+        state.toolDraft(), state.queued(), state.compaction(), inFlight,
+        state.truncatedToolIds(), state.sessionGrants());
   }
 
   private Message message(Role role, String text, List<ImageContent> images, List<ToolUse> calls,
@@ -1009,7 +1116,7 @@ public final class AgentReducer {
                                  List<RuntimeMessage.Submit> queued, Set<String> grants) {
     return new AgentState(thread, phase, activeTurnId, turnCounter, tokensIn, tokensOut,
         state.lastTickNanos(), status, draft, queued, state.compaction(),
-        state.truncatedToolIds(), grants);
+        state.oauthRefreshInFlight(), state.truncatedToolIds(), grants);
   }
 
   private static Step done(AgentState state) {

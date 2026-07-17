@@ -35,6 +35,12 @@ public record ActiveTurn(
         liveDeltaBytes, firstDeltaNanos, rateLastSampleNanos, rateLastSampleBytes, retryState);
   }
 
+  public ActiveTurn withCancellation(CancellationSignal value) {
+    return new ActiveTurn(Objects.requireNonNull(value, "value"), startedNanos, lastEventNanos,
+        truncationRetries, transientRetries, midStreamFailures, lastFailureNanos, liveDeltaBytes,
+        firstDeltaNanos, rateLastSampleNanos, rateLastSampleBytes, retryState);
+  }
+
   public ActiveTurn withTruncationRetries(int value) {
     return copy(lastEventNanos, value, transientRetries, midStreamFailures, lastFailureNanos,
         liveDeltaBytes, firstDeltaNanos, rateLastSampleNanos, rateLastSampleBytes, retryState);

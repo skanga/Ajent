@@ -18,6 +18,7 @@ public final class AgentLoop implements AutoCloseable {
   private final PermissionPort permissions;
   private final PersistencePort persistence;
   private final Consumer<AgentState> observer;
+  private final OAuthRefreshPort oauthRefresh;
   private final ExecutorService tasks;
   private final ScheduledExecutorService scheduler;
   private AgentState state;
@@ -27,12 +28,27 @@ public final class AgentLoop implements AutoCloseable {
                    PermissionPort permissions, PersistencePort persistence,
                    Consumer<AgentState> observer) {
     this(initial, reducer, provider, tools, permissions, persistence, observer,
+        token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"),
+        Executors.newVirtualThreadPerTaskExecutor());
+  }
+
+  public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
+                   PermissionPort permissions, PersistencePort persistence,
+                   Consumer<AgentState> observer, OAuthRefreshPort oauthRefresh) {
+    this(initial, reducer, provider, tools, permissions, persistence, observer, oauthRefresh,
         Executors.newVirtualThreadPerTaskExecutor());
   }
 
   AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
             PermissionPort permissions, PersistencePort persistence, Consumer<AgentState> observer,
             ExecutorService tasks) {
+    this(initial, reducer, provider, tools, permissions, persistence, observer,
+        token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"), tasks);
+  }
+
+  AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
+            PermissionPort permissions, PersistencePort persistence, Consumer<AgentState> observer,
+            OAuthRefreshPort oauthRefresh, ExecutorService tasks) {
     state = Objects.requireNonNull(initial, "initial");
     this.reducer = Objects.requireNonNull(reducer, "reducer");
     this.provider = Objects.requireNonNull(provider, "provider");
@@ -40,6 +56,7 @@ public final class AgentLoop implements AutoCloseable {
     this.permissions = Objects.requireNonNull(permissions, "permissions");
     this.persistence = Objects.requireNonNull(persistence, "persistence");
     this.observer = Objects.requireNonNull(observer, "observer");
+    this.oauthRefresh = Objects.requireNonNull(oauthRefresh, "oauthRefresh");
     this.tasks = Objects.requireNonNull(tasks, "tasks");
     scheduler = Executors.newSingleThreadScheduledExecutor(
         java.lang.Thread.ofVirtual().name("ajent-retry-", 0).factory());
@@ -97,6 +114,16 @@ public final class AgentLoop implements AutoCloseable {
         }
         dispatchIfOpen(new RuntimeMessage.PermissionResolved(request.call().id().value(),
             decision.approved(), decision.always()));
+      });
+      case RuntimeEffect.RefreshOAuth refresh -> tasks.submit(() -> {
+        OAuthRefreshPort.Result result;
+        try {
+          result = oauthRefresh.refreshAndInstall(refresh.refreshToken());
+        } catch (RuntimeException exception) {
+          result = new OAuthRefreshPort.Result.Failure("refresh threw: "
+              + exception.getMessage());
+        }
+        dispatchIfOpen(new RuntimeMessage.TokenRefreshed(refresh.turnId(), result));
       });
       case RuntimeEffect.Schedule schedule -> scheduler.schedule(
           () -> dispatchIfOpen(schedule.message()), schedule.delay().toNanos(),

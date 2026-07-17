@@ -19,6 +19,7 @@ public record AgentState(
     Optional<ToolDraft> toolDraft,
     List<RuntimeMessage.Submit> queued,
     Compaction compaction,
+    boolean oauthRefreshInFlight,
     Set<String> truncatedToolIds,
     Set<String> sessionGrants) {
 
@@ -62,6 +63,6 @@ public record AgentState(
 
   public static AgentState initial(Thread thread) {
     return new AgentState(thread, new SessionPhase.Idle(), 0, 0, 0, 0, 0, "",
-        Optional.empty(), List.of(), Compaction.initial(), Set.of(), Set.of());
+        Optional.empty(), List.of(), Compaction.initial(), false, Set.of(), Set.of());
   }
 }

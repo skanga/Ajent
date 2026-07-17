@@ -520,7 +520,8 @@ final class AgentReducerTest {
         executing.activeTurnId(), executing.turnCounter(), executing.tokensIn(),
         executing.tokensOut(), executing.lastTickNanos(), executing.status(),
         executing.toolDraft(), executing.queued(), executing.compaction(),
-        executing.truncatedToolIds(), executing.sessionGrants());
+        executing.oauthRefreshInFlight(), executing.truncatedToolIds(),
+        executing.sessionGrants());
 
     stranded = reducer.update(stranded, new RuntimeMessage.Tick()).state();
     for (int second = 1; second < 30; second++) {
@@ -592,6 +593,80 @@ final class AgentReducerTest {
     AgentReducer.Step lateRetry = reducer.update(cancelled, new RuntimeMessage.RetryStream(1));
     assertThat(lateRetry.state()).isEqualTo(cancelled);
     assertThat(lateRetry.effects()).isEmpty();
+  }
+
+  @Test void authFailureWithRefreshTokenParksThenRetriesExactlyOnceOnSuccess() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get, 200_000,
+        () -> Optional.of("refresh-token"));
+    AgentState state = submit(reducer);
+    AgentReducer.Step parked = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("expired", Optional.empty(), ErrorClass.AUTH, false)));
+
+    assertThat(parked.state().oauthRefreshInFlight()).isTrue();
+    assertThat(parked.state().phase().active().orElseThrow().retryState())
+        .isInstanceOf(RetryState.Scheduled.class);
+    assertThat(parked.state().phase().active().orElseThrow().transientRetries()).isEqualTo(1);
+    assertThat(parked.state().status()).isEqualTo("auth expired — refreshing token…");
+    assertThat(parked.effects()).containsExactly(
+        new RuntimeEffect.RefreshOAuth(1, "refresh-token"));
+
+    AgentReducer.Step refreshed = reducer.update(parked.state(),
+        new RuntimeMessage.TokenRefreshed(1, new OAuthRefreshPort.Result.Success()));
+    assertThat(refreshed.state().oauthRefreshInFlight()).isFalse();
+    assertThat(refreshed.state().status()).isEqualTo("OAuth token refreshed");
+    assertThat(refreshed.effects()).containsExactly(new RuntimeEffect.Schedule(Duration.ZERO,
+        new RuntimeMessage.RetryStream(1)));
+
+    AgentReducer.Step retried = reducer.update(refreshed.state(), new RuntimeMessage.RetryStream(1));
+    assertThat(retried.state().phase().active().orElseThrow().retryState())
+        .isInstanceOf(RetryState.Fresh.class);
+    assertThat(retried.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
+    assertThat(((RuntimeEffect.StartStream) retried.effects().getFirst()).cancellation())
+        .isNotSameAs(state.phase().active().orElseThrow().cancellation());
+  }
+
+  @Test void authRefreshFailureSettlesParkedTurnAndMissingTokenNeverParks() {
+    AgentReducer withToken = reducer(PermissionVerdict.ALLOW, () -> 1_000L, 200_000,
+        () -> Optional.of("refresh-token"));
+    AgentReducer.Step parked = withToken.update(submit(withToken),
+        new RuntimeMessage.ProviderEvent(1,
+            new StreamEvent.Error("expired", Optional.empty(), ErrorClass.AUTH, false)));
+    AgentReducer.Step failed = withToken.update(parked.state(),
+        new RuntimeMessage.TokenRefreshed(1,
+            new OAuthRefreshPort.Result.Failure("[network] offline")));
+    assertThat(failed.state().oauthRefreshInFlight()).isFalse();
+    assertThat(failed.state().phase()).isInstanceOf(SessionPhase.Idle.class);
+    assertThat(failed.state().status())
+        .isEqualTo("error: token refresh failed: [network] offline");
+    assertThat(failed.state().thread().messages()).singleElement()
+        .satisfies(message -> assertThat(message.role()).isEqualTo(Role.USER));
+
+    AgentReducer withoutToken = reducer(PermissionVerdict.ALLOW);
+    AgentReducer.Step terminal = withoutToken.update(submit(withoutToken),
+        new RuntimeMessage.ProviderEvent(1,
+            new StreamEvent.Error("expired", Optional.empty(), ErrorClass.AUTH, false)));
+    assertThat(terminal.state().phase()).isInstanceOf(SessionPhase.Idle.class);
+    assertThat(terminal.effects()).noneMatch(RuntimeEffect.RefreshOAuth.class::isInstance);
+  }
+
+  @Test void refreshCompletionAfterCancelClearsLatchAndDrainsQueuedWork() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, () -> 1_000L, 200_000,
+        () -> Optional.of("refresh-token"));
+    AgentState state = reducer.update(submit(reducer), new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Error("expired", Optional.empty(), ErrorClass.AUTH, false))).state();
+    state = reducer.update(state, new RuntimeMessage.Submit("queued", List.of())).state();
+    state = reducer.update(state, new RuntimeMessage.Cancel()).state();
+    assertThat(state.oauthRefreshInFlight()).isTrue();
+
+    AgentReducer.Step refreshed = reducer.update(state,
+        new RuntimeMessage.TokenRefreshed(1, new OAuthRefreshPort.Result.Success()));
+    assertThat(refreshed.state().oauthRefreshInFlight()).isFalse();
+    assertThat(refreshed.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(refreshed.state().thread().messages().getLast().text()).isEmpty();
+    assertThat(refreshed.state().thread().messages().get(
+        refreshed.state().thread().messages().size() - 2).text()).isEqualTo("queued");
+    assertThat(refreshed.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
   }
 
   @Test void naturalFinishDrainsQueuedTurnsInFifoOrder() {
@@ -895,11 +970,24 @@ final class AgentReducerTest {
   private static AgentReducer reducer(java.util.function.Function<
       com.github.skanga.ajent.domain.ToolUse, PermissionVerdict> permission,
       java.util.function.LongSupplier clock, int contextMax) {
+    return reducer(permission, clock, contextMax, Optional::empty);
+  }
+
+  private static AgentReducer reducer(PermissionVerdict verdict,
+                                      java.util.function.LongSupplier clock, int contextMax,
+                                      java.util.function.Supplier<Optional<String>> refreshToken) {
+    return reducer(call -> verdict, clock, contextMax, refreshToken);
+  }
+
+  private static AgentReducer reducer(java.util.function.Function<
+      com.github.skanga.ajent.domain.ToolUse, PermissionVerdict> permission,
+      java.util.function.LongSupplier clock, int contextMax,
+      java.util.function.Supplier<Optional<String>> refreshToken) {
     var ids = new AtomicInteger();
     return new AgentReducer(new AgentReducer.Context(clock,
         () -> Instant.parse("2026-07-17T00:00:00Z"),
         () -> new MessageId("m-" + ids.incrementAndGet()), permission, () -> 1.0,
-        () -> contextMax));
+        () -> contextMax, refreshToken));
   }
 
   private static Thread thread() {
