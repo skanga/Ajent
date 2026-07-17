@@ -37,6 +37,30 @@ final class AgentLoopTest {
     assertThat(saves.get()).isGreaterThanOrEqualTo(2);
   }
 
+  @Test void transitionObserverReceivesTheCausalMessageWithItsReducedState() throws Exception {
+    var finished = new CountDownLatch(1);
+    var observedReason = new java.util.concurrent.atomic.AtomicReference<StopReason>();
+    ProviderPort provider = (turn, messages, cancellation, sink) ->
+        sink.accept(new StreamEvent.Finished(StopReason.MAX_TOKENS));
+
+    try (var loop = new AgentLoop(AgentState.initial(thread()),
+        reducer(PermissionVerdict.ALLOW), provider,
+        call -> new ToolCompletion.Success("unused"),
+        call -> new PermissionPort.Decision(true, false), thread -> {},
+        (message, state) -> {
+          if (message instanceof RuntimeMessage.ProviderEvent(
+              long ignored, StreamEvent.Finished event)
+              && state.phase() instanceof SessionPhase.Idle) {
+            observedReason.set(event.stopReason());
+            finished.countDown();
+          }
+        })) {
+      loop.dispatch(new RuntimeMessage.Submit("question", List.of()));
+      assertThat(finished.await(5, TimeUnit.SECONDS)).isTrue();
+    }
+    assertThat(observedReason.get()).isEqualTo(StopReason.MAX_TOKENS);
+  }
+
   @Test void executesPermissionedToolsAndFeedsTheirResultIntoAContinuation() throws Exception {
     var idle = new CountDownLatch(1);
     var providerCalls = new AtomicInteger();

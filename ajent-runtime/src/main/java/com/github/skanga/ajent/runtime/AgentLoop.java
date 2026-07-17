@@ -6,6 +6,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /** Structured virtual-thread interpreter for {@link AgentReducer}'s effects. */
@@ -17,7 +18,7 @@ public final class AgentLoop implements AutoCloseable {
   private final ToolPort tools;
   private final PermissionPort permissions;
   private final PersistencePort persistence;
-  private final Consumer<AgentState> observer;
+  private final BiConsumer<RuntimeMessage, AgentState> observer;
   private final OAuthRefreshPort oauthRefresh;
   private final ExecutorService tasks;
   private final ScheduledExecutorService scheduler;
@@ -27,6 +28,14 @@ public final class AgentLoop implements AutoCloseable {
   public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
                    PermissionPort permissions, PersistencePort persistence,
                    Consumer<AgentState> observer) {
+    this(initial, reducer, provider, tools, permissions, persistence, states(observer),
+        token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"),
+        Executors.newVirtualThreadPerTaskExecutor());
+  }
+
+  public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
+                   PermissionPort permissions, PersistencePort persistence,
+                   BiConsumer<RuntimeMessage, AgentState> observer) {
     this(initial, reducer, provider, tools, permissions, persistence, observer,
         token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"),
         Executors.newVirtualThreadPerTaskExecutor());
@@ -35,6 +44,14 @@ public final class AgentLoop implements AutoCloseable {
   public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
                    PermissionPort permissions, PersistencePort persistence,
                    Consumer<AgentState> observer, OAuthRefreshPort oauthRefresh) {
+    this(initial, reducer, provider, tools, permissions, persistence, states(observer), oauthRefresh,
+        Executors.newVirtualThreadPerTaskExecutor());
+  }
+
+  public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
+                   PermissionPort permissions, PersistencePort persistence,
+                   BiConsumer<RuntimeMessage, AgentState> observer,
+                   OAuthRefreshPort oauthRefresh) {
     this(initial, reducer, provider, tools, permissions, persistence, observer, oauthRefresh,
         Executors.newVirtualThreadPerTaskExecutor());
   }
@@ -42,12 +59,20 @@ public final class AgentLoop implements AutoCloseable {
   AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
             PermissionPort permissions, PersistencePort persistence, Consumer<AgentState> observer,
             ExecutorService tasks) {
-    this(initial, reducer, provider, tools, permissions, persistence, observer,
+    this(initial, reducer, provider, tools, permissions, persistence, states(observer),
         token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"), tasks);
   }
 
   AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
             PermissionPort permissions, PersistencePort persistence, Consumer<AgentState> observer,
+            OAuthRefreshPort oauthRefresh, ExecutorService tasks) {
+    this(initial, reducer, provider, tools, permissions, persistence, states(observer),
+        oauthRefresh, tasks);
+  }
+
+  private AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
+            PermissionPort permissions, PersistencePort persistence,
+            BiConsumer<RuntimeMessage, AgentState> observer,
             OAuthRefreshPort oauthRefresh, ExecutorService tasks) {
     state = Objects.requireNonNull(initial, "initial");
     this.reducer = Objects.requireNonNull(reducer, "reducer");
@@ -71,9 +96,14 @@ public final class AgentLoop implements AutoCloseable {
       step = reducer.update(state, message);
       state = step.state();
     }
-    observer.accept(step.state());
+    observer.accept(message, step.state());
     step.effects().forEach(this::execute);
     return step.state();
+  }
+
+  private static BiConsumer<RuntimeMessage, AgentState> states(Consumer<AgentState> observer) {
+    Objects.requireNonNull(observer, "observer");
+    return (ignored, state) -> observer.accept(state);
   }
 
   public AgentState state() {
