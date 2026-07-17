@@ -96,6 +96,21 @@ class ConversationTest {
   }
 
   @Test
+  void toolStatusVariantsCarryOnlyTheMonotonicTimesValidForTheirState() {
+    List<ToolStatus> statuses = List.of(new ToolStatus.Pending(11),
+        new ToolStatus.Approved(12), new ToolStatus.Running(13, "progress"),
+        new ToolStatus.Done(14, 15, "done"), new ToolStatus.Failed(16, 17, "failed"),
+        new ToolStatus.Rejected(18));
+    assertThat(statuses).extracting(ToolStatus::startedNanos)
+        .containsExactly(11L, 12L, 13L, 14L, 16L, 0L);
+    assertThat(statuses).extracting(ToolStatus::finishedNanos)
+        .containsExactly(0L, 0L, 0L, 15L, 17L, 18L);
+    assertThat(new ToolStatus.Pending().startedNanos()).isZero();
+    assertThat(new ToolStatus.Done("done").finishedNanos()).isZero();
+    assertThatIllegalArgumentException().isThrownBy(() -> new ToolStatus.Pending(-1));
+  }
+
+  @Test
   void aggregateRecordsRejectNullRequiredComponents() {
     assertThatNullPointerException().isThrownBy(() -> new Message(null, "", List.of(), List.of()));
     assertThatNullPointerException().isThrownBy(() -> new Message(Role.USER, null, List.of(), List.of()));

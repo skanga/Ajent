@@ -19,16 +19,56 @@ public sealed interface ToolStatus {
     };
   }
 
-  record Pending() implements ToolStatus {}
-  record Approved() implements ToolStatus {}
-  record Running(String progressText) implements ToolStatus {
-    public Running { progressText = Objects.requireNonNull(progressText, "progressText"); }
+  long startedNanos();
+
+  long finishedNanos();
+
+  record Pending(long startedNanos) implements ToolStatus {
+    public Pending() { this(0); }
+    public Pending { requireMonotonic(startedNanos); }
+    @Override public long finishedNanos() { return 0; }
   }
-  record Done(String output) implements ToolStatus {
-    public Done { output = Objects.requireNonNull(output, "output"); }
+
+  record Approved(long startedNanos) implements ToolStatus {
+    public Approved() { this(0); }
+    public Approved { requireMonotonic(startedNanos); }
+    @Override public long finishedNanos() { return 0; }
   }
-  record Failed(String output) implements ToolStatus {
-    public Failed { output = Objects.requireNonNull(output, "output"); }
+
+  record Running(long startedNanos, String progressText) implements ToolStatus {
+    public Running(String progressText) { this(0, progressText); }
+    public Running {
+      requireMonotonic(startedNanos);
+      progressText = Objects.requireNonNull(progressText, "progressText");
+    }
+    @Override public long finishedNanos() { return 0; }
   }
-  record Rejected() implements ToolStatus {}
+
+  record Done(long startedNanos, long finishedNanos, String output) implements ToolStatus {
+    public Done(String output) { this(0, 0, output); }
+    public Done {
+      requireMonotonic(startedNanos);
+      requireMonotonic(finishedNanos);
+      output = Objects.requireNonNull(output, "output");
+    }
+  }
+
+  record Failed(long startedNanos, long finishedNanos, String output) implements ToolStatus {
+    public Failed(String output) { this(0, 0, output); }
+    public Failed {
+      requireMonotonic(startedNanos);
+      requireMonotonic(finishedNanos);
+      output = Objects.requireNonNull(output, "output");
+    }
+  }
+
+  record Rejected(long finishedNanos) implements ToolStatus {
+    public Rejected() { this(0); }
+    public Rejected { requireMonotonic(finishedNanos); }
+    @Override public long startedNanos() { return 0; }
+  }
+
+  private static void requireMonotonic(long nanos) {
+    if (nanos < 0) throw new IllegalArgumentException("monotonic time cannot be negative");
+  }
 }

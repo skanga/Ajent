@@ -41,6 +41,8 @@ public final class AgentReducer {
   private static final int MAX_TRUNCATION_RETRIES = 2;
   private static final Duration TICK_REBASE_THRESHOLD = Duration.ofSeconds(2);
   private static final Duration STREAM_STALL = Duration.ofSeconds(120);
+  private static final Duration TOOL_NO_RUNNING_GRACE = Duration.ofSeconds(30);
+  private static final Duration TOOL_WEDGE = Duration.ofSeconds(330);
   private static final String MAX_TOKENS_TOOL_ERROR =
       "Output token cap (max_tokens) was reached before the tool input finished streaming, "
           + "so the call was cut off. Even if the args parsed, the body is likely truncated. "
@@ -118,18 +120,46 @@ public final class AgentReducer {
       active = active.withLastEventNanos(active.lastEventNanos() + gap);
       revised = withActive(revised, active);
     }
-    if (!(revised.phase() instanceof SessionPhase.Streaming)
-        || !(active.retryState() instanceof RetryState.Fresh)
-        || active.lastEventNanos() == 0
-        || now - active.lastEventNanos() < STREAM_STALL.toNanos()) return done(revised);
+    if (revised.phase() instanceof SessionPhase.Streaming
+        && active.retryState() instanceof RetryState.Fresh
+        && active.lastEventNanos() != 0
+        && now - active.lastEventNanos() >= STREAM_STALL.toNanos()) {
+      long silentSeconds = Duration.ofNanos(now - active.lastEventNanos()).toSeconds();
+      active.cancellation().cancel();
+      revised = withActive(revised, active.withRetryState(new RetryState.StallFired()));
+      var error = new StreamEvent.Error("stream stalled — no events for " + silentSeconds + "s",
+          Optional.empty(), ErrorClass.TRANSIENT, true);
+      return new Step(revised, List.of(new RuntimeEffect.Schedule(Duration.ZERO,
+          new RuntimeMessage.ProviderEvent(revised.activeTurnId(), error))));
+    }
+    return toolWedge(revised, now);
+  }
 
-    long silentSeconds = Duration.ofNanos(now - active.lastEventNanos()).toSeconds();
-    active.cancellation().cancel();
-    revised = withActive(revised, active.withRetryState(new RetryState.StallFired()));
-    var error = new StreamEvent.Error("stream stalled — no events for " + silentSeconds + "s",
-        Optional.empty(), ErrorClass.TRANSIENT, true);
-    return new Step(revised, List.of(new RuntimeEffect.Schedule(Duration.ZERO,
-        new RuntimeMessage.ProviderEvent(revised.activeTurnId(), error))));
+  private Step toolWedge(AgentState state, long now) {
+    if (!(state.phase() instanceof SessionPhase.ExecutingTool)) return done(state);
+    Optional<Message> assistant = lastAssistant(state);
+    if (assistant.isEmpty()) return done(state);
+    boolean anyRunning = false;
+    boolean wedged = false;
+    AgentState revised = state;
+    for (ToolUse call : assistant.orElseThrow().toolCalls()) {
+      if (!(call.status() instanceof ToolStatus.Running running)) continue;
+      anyRunning = true;
+      if (running.startedNanos() == 0
+          || now - running.startedNanos() < TOOL_WEDGE.toNanos()) continue;
+      long seconds = Duration.ofNanos(now - running.startedNanos()).toSeconds();
+      String failure = "tool ran " + seconds + "s with no result — worker likely hung on a "
+          + "blocking syscall; failing it so the turn can recover. The worker thread may "
+          + "continue in the background; its result is discarded if it ever returns.";
+      revised = updateTool(revised, call.id().value(), value -> new ToolUse(value.id(),
+          value.name(), value.arguments(), new ToolStatus.Failed(running.startedNanos(), now,
+              failure)));
+      wedged = true;
+    }
+    ActiveTurn active = revised.phase().active().orElseThrow();
+    if (!anyRunning && active.lastEventNanos() != 0
+        && now - active.lastEventNanos() >= TOOL_NO_RUNNING_GRACE.toNanos()) wedged = true;
+    return wedged ? kickTools(revised) : done(revised);
   }
 
   private Step submit(AgentState state, RuntimeMessage.Submit submit) {
@@ -345,12 +375,12 @@ public final class AgentReducer {
           + "input arrived. Please emit a fresh tool call with every required field populated "
           + "(including `" + missing + "`).";
       AgentState failed = updateTool(parsed, draft.callId(), call -> new ToolUse(call.id(),
-          call.name(), call.arguments(), new ToolStatus.Failed(failure)));
+          call.name(), call.arguments(), failed(call, failure)));
       return validatePendingTools(failed, true);
     } catch (Exception exception) {
       AgentState failed = updateTool(state, draft.callId(), call -> new ToolUse(call.id(),
-          call.name(), call.arguments(), new ToolStatus.Failed("invalid tool arguments: "
-              + exception.getMessage())));
+          call.name(), call.arguments(), failed(call,
+              "invalid tool arguments: " + exception.getMessage())));
       return new DraftFinalization(clearDraft(failed), false);
     }
   }
@@ -376,7 +406,7 @@ public final class AgentReducer {
           + "input arrived. Please emit a fresh tool call with every required field populated "
           + "(including `" + missing + "`).";
       revised = updateTool(revised, call.id().value(), value -> new ToolUse(value.id(),
-          value.name(), value.arguments(), new ToolStatus.Failed(failure)));
+          value.name(), value.arguments(), failed(value, failure)));
       truncated = true;
     }
     return new DraftFinalization(revised, truncated);
@@ -408,7 +438,12 @@ public final class AgentReducer {
 
   private AgentState failPendingTools(AgentState state, String error) {
     return updateEveryTool(state, call -> call.status() instanceof ToolStatus.Pending
-        ? new ToolUse(call.id(), call.name(), call.arguments(), new ToolStatus.Failed(error)) : call);
+        ? new ToolUse(call.id(), call.name(), call.arguments(), failed(call, error)) : call);
+  }
+
+  private ToolStatus.Failed failed(ToolUse call, String output) {
+    return new ToolStatus.Failed(call.status().startedNanos(), context.nanoClock().getAsLong(),
+        output);
   }
 
   static String missingRequiredField(ToolUse call) {
@@ -450,9 +485,12 @@ public final class AgentReducer {
       return done(state);
     AgentState revised = updateTool(state, completed.callId(), call -> {
       if (call.status().isTerminal()) return call;
+      long now = context.nanoClock().getAsLong();
       ToolStatus status = switch (completed.result()) {
-        case ToolCompletion.Success success -> new ToolStatus.Done(success.output());
-        case ToolCompletion.Failure failure -> new ToolStatus.Failed(failure.error());
+        case ToolCompletion.Success success -> new ToolStatus.Done(
+            call.status().startedNanos(), now, success.output());
+        case ToolCompletion.Failure failure -> new ToolStatus.Failed(
+            call.status().startedNanos(), now, failure.error());
       };
       return new ToolUse(call.id(), call.name(), call.arguments(), status);
     });
@@ -475,11 +513,11 @@ public final class AgentReducer {
         state.queued(), grants);
     if (resolved.approved()) {
       AgentState approved = updateTool(withGrants, resolved.callId(), call -> new ToolUse(call.id(),
-          call.name(), call.arguments(), new ToolStatus.Approved()));
+          call.name(), call.arguments(), new ToolStatus.Approved(call.status().startedNanos())));
       return kickTools(approved);
     }
     AgentState rejected = updateTool(withGrants, resolved.callId(), call -> new ToolUse(call.id(),
-        call.name(), call.arguments(), new ToolStatus.Rejected()));
+        call.name(), call.arguments(), new ToolStatus.Rejected(context.nanoClock().getAsLong())));
     return kickTools(rejected);
   }
 
@@ -488,7 +526,8 @@ public final class AgentReducer {
     if (state.compaction().active().isPresent()) return cancelCompaction(state);
     state.phase().active().orElseThrow().cancellation().cancel();
     AgentState settled = updateEveryTool(state, call -> call.status().isTerminal() ? call
-        : new ToolUse(call.id(), call.name(), call.arguments(), new ToolStatus.Rejected()));
+        : new ToolUse(call.id(), call.name(), call.arguments(),
+            new ToolStatus.Rejected(context.nanoClock().getAsLong())));
     SessionPhase.Idle idle = SessionPhase.abort(settled.phase());
     AgentState revised = clearTruncationSignals(copy(settled, settled.thread(), idle, 0, settled.turnCounter(),
         settled.tokensIn(), settled.tokensOut(), "cancelled", Optional.empty(), settled.queued(),
@@ -534,7 +573,9 @@ public final class AgentReducer {
           ? PermissionVerdict.ALLOW : context.permissions().apply(current);
       if (verdict == PermissionVerdict.DENY) {
         revised = updateTool(revised, current.id().value(), value -> new ToolUse(value.id(),
-            value.name(), value.arguments(), new ToolStatus.Failed("Tool call denied by policy.")));
+            value.name(), value.arguments(), new ToolStatus.Failed(
+                value.status().startedNanos(), context.nanoClock().getAsLong(),
+                "Tool call denied by policy.")));
         denied = true;
         continue;
       }
@@ -544,7 +585,8 @@ public final class AgentReducer {
         break; // AgenTTY presents one permission card at a time.
       }
       revised = updateTool(revised, current.id().value(), value -> new ToolUse(value.id(),
-          value.name(), value.arguments(), new ToolStatus.Running("")));
+          value.name(), value.arguments(), new ToolStatus.Running(
+              value.status().startedNanos(), "")));
       effects.add(new RuntimeEffect.ExecuteTool(revised.activeTurnId(),
           findTool(revised, current.id().value()).orElseThrow()));
     }
@@ -762,7 +804,7 @@ public final class AgentReducer {
 
   private AgentState startTool(AgentState state, StreamEvent.ToolUseStart start) {
     ToolUse call = new ToolUse(new ToolCallId(start.id()), new ToolName(start.name()), Map.of(),
-        new ToolStatus.Pending());
+        new ToolStatus.Pending(context.nanoClock().getAsLong()));
     AgentState revised = updateLastAssistant(state, message -> {
       var calls = new ArrayList<>(message.toolCalls());
       calls.add(call);
@@ -804,8 +846,7 @@ public final class AgentReducer {
           arguments, call.status()));
     } catch (Exception exception) {
       revised = updateTool(state, draft.callId(), call -> new ToolUse(call.id(), call.name(),
-          call.arguments(), new ToolStatus.Failed("invalid tool arguments: "
-              + exception.getMessage())));
+          call.arguments(), failed(call, "invalid tool arguments: " + exception.getMessage())));
     }
     return copy(revised, revised.thread(), revised.phase(), revised.activeTurnId(),
         revised.turnCounter(), revised.tokensIn(), revised.tokensOut(), revised.status(),

@@ -264,7 +264,11 @@ final class AgentReducerTest {
     assertThat(completed.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
     assertThat(completed.state().activeTurnId()).isEqualTo(2);
     assertThat(completed.state().thread().messages().get(1).toolCalls().getFirst().status())
-        .isEqualTo(new ToolStatus.Done("file contents"));
+        .isInstanceOfSatisfying(ToolStatus.Done.class, done -> {
+          assertThat(done.startedNanos()).isEqualTo(1_000L);
+          assertThat(done.finishedNanos()).isEqualTo(1_000L);
+          assertThat(done.output()).isEqualTo("file contents");
+        });
     assertThat(completed.state().thread().messages().getLast().role()).isEqualTo(Role.ASSISTANT);
     assertThat(completed.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
   }
@@ -338,7 +342,11 @@ final class AgentReducerTest {
     AgentReducer.Step failed = reducer(PermissionVerdict.ALLOW).update(executing,
         new RuntimeMessage.ToolCompleted(1, "call-1", new ToolCompletion.Failure("read failed")));
     assertThat(failed.state().thread().messages().get(1).toolCalls().getFirst().status())
-        .isEqualTo(new ToolStatus.Failed("read failed"));
+        .isInstanceOfSatisfying(ToolStatus.Failed.class, failure -> {
+          assertThat(failure.startedNanos()).isEqualTo(1_000L);
+          assertThat(failure.finishedNanos()).isEqualTo(1_000L);
+          assertThat(failure.output()).isEqualTo("read failed");
+        });
     assertThat(failed.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
     assertThat(reducer(PermissionVerdict.ALLOW).update(failed.state(),
         new RuntimeMessage.ToolCompleted(1, "call-1", new ToolCompletion.Success("late"))).state())
@@ -420,6 +428,65 @@ final class AgentReducerTest {
     clock.addAndGet(Duration.ofSeconds(120).toNanos());
     assertThat(reducer.update(awaiting, new RuntimeMessage.Tick()).state().phase())
         .isInstanceOf(SessionPhase.AwaitingPermission.class);
+  }
+
+  @Test void tickFailsAToolWorkerHungBeyondTheNativeSafetyNetAndContinues() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState executing = toolFinished(reducer);
+    ToolStatus.Running running = (ToolStatus.Running) executing.thread().messages().getLast()
+        .toolCalls().getFirst().status();
+    assertThat(running.startedNanos()).isEqualTo(1_000L);
+
+    executing = reducer.update(executing, new RuntimeMessage.Tick()).state();
+    clock.set(1_000L + Duration.ofSeconds(330).toNanos());
+    AgentReducer.Step recovered = reducer.update(executing, new RuntimeMessage.Tick());
+
+    assertThat(recovered.state().thread().messages().get(1).toolCalls().getFirst().status())
+        .isInstanceOfSatisfying(ToolStatus.Failed.class, failed -> {
+          assertThat(failed.startedNanos()).isEqualTo(1_000L);
+          assertThat(failed.finishedNanos()).isEqualTo(clock.get());
+          assertThat(failed.output()).isEqualTo("tool ran 330s with no result — worker likely "
+              + "hung on a blocking syscall; failing it so the turn can recover. The worker "
+              + "thread may continue in the background; its result is discarded if it ever "
+              + "returns.");
+        });
+    assertThat(recovered.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(recovered.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
+    assertThat(reducer.update(recovered.state(), new RuntimeMessage.ToolCompleted(1, "call-1",
+        new ToolCompletion.Success("late worker result"))).state()).isEqualTo(recovered.state());
+  }
+
+  @Test void tickRefiresSchedulerWhenExecutingToolHasNothingRunningForThirtySeconds() {
+    var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState executing = toolFinished(reducer);
+    com.github.skanga.ajent.domain.Message assistant = executing.thread().messages().getLast();
+    var terminalCall = new com.github.skanga.ajent.domain.ToolUse(
+        assistant.toolCalls().getFirst().id(), assistant.toolCalls().getFirst().name(),
+        assistant.toolCalls().getFirst().arguments(), new ToolStatus.Done(1_000L, 2_000L, "ok"));
+    var messages = new java.util.ArrayList<>(executing.thread().messages());
+    messages.set(messages.size() - 1, assistant.withToolCalls(List.of(terminalCall)));
+    var strandedThread = new Thread(executing.thread().id(), executing.thread().title(), messages,
+        executing.thread().createdAt(), executing.thread().updatedAt(),
+        executing.thread().compactions());
+    AgentState stranded = new AgentState(strandedThread, executing.phase(),
+        executing.activeTurnId(), executing.turnCounter(), executing.tokensIn(),
+        executing.tokensOut(), executing.lastTickNanos(), executing.status(),
+        executing.toolDraft(), executing.queued(), executing.compaction(),
+        executing.truncatedToolIds(), executing.sessionGrants());
+
+    stranded = reducer.update(stranded, new RuntimeMessage.Tick()).state();
+    for (int second = 1; second < 30; second++) {
+      clock.set(1_000L + Duration.ofSeconds(second).toNanos());
+      AgentReducer.Step waiting = reducer.update(stranded, new RuntimeMessage.Tick());
+      assertThat(waiting.effects()).isEmpty();
+      stranded = waiting.state();
+    }
+    clock.set(1_000L + Duration.ofSeconds(30).toNanos());
+    AgentReducer.Step recovered = reducer.update(stranded, new RuntimeMessage.Tick());
+    assertThat(recovered.state().phase()).isInstanceOf(SessionPhase.Streaming.class);
+    assertThat(recovered.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
   }
 
   @Test void heartbeatAndFirstDeltaResetTransientBudgetButNotMidStreamFailures() {
@@ -618,7 +685,11 @@ final class AgentReducerTest {
     AgentState state = toolFinished(reducer);
     assertThat(state.phase()).isInstanceOf(SessionPhase.Streaming.class);
     assertThat(state.thread().messages().get(1).toolCalls().getFirst().status())
-        .isEqualTo(new ToolStatus.Failed("Tool call denied by policy."));
+        .isInstanceOfSatisfying(ToolStatus.Failed.class, failure -> {
+          assertThat(failure.startedNanos()).isEqualTo(1_000L);
+          assertThat(failure.finishedNanos()).isEqualTo(1_000L);
+          assertThat(failure.output()).isEqualTo("Tool call denied by policy.");
+        });
   }
 
   @Test void alwaysApprovalPropagatesToLaterCallsOfTheSameTool() {
