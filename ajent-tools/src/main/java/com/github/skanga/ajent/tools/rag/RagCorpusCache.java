@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,17 +23,25 @@ final class RagCorpusCache {
   record CachedFile(long size, long modified, List<RagChunk> chunks) {
     CachedFile { chunks = List.copyOf(chunks); }
   }
+  record LoadResult(Map<String, CachedFile> files, int embeddingDimension, long signature,
+                    HnswIndex graph) {
+    LoadResult { files = Map.copyOf(files); }
+  }
 
   private RagCorpusCache() {}
 
   static Map<String, CachedFile> load(Path root) {
+    return loadState(root).files();
+  }
+
+  static LoadResult loadState(Path root) {
     Path file = root.resolve(FILE_NAME);
     try {
       long size = Files.size(file);
-      if (size <= 0 || size > MAX_CACHE_BYTES) return Map.of();
+      if (size <= 0 || size > MAX_CACHE_BYTES) return empty();
       ByteBuffer buffer = ByteBuffer.wrap(Files.readAllBytes(file)).order(ByteOrder.LITTLE_ENDIAN);
-      if (buffer.getInt() != MAGIC_V3) return Map.of();
-      buffer.getInt(); // embedding dimension; each chunk carries its own vector too.
+      if (buffer.getInt() != MAGIC_V3) return empty();
+      int embeddingDimension = count(buffer);
       int fileCount = count(buffer);
       var result = new LinkedHashMap<String, CachedFile>();
       for (int fileIndex = 0; fileIndex < fileCount; fileIndex++) {
@@ -54,13 +63,25 @@ final class RagCorpusCache {
         }
         result.put(path, new CachedFile(fileSize, modified, chunks));
       }
-      return Map.copyOf(result);
+      long signature = 0;
+      var graph = new HnswIndex();
+      if (buffer.hasRemaining()) {
+        if (buffer.remaining() < Long.BYTES) return new LoadResult(result, embeddingDimension, 0,
+            new HnswIndex());
+        signature = buffer.getLong();
+        if (!graph.deserialize(buffer)) graph = new HnswIndex();
+      }
+      return new LoadResult(result, embeddingDimension, signature, graph);
     } catch (IOException | RuntimeException exception) {
-      return Map.of();
+      return empty();
     }
   }
 
   static void write(Path root, List<RagChunk> chunks) {
+    write(root, chunks, null);
+  }
+
+  static void write(Path root, List<RagChunk> chunks, HnswIndex graph) {
     var byPath = new LinkedHashMap<String, List<RagChunk>>();
     for (RagChunk chunk : chunks)
       byPath.computeIfAbsent(chunk.path(), ignored -> new ArrayList<>()).add(chunk);
@@ -75,7 +96,7 @@ final class RagCorpusCache {
       long modified = 0;
       try {
         size = Files.size(source);
-        modified = Files.getLastModifiedTime(source).toMillis();
+        modified = nativeModified(Files.getLastModifiedTime(source));
       } catch (IOException ignored) {
         // Hot-added non-folder documents intentionally persist zero file metadata.
       }
@@ -93,12 +114,55 @@ final class RagCorpusCache {
         for (float value : embedding) writeInt(output, Float.floatToRawIntBits(value));
       }
     }
+    if (graph != null && !graph.isEmpty()) {
+      writeLong(output, signature(chunks));
+      output.writeBytes(graph.serialize());
+    }
     try {
       Files.write(root.resolve(FILE_NAME), output.toByteArray(), StandardOpenOption.CREATE,
           StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
     } catch (IOException ignored) {
       // A cache failure never makes retrieval fail.
     }
+  }
+
+  static long signature(List<RagChunk> chunks) {
+    long hash = 0xcbf29ce484222325L;
+    for (RagChunk chunk : chunks) {
+      hash = mix(hash, chunk.path().getBytes(StandardCharsets.UTF_8));
+      hash = mixInt(hash, chunk.lineStart());
+      hash = mixInt(hash, chunk.lineEnd());
+      hash = mixInt(hash, chunk.embedding().length);
+    }
+    return hash;
+  }
+
+  /** MSVC's file_clock stores 100 ns ticks from the Windows FILETIME epoch. */
+  static long nativeModified(FileTime value) {
+    if (!System.getProperty("os.name", "").startsWith("Windows")) return value.toMillis();
+    var instant = value.toInstant();
+    return (instant.getEpochSecond() + 11_644_473_600L) * 10_000_000L
+        + instant.getNano() / 100;
+  }
+
+  private static LoadResult empty() {
+    return new LoadResult(Map.of(), 0, 0, new HnswIndex());
+  }
+
+  private static long mixInt(long hash, int value) {
+    for (int shift = 0; shift < Integer.SIZE; shift += Byte.SIZE) {
+      hash ^= (value >>> shift) & 0xffL;
+      hash *= 0x100000001b3L;
+    }
+    return hash;
+  }
+
+  private static long mix(long hash, byte[] value) {
+    for (byte item : value) {
+      hash ^= item & 0xffL;
+      hash *= 0x100000001b3L;
+    }
+    return hash;
   }
 
   private static int count(ByteBuffer buffer) {

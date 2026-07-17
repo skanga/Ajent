@@ -92,4 +92,23 @@ final class AgenttyDocRetrieverTest {
     assertThat(response.mode()).contains("neural-reranked");
     assertThat(response.hits().getFirst().path()).isEqualTo("strong.md");
   }
+
+  @Test void configuredDenseRetrievalIsLiveInSearchDocs(@TempDir Path root) throws Exception {
+    Path docs = Files.createDirectories(root.resolve("docs"));
+    Files.writeString(docs.resolve("semantic.md"), "a passage with entirely unrelated terms");
+    EmbeddingClient embeddings = (config, texts) -> Optional.of(texts.stream()
+        .map(text -> text.contains("conceptual query") ? new float[] {0, 1}
+            : new float[] {0, 1}).toList());
+    var corpus = new RagCorpus(embeddings);
+    var config = new EmbeddingClient.Config("localhost", 11434, "nomic");
+    var retriever = new AgenttyDocRetriever(docs, null, null, null, false, false,
+        null, null, null, null, corpus, config);
+
+    HostServices.DocResponse response = retriever.retrieve(
+        new HostServices.DocQuery("conceptual query", 2));
+    assertThat(response.error()).isEmpty();
+    assertThat(response.hits()).extracting(HostServices.DocHit::path)
+        .containsExactly("semantic.md");
+    assertThat(response.mode()).contains("hybrid+ctx").doesNotContain("BM25-only");
+  }
 }

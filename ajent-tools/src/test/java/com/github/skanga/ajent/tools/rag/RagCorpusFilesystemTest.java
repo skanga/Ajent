@@ -91,6 +91,24 @@ final class RagCorpusFilesystemTest {
     corpus.flushCache();
   }
 
+  @Test void cachePersistsAndRestoresTheNativeHnswTrailer() {
+    var chunks = List.of(
+        new RagChunk("a.md", 1, 1, "alpha", "", new float[] {1, 0}, null),
+        new RagChunk("b.md", 1, 1, "beta", "", new float[] {0, 1}, null));
+    var graph = new HnswIndex();
+    graph.build(List.of(0, 1), chunks.stream().map(RagChunk::embedding).toList());
+
+    RagCorpusCache.write(temporaryDirectory, chunks, graph);
+    RagCorpusCache.LoadResult restored = RagCorpusCache.loadState(temporaryDirectory);
+
+    assertThat(restored.signature()).isEqualTo(RagCorpusCache.signature(chunks)).isNotZero();
+    assertThat(restored.embeddingDimension()).isEqualTo(2);
+    assertThat(restored.graph().search(new float[] {0, 1}, 1).getFirst().id()).isEqualTo(1);
+    assertThat(RagCorpusCache.load(temporaryDirectory)).hasSize(2);
+    RagCorpusCache.write(temporaryDirectory, chunks);
+    assertThat(RagCorpusCache.loadState(temporaryDirectory).graph().isEmpty()).isTrue();
+  }
+
   private void write(String relative, String body) throws IOException {
     Files.writeString(temporaryDirectory.resolve(relative), body);
   }

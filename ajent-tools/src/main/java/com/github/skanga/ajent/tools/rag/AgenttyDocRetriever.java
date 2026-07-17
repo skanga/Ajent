@@ -19,7 +19,8 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
   private final RagQueryExpander.Config expansionConfig;
   private final NeuralReranker neuralReranker;
   private final NeuralReranker.Config neuralConfig;
-  private final RagCorpus docs = new RagCorpus();
+  private final RagCorpus docs;
+  private final EmbeddingClient.Config embeddingConfig;
   private boolean docsBuilt;
 
   public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
@@ -41,6 +42,16 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
                              boolean skillsEnabled, boolean memoryEnabled,
                              RagQueryExpander expander, RagQueryExpander.Config expansionConfig,
                              NeuralReranker neuralReranker, NeuralReranker.Config neuralConfig) {
+    this(docsRoot, skills, memory, mcp, skillsEnabled, memoryEnabled, expander, expansionConfig,
+        neuralReranker, neuralConfig, new RagCorpus(), EmbeddingClient.Config.disabled());
+  }
+
+  public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
+                             MemoryKnowledgeSource memory, KnowledgeSource mcp,
+                             boolean skillsEnabled, boolean memoryEnabled,
+                             RagQueryExpander expander, RagQueryExpander.Config expansionConfig,
+                             NeuralReranker neuralReranker, NeuralReranker.Config neuralConfig,
+                             RagCorpus docs, EmbeddingClient.Config embeddingConfig) {
     this.docsRoot = docsRoot;
     this.skills = skills;
     this.memory = memory;
@@ -51,16 +62,18 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
     this.expansionConfig = expansionConfig;
     this.neuralReranker = neuralReranker;
     this.neuralConfig = neuralConfig;
+    this.docs = docs;
+    this.embeddingConfig = embeddingConfig;
   }
 
   @Override public synchronized HostServices.DocResponse retrieve(HostServices.DocQuery query) {
     try {
       if (!docsBuilt) {
         docsBuilt = true;
-        if (docsRoot != null && Files.isDirectory(docsRoot)) docs.build(docsRoot);
+        if (docsRoot != null && Files.isDirectory(docsRoot)) docs.build(docsRoot, embeddingConfig);
       }
       var router = new KnowledgeRouter();
-      CorpusKnowledgeSource docsSource = new CorpusKnowledgeSource("docs", docs);
+      CorpusKnowledgeSource docsSource = new CorpusKnowledgeSource("docs", docs, embeddingConfig);
       boolean haveDocs = docs.chunkCount() > 0;
       if (haveDocs) router.add(docsSource);
       if (skillsEnabled && skills != null) router.add(skills);
@@ -96,7 +109,8 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
       context = pipeline.add(new RagPipeline.MmrStage(limit, .75))
           .add(new RagPipeline.CompressStage(600)).run(context);
 
-      String mode = "BM25-only, " + (neural ? "neural-reranked" : "reranked");
+      String mode = (haveDocs && docs.hasEmbeddings() ? "hybrid+ctx" : "BM25-only") + ", "
+          + (neural ? "neural-reranked" : "reranked");
       if (variantCount > 0) mode += ", +" + variantCount + " query variants";
       mode += ", confidence " + String.format(Locale.ROOT, "%.2f", context.confidence());
       if (context.confidence() < .25)
