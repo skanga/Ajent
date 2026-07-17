@@ -20,6 +20,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -199,6 +202,66 @@ class ProviderHttpTransportTest {
         .streamOpenAi(request(false, new ProviderAuth.Empty()), events::add, () -> true);
 
     assertThat(events).containsExactly(new StreamEvent.Error("cancelled"));
+  }
+
+  @Test
+  void cancellationUnblocksAStalledResponseBody() throws Exception {
+    var serverRelease = new CountDownLatch(1);
+    start(exchange -> {
+      exchange.sendResponseHeaders(200, 0);
+      exchange.getResponseBody().write(("data: {\"choices\":[{\"delta\":{"
+          + "\"content\":\"started\"}}]}\n\n").getBytes(StandardCharsets.UTF_8));
+      exchange.getResponseBody().flush();
+      serverRelease.await(5, TimeUnit.SECONDS);
+      exchange.close();
+    });
+    var cancelled = new AtomicBoolean();
+    var firstEvent = new CountDownLatch(1);
+    var events = java.util.Collections.synchronizedList(new ArrayList<StreamEvent>());
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var future = executor.submit(() -> new ProviderHttpTransport(HttpClient.newHttpClient())
+          .streamOpenAi(request(false, new ProviderAuth.Bearer("token")), event -> {
+            events.add(event);
+            firstEvent.countDown();
+          }, cancelled::get));
+      assertThat(firstEvent.await(5, TimeUnit.SECONDS)).isTrue();
+
+      cancelled.set(true);
+      try {
+        future.get(2, TimeUnit.SECONDS);
+      } finally {
+        serverRelease.countDown();
+      }
+    }
+
+    assertThat(events).containsExactly(
+        new StreamEvent.TextDelta("started"), new StreamEvent.Error("cancelled"));
+  }
+
+  @Test
+  void byteIdleTimeoutTerminatesAStalledResponseAsTransient() throws Exception {
+    var serverRelease = new CountDownLatch(1);
+    start(exchange -> {
+      exchange.sendResponseHeaders(200, 0);
+      exchange.getResponseBody().flush();
+      serverRelease.await(5, TimeUnit.SECONDS);
+      exchange.close();
+    });
+    var events = new ArrayList<StreamEvent>();
+    try {
+      new ProviderHttpTransport(HttpClient.newHttpClient(), Duration.ofMillis(200),
+          Duration.ofMillis(10)).streamOpenAi(
+              request(false, new ProviderAuth.Bearer("token")), events::add, () -> false);
+    } finally {
+      serverRelease.countDown();
+    }
+
+    assertThat(events).singleElement().satisfies(event -> {
+      var error = assertThat(event).asInstanceOf(
+          org.assertj.core.api.InstanceOfAssertFactories.type(StreamEvent.Error.class)).actual();
+      assertThat(error.message()).contains("idle timeout", "no bytes");
+      assertThat(error.errorClass()).isEqualTo(ErrorClass.TRANSIENT);
+    });
   }
 
   private void start(ThrowingHandler handler) throws IOException {
