@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 10 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 12 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -41,8 +41,8 @@ are recorded in the machine-readable manifests under
 | Thread/settings persistence | planned | planned | planned | missing | planned |
 | Credential v1 envelope | planned | planned | planned | missing | planned |
 | Anthropic provider | tool-result budget and image cases | `AnthropicMessagesTest` | message-block serializer and 64 KiB UTF-8 budget | source assertions translated; live transport missing | partial |
-| OpenAI-compatible providers | planned | planned | planned | missing | planned |
-| Ollama provider | planned | planned | planned | missing | planned |
+| OpenAI-compatible providers | `openai_transport_test.cpp` assertions | `OpenAiWireBuildersTest`, `ProviderRegistryTest`, `OpenAiStreamParserTest`, `OpenAiStreamDecoderTest`, wire-framer tests | presets/auth resolution, message/tool serialization, SSE/native parsing, byte-incremental decoding and salvage | all enabled source assertions translated; live HTTP, model listing, retry/cancel, and native differential capture remain | partial |
+| Ollama provider | `ollama_transport_test.cpp` assertions | `OllamaWireTest`, `OllamaStreamParserTest`, `OllamaStreamDecoderTest` | native/JSON-protocol history, option selection, structured/salvaged calls, response pseudo-tool, byte-incremental NDJSON | all 39 source scenarios translated; exact full prompt, env overrides, live HTTP/model discovery, and native differential capture remain | partial |
 | Native tool catalog/dispatch | planned | planned | planned | missing | planned |
 | Permissions and scheduling | planned | planned | planned | missing | planned |
 | Skills and memory | planned | planned | planned | missing | planned |

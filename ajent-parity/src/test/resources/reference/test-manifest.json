@@ -300,9 +300,13 @@
       "classification": "unit",
       "surface": "provider",
       "referenceRun": "ctest --test-dir <build> -R \"^ollama_transport_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/OllamaTransportTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-provider/src/test/java/com/github/skanga/ajent/provider/ollama/OllamaStreamParserTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "ajent-provider/src/test/java/com/github/skanga/ajent/provider/ollama/OllamaWireTest.java",
+        "ajent-provider/src/test/java/com/github/skanga/ajent/provider/ollama/OllamaStreamDecoderTest.java",
+        "mvn -q -pl ajent-provider -am test"
+      ]
     },
     {
       "id": "openai_transport_test",
@@ -312,9 +316,14 @@
       "classification": "unit",
       "surface": "provider",
       "referenceRun": "ctest --test-dir <build> -R \"^openai_transport_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/OpenaiTransportTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-provider/src/test/java/com/github/skanga/ajent/provider/openai/OpenAiStreamParserTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "ajent-provider/src/test/java/com/github/skanga/ajent/provider/openai/OpenAiWireBuildersTest.java",
+        "ajent-provider/src/test/java/com/github/skanga/ajent/provider/openai/OpenAiStreamDecoderTest.java",
+        "ajent-provider/src/test/java/com/github/skanga/ajent/provider/wire/SseFramerTest.java",
+        "mvn -q -pl ajent-provider -am test"
+      ]
     },
     {
       "id": "param_tag_repair_test",
