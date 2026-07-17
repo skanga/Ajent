@@ -6,7 +6,7 @@ Ajent adds a library only when the JDK cannot express a parity requirement clean
 |---|---|---|---|
 | JUnit 6.1.0 | test | Java unit and differential test engine | all reactor test reports |
 | AssertJ 3.27.6 | test | readable, typed assertions for translated C++ conditions | translated pure suites and CLI parity tests |
-| Jackson 2.22.0 | `ajent-tools` | mutable JSON tree required for byte-shape-compatible tool argument repair | `ParameterTagRepairTest` |
+| Jackson 2.22.0 | `ajent-tools`, `ajent-provider` | mutable JSON tree for byte-shape-compatible argument repair and structural provider wire serialization | `ParameterTagRepairTest`, `AnthropicMessagesTest` |
 | JaCoCo 0.8.15 | build | enforced coverage gap detection | `mvn verify`; 80% module gates, 90% domain branch gate |
 
 No LLM orchestration framework is present. In particular, LangChain4j is intentionally absent because Ajent must preserve AgenTTY's provider wire format, reducer decisions, and tool semantics directly.

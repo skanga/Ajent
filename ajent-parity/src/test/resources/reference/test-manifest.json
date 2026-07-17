@@ -72,9 +72,9 @@
       "classification": "unit",
       "surface": "tools-agent-loop",
       "referenceRun": "ctest --test-dir <build> -R \"^doom_loop_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/DoomLoopTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-core/src/test/java/com/github/skanga/ajent/core/loop/DoomLoopBreakerTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q -pl ajent-core -am verify", "all 10 reference scenarios translated"]
     },
     {
       "id": "edit_turn_cpu_probe",
@@ -276,9 +276,9 @@
       "classification": "unit",
       "surface": "model-catalog",
       "referenceRun": "ctest --test-dir <build> -R \"^model_label_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/ModelLabelTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/ModelLabelsTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q -pl ajent-terminal -am verify", "100% line / 88.37% branch coverage"]
     },
     {
       "id": "o1_probe",
@@ -468,9 +468,9 @@
       "classification": "unit",
       "surface": "tools-agent-loop",
       "referenceRun": "ctest --test-dir <build> -R \"^salvage_dedup_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/SalvageDedupTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-core/src/test/java/com/github/skanga/ajent/core/loop/SalvagedCallDeduplicatorTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q -pl ajent-core -am verify", "all 10 reference scenarios translated"]
     },
     {
       "id": "scheduler_path_test",
@@ -480,9 +480,9 @@
       "classification": "unit",
       "surface": "tools-agent-loop",
       "referenceRun": "ctest --test-dir <build> -R \"^scheduler_path_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/SchedulerPathTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-core/src/test/java/com/github/skanga/ajent/core/scheduling/ToolSchedulerTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q -pl ajent-core -am verify", "all 13 reference checks translated"]
     },
     {
       "id": "scrollback_oracle_test",
@@ -624,9 +624,9 @@
       "classification": "unit",
       "surface": "tools-agent-loop",
       "referenceRun": "ctest --test-dir <build> -R \"^tool_result_budget_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/ToolResultBudgetTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-provider/src/test/java/com/github/skanga/ajent/provider/anthropic/AnthropicMessagesTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q -pl ajent-provider -am verify", "all reference budget and image checks translated"]
     },
     {
       "id": "toolset_e2e_test",
