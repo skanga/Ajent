@@ -627,9 +627,16 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^stream_md_lag_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/StreamMdLagTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/StreamingMarkdownLagTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/StreamingMarkdown.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/TextReveal.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "native 400-section 60+ KiB workload translated with 2-6 KiB versus 40-60 KiB growth windows, 6 KiB versus full steady frames, 24x ceilings, 16,000-byte live-tail bound, and finish-time committed-prefix flush"
+      ]
     },
     {
       "id": "table_render_test",

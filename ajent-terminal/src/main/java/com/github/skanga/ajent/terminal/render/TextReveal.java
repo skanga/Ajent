@@ -24,6 +24,11 @@ public final class TextReveal {
     this.finalizeSeconds = finalizeSeconds > 0 ? finalizeSeconds : 0.001;
   }
 
+  /** Updates live reveal pacing without discarding the current cursor position. */
+  public void setPacing(double floorRate, double drainSeconds) {
+    cursor.setPacing(floorRate, drainSeconds);
+  }
+
   /** Starts a new text block, revealing existing settled text immediately. */
   public Frame begin(String text, boolean streaming, long nowNanos) {
     source = Objects.requireNonNull(text, "text");

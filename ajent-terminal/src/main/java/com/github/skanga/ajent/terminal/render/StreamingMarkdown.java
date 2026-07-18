@@ -37,6 +37,7 @@ public final class StreamingMarkdown {
   private boolean revealEffects = true;
   private int rowFloor;
   private int floorWidth = -1;
+  private int committedSourceEnd;
 
   /** Native top-level block kinds exposed by Maya's StreamingMarkdown. */
   public enum BlockKind {
@@ -107,10 +108,15 @@ public final class StreamingMarkdown {
     revealEffects = enabled;
   }
 
+  public void setRevealPacing(double floorRate, double drainSeconds) {
+    reveal.setPacing(floorRate, drainSeconds);
+  }
+
   public void finish() {
     applyAsyncIfReady();
     live = false;
     blocks = parse(source);
+    committedSourceEnd = source.length();
   }
 
   public String content() {
@@ -121,6 +127,11 @@ public final class StreamingMarkdown {
     return blocks;
   }
 
+  /** UTF-8 byte extent that has left the mutable live tail. */
+  public int committedBytes() {
+    return utf8Length(source.substring(0, committedSourceEnd));
+  }
+
   /** Builds a production frame while preserving the largest live height at this width. */
   public List<MarkdownTerminalRenderer.Line> render(int width, long nowNanos) {
     if (width <= 0) throw new IllegalArgumentException("Markdown width must be positive");
@@ -128,6 +139,7 @@ public final class StreamingMarkdown {
     revealFrame = revealFrame == null
         ? reveal.begin(source, live && revealEffects, nowNanos)
         : reveal.update(source, live && revealEffects, nowNanos);
+    commitRevealedBlocks();
     List<MarkdownTerminalRenderer.Line> rendered =
         MarkdownTerminalRenderer.render(revealFrame, width);
     if (width != floorWidth) {
@@ -171,9 +183,24 @@ public final class StreamingMarkdown {
   }
 
   private void applyParsed(Parsed parsed) {
-    if (!parsed.source().startsWith(source)) resetVisualState();
+    if (!parsed.source().startsWith(source)) {
+      resetVisualState();
+      committedSourceEnd = 0;
+    }
     source = parsed.source();
     blocks = parsed.blocks();
+  }
+
+  private void commitRevealedBlocks() {
+    if (revealFrame == null || blocks.isEmpty()) return;
+    int revealedEnd = source.offsetByCodePoints(0,
+        Math.min(revealFrame.revealedCodePoints(), source.codePointCount(0, source.length())));
+    int extent = committedSourceEnd;
+    for (Block block : blocks) {
+      if (block.sourceEnd() > revealedEnd) break;
+      extent = Math.max(extent, block.sourceEnd());
+    }
+    committedSourceEnd = extent;
   }
 
   private void cancelPendingParse() {
