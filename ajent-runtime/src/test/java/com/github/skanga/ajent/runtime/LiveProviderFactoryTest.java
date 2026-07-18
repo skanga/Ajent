@@ -77,6 +77,24 @@ class LiveProviderFactoryTest {
         });
   }
 
+  @Test
+  void clampsPersistedEffortAtRequestTimeForTheSelectedModel(@TempDir Path root) throws Exception {
+    var components = components(root);
+    var oldOpus = new LiveProviderFactory.Configuration(
+        "anthropic", "claude-opus-4-5", new ProviderAuth.Empty(), "max",
+        components.systemPrompt(), 0, Map.of());
+    var unsupported = new LiveProviderFactory.Configuration(
+        "anthropic", "claude-haiku-4-5", new ProviderAuth.Empty(), "high",
+        components.systemPrompt(), 0, Map.of());
+
+    assertThat(LiveProviderFactory.request(oldOpus, List.of()))
+        .isInstanceOfSatisfying(HttpProviderPort.Request.Anthropic.class,
+            request -> assertThat(request.value().effort()).isEqualTo("high"));
+    assertThat(LiveProviderFactory.request(unsupported, List.of()))
+        .isInstanceOfSatisfying(HttpProviderPort.Request.Anthropic.class,
+            request -> assertThat(request.value().effort()).isEmpty());
+  }
+
   private static ToolRuntimeFactory.Components components(Path root) throws Exception {
     Path workspace = Files.createDirectories(root.resolve("workspace"));
     Path home = Files.createDirectories(root.resolve("home"));

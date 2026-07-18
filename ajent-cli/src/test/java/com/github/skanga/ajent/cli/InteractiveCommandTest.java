@@ -320,6 +320,32 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
 
+  @Test void modelPickerCyclesAndRendersNativeReasoningEffortLadder() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.model = "claude-opus-4-7";
+    agent.availableModels = List.of(
+        new com.github.skanga.ajent.terminal.ui.ModelPicker.Model(
+            "claude-opus-4-7", "Claude Opus 4.7", false),
+        new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("gpt-5", "GPT 5", false));
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "open model".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("reasoning effort: off", "\u2190/\u2192 change");
+    ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
+    assertThat(agent.effort).isEqualTo(com.github.skanga.ajent.domain.Effort.LOW);
+    assertThat(terminal.bytes.toString()).contains("\u25c7 low", "reasoning effort: low");
+    ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+    assertThat(agent.effort).isEqualTo(com.github.skanga.ajent.domain.Effort.NONE);
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
+    assertThat(agent.effort).isEqualTo(com.github.skanga.ajent.domain.Effort.NONE);
+  }
+
   @Test void liveDiffReviewRoutesHunksAndPaletteWideActions() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
@@ -970,10 +996,13 @@ final class InteractiveCommandTest {
     private int newThreads;
     private Profile profile = Profile.ASK;
     private String model = "alpha";
+    private com.github.skanga.ajent.domain.Effort effort =
+        com.github.skanga.ajent.domain.Effort.NONE;
     private List<String> favorites = List.of();
     private String provider = "anthropic";
     private boolean rejectProvider;
     private boolean deferModels;
+    private List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model> availableModels;
     private String anthropicKey = "";
     private String providerKey = "";
     private URI browser;
@@ -1060,15 +1089,18 @@ final class InteractiveCommandTest {
       return profile;
     }
     @Override public String model() { return model; }
+    @Override public com.github.skanga.ajent.domain.Effort effort() { return effort; }
+    @Override public void setEffort(com.github.skanga.ajent.domain.Effort value) { effort = value; }
     @Override public void loadModels(
         java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>> receiver) {
       if (deferModels) { pendingModels = receiver; return; }
       receiver.accept(modelRows());
     }
     private List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model> modelRows() {
-      return List.of(
+      return availableModels == null ? List.of(
           new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("alpha", "Alpha", false),
-          new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("beta", "Beta", false));
+          new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("beta", "Beta", false))
+          : availableModels;
     }
     private void completeModels() {
       deferModels = false;

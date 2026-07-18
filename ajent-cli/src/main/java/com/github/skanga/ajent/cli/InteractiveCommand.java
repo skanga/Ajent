@@ -6,9 +6,11 @@ import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
 import com.github.skanga.ajent.domain.Attachment;
 import com.github.skanga.ajent.domain.AttachmentText;
+import com.github.skanga.ajent.domain.Effort;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.ModelId;
+import com.github.skanga.ajent.domain.ModelCapabilities;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.SessionPhase;
@@ -290,6 +292,15 @@ final class InteractiveCommand {
           return next;
         }
         @Override public String model() { return activeProvider.get().model(); }
+        @Override public Effort effort() {
+          return Effort.fromWire(activeProvider.get().effort());
+        }
+        @Override public void setEffort(Effort effort) {
+          activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
+              current.provider(), current.model(), current.auth(), effort.wire(),
+              current.systemPrompt(), current.contextWindow(), current.environment()));
+          configured.settings().save(configured.settings().load().withEffort(effort.wire()));
+        }
         @Override public void loadModels(Consumer<List<ModelPicker.Model>> receiver) {
           Thread.startVirtualThread(() -> {
             List<com.github.skanga.ajent.provider.ProviderModel> discovered =
@@ -309,11 +320,16 @@ final class InteractiveCommand {
           });
         }
         @Override public void selectModel(String model) {
-          activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
-              current.provider(), model, current.auth(), current.effort(), current.systemPrompt(),
-              current.contextWindow(), current.environment()));
+          activeProvider.updateAndGet(current -> {
+            Effort effort = Effort.fromWire(current.effort()).clamp(
+                ModelCapabilities.fromId(model));
+            return new LiveProviderFactory.Configuration(
+                current.provider(), model, current.auth(), effort.wire(), current.systemPrompt(),
+                current.contextWindow(), current.environment());
+          });
+          LiveProviderFactory.Configuration selected = activeProvider.get();
           configured.settings().save(configured.settings().load().withProviderModel(
-              activeProvider.get().provider(), new ModelId(model)));
+              selected.provider(), new ModelId(model)).withEffort(selected.effort()));
         }
         @Override public void saveFavorites(List<String> models) {
           configured.settings().save(configured.settings().load().withFavoriteModels(
@@ -341,9 +357,12 @@ final class InteractiveCommand {
           if (recalled.isBlank()) recalled = activeProvider.get().model();
           String selectedModel = recalled;
           activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
-              provider, selectedModel, auth, current.effort(), current.systemPrompt(),
+              provider, selectedModel, auth, Effort.fromWire(current.effort()).clamp(
+                  ModelCapabilities.fromId(selectedModel)).wire(),
+              current.systemPrompt(),
               current.contextWindow(), current.environment()));
-          configured.settings().save(saved.withProviderModel(provider, new ModelId(selectedModel)));
+          configured.settings().save(saved.withProviderModel(provider, new ModelId(selectedModel))
+              .withEffort(activeProvider.get().effort()));
           return true;
         }
         @Override public LoginModal.OAuthAttempt newOAuthAttempt() {
@@ -480,7 +499,8 @@ final class InteractiveCommand {
     var checkpoints = new GitCheckpointStore(workspace, sandbox.runner());
     var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
         workspace, workspace, home, docs, new JdkWebTransport(), todos, null, sandbox.runner()));
-    var providers = new LiveProviderFactory.Configuration(provider, model, auth, settings.effort(),
+    String effort = Effort.fromWire(settings.effort()).clamp(ModelCapabilities.fromId(model)).wire();
+    var providers = new LiveProviderFactory.Configuration(provider, model, auth, effort,
         tools.systemPrompt(), 0, environment);
     CheckpointPort checkpointPort = new CheckpointPort() {
       @Override public boolean enabled() { return checkpoints.inGitRepo(); }
@@ -598,6 +618,8 @@ final class InteractiveCommand {
     void restoreCheckpoint(CheckpointId id, Consumer<CheckpointPicker.Restore> completed);
     Profile cycleProfile();
     String model();
+    Effort effort();
+    void setEffort(Effort effort);
     void loadModels(Consumer<List<ModelPicker.Model>> receiver);
     void selectModel(String model);
     void saveFavorites(List<String> models);
@@ -689,6 +711,7 @@ final class InteractiveCommand {
     private List<DiffReview.File> diffFiles = List.of();
     private List<ModelPicker.Model> models = List.of();
     private boolean modelsLoading;
+    private Effort effort = Effort.NONE;
     private String uiStatus = "";
     private String composer = "";
     private List<Attachment> composerAttachments = List.of();
@@ -928,6 +951,7 @@ final class InteractiveCommand {
 
     private void openModelPicker(AgentControl loop) {
       modelsLoading = true;
+      effort = loop.effort();
       if (models.isEmpty()) {
         models = List.of(new ModelPicker.Model(loop.model(), loop.model(), false));
       }
@@ -1223,8 +1247,15 @@ final class InteractiveCommand {
             modelPicker = selected.state();
             selected.model().ifPresent(model -> {
               loop.selectModel(model.id());
+              effort = effort.clamp(ModelCapabilities.fromId(model.id()));
               uiStatus = "model: " + model.displayName();
             });
+          }
+          case LEFT, RIGHT -> {
+            effort = ModelPicker.cycleEffort(modelPicker, models, effort,
+                special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
+            loop.setEffort(effort);
+            uiStatus = "reasoning effort: " + effort.label();
           }
           case UP -> modelPicker = ModelPicker.move(modelPicker, models, -1);
           case DOWN -> modelPicker = ModelPicker.move(modelPicker, models, 1);
@@ -1483,8 +1514,18 @@ final class InteractiveCommand {
             ModelPicker.Model model = models.get(visible.get(index));
             String marker = index == open.index() ? "› " : "  ";
             String favorite = model.favorite() ? "★ " : "  ";
-            lines.add(new StyledLine(marker + favorite + model.displayName(),
+            boolean selected = index == open.index();
+            boolean supportsEffort = ModelCapabilities.fromId(model.id()).supportsEffort();
+            String trailing = selected && supportsEffort && effort != Effort.NONE
+                ? "  \u25c7 " + effort.label() : "";
+            lines.add(new StyledLine(marker + favorite + model.displayName() + trailing,
                 index == open.index() ? Style.ACCENT : Style.NORMAL));
+          }
+          Optional<ModelPicker.Model> selected = ModelPicker.select(modelPicker, models).model();
+          if (selected.isPresent() && ModelCapabilities
+              .fromId(selected.orElseThrow().id()).supportsEffort()) {
+            lines.add(new StyledLine("reasoning effort: " + effort.label()
+                + "  \u2190/\u2192 change", Style.MUTED));
           }
         }
         if (providerPicker instanceof PickerState.OpenAt open) {

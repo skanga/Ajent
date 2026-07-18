@@ -115,6 +115,7 @@ include:
 - `Ctrl-T`: open the plan
 - `Ctrl-G`: run a fenced code block from the latest assistant reply
 - `Ctrl-O`: inspect tool output
+- `Left` / `Right` in the model picker: cycle supported reasoning effort
 
 Write, execution, and network tools are governed by the active permission
 profile. The default `ask` profile prompts before consequential operations.

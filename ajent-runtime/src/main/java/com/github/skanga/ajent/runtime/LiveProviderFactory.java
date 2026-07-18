@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.runtime;
 
+import com.github.skanga.ajent.domain.Effort;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.ModelCapabilities;
 import com.github.skanga.ajent.provider.ChatRequest;
@@ -56,9 +57,11 @@ public final class LiveProviderFactory {
     int maximum = ModelCapabilities.maxOutputTokensFor(
         configuration.model(), configuration.environment().get("AGENTTY_MAX_OUTPUT_TOKENS"));
     if (configuration.provider().equals("anthropic")) {
+      String effort = Effort.fromWire(configuration.effort())
+          .clamp(ModelCapabilities.fromId(configuration.model())).wire();
       return new HttpProviderPort.Request.Anthropic(new AnthropicRequest(
           configuration.model(), configuration.systemPrompt().anthropic(), history, tools,
-          maximum, configuration.auth(), 0, configuration.effort()));
+          maximum, configuration.auth(), 0, effort));
     }
     Endpoint endpoint = Endpoint.fromSpec(configuration.provider());
     boolean weak = ModelCapabilities.isWeakModel(configuration.model());

@@ -2,6 +2,7 @@ package com.github.skanga.ajent.terminal.ui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.github.skanga.ajent.domain.Effort;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +48,21 @@ final class ModelProviderPickerTest {
     var result = ModelPicker.toggleFavorite(new PickerState.OpenAt(1, "Claude"), MODELS);
     assertThat(result.models().get(1).favorite()).isFalse();
     assertThat(result.models().get(0).favorite()).isFalse();
+  }
+
+  @Test void cyclesEffortForTheHighlightedModelsCapabilities() {
+    var models = List.of(
+        new ModelPicker.Model("claude-opus-4-7", "Opus", false),
+        new ModelPicker.Model("claude-opus-4-5", "Old Opus", false),
+        new ModelPicker.Model("gpt-5", "GPT", false));
+    assertThat(ModelPicker.cycleEffort(new PickerState.OpenAt(0, ""), models,
+        Effort.MAX, 1)).isEqualTo(Effort.NONE);
+    assertThat(ModelPicker.cycleEffort(new PickerState.OpenAt(1, ""), models,
+        Effort.HIGH, 1)).isEqualTo(Effort.NONE);
+    assertThat(ModelPicker.cycleEffort(new PickerState.OpenAt(2, ""), models,
+        Effort.HIGH, 1)).isEqualTo(Effort.NONE);
+    assertThat(ModelPicker.cycleEffort(new PickerState.Closed(), models,
+        Effort.HIGH, 1)).isEqualTo(Effort.HIGH);
   }
 
   @Test void providerPickerAddsCustomHostRowAndReturnsTypedActions() {

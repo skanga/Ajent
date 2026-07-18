@@ -1,5 +1,7 @@
 package com.github.skanga.ajent.terminal.ui;
 
+import com.github.skanga.ajent.domain.Effort;
+import com.github.skanga.ajent.domain.ModelCapabilities;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -108,6 +110,13 @@ public final class ModelPicker {
     Model model = changed.get(realIndex);
     changed.set(realIndex, model.withFavorite(!model.favorite()));
     return new FavoriteResult(state, changed);
+  }
+
+  public static Effort cycleEffort(
+      PickerState.OneAxis state, List<Model> models, Effort current, int delta) {
+    return selected(state, models)
+        .map(model -> current.cycle(delta, ModelCapabilities.fromId(model.id())))
+        .orElse(current);
   }
 
   public static List<Integer> filteredIndices(List<Model> models, String query) {

@@ -62,4 +62,9 @@ public record Settings(
     return new Settings(modelId, profile, favoriteModels, provider, keys,
         providerModels, effort, alwaysAllowTools);
   }
+
+  public Settings withEffort(String value) {
+    return new Settings(modelId, profile, favoriteModels, provider, providerKeys,
+        providerModels, value, alwaysAllowTools);
+  }
 }

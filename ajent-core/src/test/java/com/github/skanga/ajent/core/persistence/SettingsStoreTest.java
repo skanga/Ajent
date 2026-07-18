@@ -28,6 +28,7 @@ class SettingsStoreTest {
     assertThat(provider.providerModels()).containsEntry("ollama", "qwen");
     assertThat(defaults.withProviderKey("groq", "secret").providerKeys())
         .containsEntry("groq", "secret");
+    assertThat(defaults.withEffort("xhigh").effort()).isEqualTo("xhigh");
   }
   private static final ObjectMapper JSON = new ObjectMapper();
 
