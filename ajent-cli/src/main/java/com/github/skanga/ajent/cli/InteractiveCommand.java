@@ -57,6 +57,7 @@ import com.github.skanga.ajent.terminal.ui.PickerState;
 import com.github.skanga.ajent.terminal.ui.PlanModal;
 import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.SymbolPicker;
+import com.github.skanga.ajent.terminal.ui.ToolBodyPreview;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.terminal.ui.ThreadPicker;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
@@ -1702,7 +1703,7 @@ final class InteractiveCommand {
         if (state == null) return;
         JLineTerminalSession.Size size = terminal.size();
         int width = Math.max(1, size.columns());
-        RenderedLines rendered = lines(state, permission.current(), width, composer,
+        RenderedLines rendered = lines(state, permission.current(), width, Math.max(1, size.rows()), composer,
             animations.nowNanos());
         List<StyledLine> lines = rendered.lines();
         if (palette instanceof CommandPalette.Open open) {
@@ -1973,10 +1974,12 @@ final class InteractiveCommand {
         int accent = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.cyan()).withBold());
         int muted = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.brightBlack()));
         int danger = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.red()).withBold());
+        int success = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.green()).withBold());
         for (int row = 0; row < lines.size(); row++) {
           StyledLine line = lines.get(row);
           int style = switch (line.style()) {
-            case NORMAL -> normal; case ACCENT -> accent; case MUTED -> muted; case DANGER -> danger;
+            case NORMAL -> normal; case ACCENT -> accent; case MUTED -> muted;
+            case DANGER -> danger; case SUCCESS -> success;
           };
           canvas.writeText(0, row, line.text(), style);
         }
@@ -2011,8 +2014,8 @@ final class InteractiveCommand {
       };
     }
 
-    private RenderedLines lines(
-        AgentState state, ToolUse permission, int width, String composer, long nowNanos) {
+    private RenderedLines lines(AgentState state, ToolUse permission, int width, int terminalRows,
+        String composer, long nowNanos) {
       var output = new ArrayList<StyledLine>();
       boolean animating = false;
       if (state.thread().messages().isEmpty()) {
@@ -2042,10 +2045,23 @@ final class InteractiveCommand {
           animating |= revealFrame.animating();
         }
         wrap(output, text, width, Style.NORMAL);
+        Map<String, java.util.Set<Integer>> grepHits =
+            ToolBodyPreview.collectGrepHits(message.toolCalls());
         for (ToolUse call : message.toolCalls()) {
           output.add(new StyledLine("  " + call.name().value() + " · "
               + call.status().getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT),
               call.status().isError() ? Style.DANGER : Style.MUTED));
+          ToolBodyPreview.Preview preview =
+              ToolBodyPreview.describe(call, terminalRows, grepHits);
+          for (ToolBodyPreview.Row row : ToolBodyPreview.render(preview)) {
+            output.add(new StyledLine(row.text(), switch (row.tone()) {
+              case NORMAL -> Style.NORMAL;
+              case MUTED -> Style.MUTED;
+              case DANGER -> Style.DANGER;
+              case SUCCESS -> Style.SUCCESS;
+              case ACCENT -> Style.ACCENT;
+            }));
+          }
         }
         message.error().ifPresent(error -> wrap(output, "error: " + error, width, Style.DANGER));
       }
@@ -2070,7 +2086,7 @@ final class InteractiveCommand {
       }
     }
 
-    private enum Style { NORMAL, ACCENT, MUTED, DANGER }
+    private enum Style { NORMAL, ACCENT, MUTED, DANGER, SUCCESS }
     private record StyledLine(String text, Style style) {}
     private record RenderedLines(List<StyledLine> lines, boolean animating) {}
 

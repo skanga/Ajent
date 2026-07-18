@@ -1196,6 +1196,23 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("no tool outputs");
   }
 
+  @Test void liveTranscriptRendersStructuredToolBodyPreviews() {
+    ToolUse todo = new ToolUse(new ToolCallId("plan"), new ToolName("todo"), Map.of(
+        "todos", List.of(Map.of("content", "ship it", "status", "completed"))),
+        new ToolStatus.Pending());
+    ToolUse write = new ToolUse(new ToolCallId("write"), new ToolName("write"), Map.of(
+        "content", "first\nsecond"), new ToolStatus.Done("wrote file"));
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(
+        new Message(Role.ASSISTANT, "", List.of(), List.of(todo, write))))));
+    var terminal = new FakeTerminal();
+
+    new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate()).render();
+
+    assertThat(terminal.bytes.toString()).contains("✓", "ship it", "first", "second",
+        "2 lines");
+  }
+
   @Test void emptyToolNameAndClosedStreamingBlockRenderSafely() {
     ToolUse unnamed = new ToolUse(new ToolCallId("empty"), new ToolName(""), Map.of(),
         new ToolStatus.Done(0, 1, "output"));
