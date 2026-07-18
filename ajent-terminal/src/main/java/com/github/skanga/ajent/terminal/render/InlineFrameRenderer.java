@@ -279,8 +279,19 @@ public final class InlineFrameRenderer {
       state = State.reset(state.generation + 1);
     }
     long[] current = Arrays.copyOf(canvas.packedCells(), contentRows * canvas.width());
-    boolean same = state.previousWidth == canvas.width() && state.previousRows == contentRows
-        && Arrays.equals(state.previousCells, current);
+    int previousRows = state.previousRows;
+    int previousOnScreen = Math.min(previousRows, terminalRows);
+    int commonRows = Math.min(contentRows, previousRows);
+    int firstChanged = commonRows;
+    if (state.previousWidth == canvas.width() && state.previousCells.length >= commonRows * canvas.width()) {
+      for (int row = Math.max(0, previousRows - previousOnScreen); row < commonRows; row++) {
+        if (!rowEquals(current, state.previousCells, row, canvas.width())) {
+          firstChanged = row;
+          break;
+        }
+      }
+    }
+    boolean same = firstChanged == commonRows && contentRows == previousRows;
     if (same && resetPrefix.isEmpty()) {
       State successor = new State(state.previousCells, state.previousWidth, state.previousRows,
           state.wireCursorRows, state.ghostRowsAbove, true, state.decawmOff,
@@ -302,10 +313,80 @@ public final class InlineFrameRenderer {
     } else if (state.previousRows == 0) {
       output.append('\r').append(CanvasSerializer.serialize(canvas, styles, contentRows, 0));
     } else {
-      int moveUp = Math.min(Math.max(0, state.wireCursorRows - 1), terminalRows - 1);
-      if (moveUp > 0) output.append("\u001b[").append(moveUp).append('A');
-      output.append('\r').append(CanvasSerializer.serialize(canvas, styles, contentRows,
-          Math.max(0, contentRows - terminalRows))).append("\u001b[J");
+      int delta = firstChanged - (previousRows - 1);
+      if (delta < 0) {
+        int moveUp = Math.min(-delta, previousOnScreen - 1);
+        appendCursorMove(output, moveUp, 'A');
+        output.append('\r');
+      } else if (delta == 0) {
+        output.append('\r');
+      } else {
+        output.append("\r\n");
+        appendCursorMove(output, delta - 1, 'B');
+      }
+      if (!state.decawmOff) {
+        output.append("\u001b[?7l");
+        state = new State(state.previousCells, state.previousWidth, state.previousRows,
+            state.wireCursorRows, state.ghostRowsAbove, true, true,
+            state.shadowHash, state.generation);
+      }
+      int currentStyle = TerminalStylePool.UNKNOWN_STYLE;
+      boolean compatRepaint = System.getenv("MAYA_COMPAT_REPAINT") != null
+          || "zed".equals(System.getenv("TERM_PROGRAM"));
+      long blank = PackedCell.BLANK.pack();
+      for (int row = firstChanged; row < contentRows; row++) {
+        if (row > firstChanged) output.append("\r\n");
+        long[] currentRow = Arrays.copyOfRange(current, row * canvas.width(),
+            (row + 1) * canvas.width());
+        long[] previousRow = new long[canvas.width()];
+        Arrays.fill(previousRow, blank);
+        boolean newRow = row >= previousRows;
+        if (!newRow) {
+          System.arraycopy(state.previousCells, row * canvas.width(), previousRow, 0,
+              canvas.width());
+        }
+        int newVisibleTop = Math.max(0, contentRows - terminalRows);
+        int previousVisibleTop = Math.max(0, previousRows - terminalRows);
+        boolean willScrollOff = contentRows >= terminalRows
+            && row >= previousVisibleTop && row <= newVisibleTop;
+        int rowFirstDifference = CanvasSerializer.firstDifference(currentRow, previousRow);
+        boolean wholeRow = willScrollOff || (compatRepaint && rowFirstDifference < canvas.width());
+        int firstDifference = wholeRow ? 0
+            : CanvasSerializer.snapFirstDifferenceLeft(rowFirstDifference, currentRow, previousRow);
+        if (firstDifference >= canvas.width()) continue;
+        int lastDifference = wholeRow ? canvas.width() - 1
+            : CanvasSerializer.snapLastDifferenceRight(
+                CanvasSerializer.lastDifference(currentRow, previousRow), currentRow, previousRow);
+        int lastVisible = canvas.lastContentColumn(row);
+        int endEmit = Math.max(firstDifference, Math.min(lastDifference + 1, lastVisible + 1));
+        boolean needErase = newRow || lastDifference > lastVisible;
+        boolean needEmit = endEmit > firstDifference;
+        if (needEmit || needErase) appendCursorMove(output, firstDifference, 'C');
+        if (needEmit) {
+          currentStyle = CanvasSerializer.emitCellRun(canvas, styles, row, firstDifference,
+              endEmit, currentStyle, output);
+        }
+        if (needErase) {
+          if (currentStyle != 0) {
+            output.append(styles.sgr(0));
+            currentStyle = 0;
+          }
+          if (!(needEmit && endEmit >= canvas.width())) output.append("\u001b[K");
+        }
+      }
+      if (contentRows < previousRows) {
+        output.append('\r');
+        int lastRow = contentRows - 1;
+        int lastVisible = canvas.lastContentColumn(lastRow);
+        if (lastVisible >= 0) {
+          currentStyle = CanvasSerializer.emitCellRun(canvas, styles, lastRow, 0,
+              lastVisible + 1, currentStyle, output);
+        }
+        if (currentStyle != 0) output.append(styles.sgr(0));
+        if (lastVisible < canvas.width() - 1) output.append("\u001b[J");
+        else output.append("\r\n\u001b[J\u001b[A");
+      }
+      output.append("\u001b[0m");
     }
     if (synchronizedOutput) output.append("\u001b[?2026l");
     State successor = state.withShadow(current, canvas.width(), contentRows,
@@ -348,5 +429,14 @@ public final class InlineFrameRenderer {
       combined ^= hash;
     }
     return combined;
+  }
+
+  private static boolean rowEquals(long[] left, long[] right, int row, int width) {
+    int offset = row * width;
+    return Arrays.equals(left, offset, offset + width, right, offset, offset + width);
+  }
+
+  private static void appendCursorMove(StringBuilder output, int count, char direction) {
+    if (count > 0) output.append("\u001b[").append(count).append(direction);
   }
 }

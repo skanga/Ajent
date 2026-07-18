@@ -89,6 +89,42 @@ final class InlineFrameRendererTest {
         .endsWith("\u001b[?2026l");
   }
 
+  @Test void syncedChangesEmitOnlyTheSnappedCellSpanAndPersistDecawmOff() {
+    var styles = new TerminalStylePool();
+    var first = new TerminalCanvas(10, 2);
+    first.writeText(0, 0, "hello", 0);
+    var synced = firstRender(first, styles);
+    var second = new TerminalCanvas(10, 2);
+    second.writeText(0, 0, "hallo", 0);
+    var witness = synced.verify().orElseThrow();
+    var proof = synced.checkScrollback(second, 24).orElseThrow();
+    var output = new StringBuilder();
+    var result = synced.render(second, CanvasSerializer.contentRows(second), 24, styles,
+        output::append, witness, proof, false);
+    assertThat(output).hasToString(
+        "\u001b[?25l\r\u001b[?7l\u001b[1C\u001b[0ma\u001b[0m");
+    var updated = (InlineFrameRenderer.Synced) result;
+    assertThat(updated.finalizeFrame().restoreBytes()).isEqualTo("\u001b[?25h\u001b[?7h");
+  }
+
+  @Test void growthAdvancesFromPriorBottomAndWritesOnlyTheNewRow() {
+    var styles = new TerminalStylePool();
+    var first = new TerminalCanvas(10, 3);
+    first.writeText(0, 0, "one", 0);
+    var synced = firstRender(first, styles);
+    var second = new TerminalCanvas(10, 3);
+    second.writeText(0, 0, "one", 0);
+    second.writeText(0, 1, "two", 0);
+    var witness = synced.verify().orElseThrow();
+    var proof = synced.checkScrollback(second, 24).orElseThrow();
+    var output = new StringBuilder();
+    var result = synced.render(second, CanvasSerializer.contentRows(second), 24, styles,
+        output::append, witness, proof, false);
+    assertThat(result).isInstanceOf(InlineFrameRenderer.Synced.class);
+    assertThat(output).hasToString(
+        "\u001b[?25l\r\n\u001b[?7l\u001b[0mtwo\u001b[K\u001b[0m");
+  }
+
   private static InlineFrameRenderer.Synced firstRender(
       TerminalCanvas canvas, TerminalStylePool styles) {
     var result = new InlineFrameRenderer.Empty().seed().render(canvas,
