@@ -82,6 +82,10 @@ public final class AjentCli {
           @Override public int skills(PrintStream out) {
             return SkillCommands.systemDefault().list(out);
           }
+          @Override public int mcpServe(CliArguments arguments, BufferedReader input,
+                                        PrintStream out, PrintStream err) {
+            return McpServeCommand.systemDefault().run(arguments, input, out, err);
+          }
         });
   }
 
@@ -110,6 +114,8 @@ public final class AjentCli {
       return commands.status(stdout);
     if (parsed.subcommand() == CliArguments.Subcommand.SKILLS)
       return commands.skills(stdout);
+    if (parsed.subcommand() == CliArguments.Subcommand.MCP_SERVE)
+      return commands.mcpServe(parsed, input, stdout, stderr);
     String command = parsed.subcommand() == CliArguments.Subcommand.NONE
         ? "interactive mode" : parsed.subcommand().commandName();
     stderr.print("ajent: " + command + " is not implemented yet\n");
@@ -121,5 +127,7 @@ public final class AjentCli {
     int logout(PrintStream output, PrintStream error);
     int status(PrintStream output);
     int skills(PrintStream output);
+    int mcpServe(CliArguments arguments, BufferedReader input,
+                 PrintStream output, PrintStream error);
   }
 }
