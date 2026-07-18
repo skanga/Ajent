@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -55,6 +57,13 @@ class ProcessSandboxTest {
 
     initialized.runner().argv(List.of("git", "status"), directory, 55, Duration.ofSeconds(2));
     assertThat(base.lastArgv).endsWith("--", "git", "status");
+
+    var progress = new ArrayList<String>();
+    initialized.runner().shellWithProgress(
+        "echo streaming", directory, 77, Duration.ofSeconds(2), progress::add);
+    assertThat(base.lastArgv).endsWith("--", "/bin/sh", "-c", "echo streaming");
+    assertThat(base.lastMaxBytes).isEqualTo(77);
+    assertThat(progress).containsExactly("sandboxed progress");
   }
 
   @Test
@@ -134,6 +143,14 @@ class ProcessSandboxTest {
       boolean probe = argv.size() == 2 && argv.get(1).equals("--version");
       return new Result(probe ? probeSuccess : true, probe && !probeSuccess ? 1 : 0,
           "", false, false, probe && !probeSuccess ? "missing" : "");
+    }
+
+    @Override
+    public Result argvWithProgress(List<String> argv, Path directory, int maxBytes, Duration timeout,
+        Consumer<String> progress) {
+      Result result = argv(argv, directory, maxBytes, timeout);
+      progress.accept("sandboxed progress");
+      return result;
     }
   }
 }

@@ -3,6 +3,7 @@ package com.github.skanga.ajent.tools.runtime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.skanga.ajent.domain.CancellationSignal;
 import com.github.skanga.ajent.tools.catalog.ToolCatalog;
 import com.github.skanga.ajent.tools.catalog.ToolKind;
 import com.github.skanga.ajent.tools.fs.FileTools;
@@ -18,6 +19,7 @@ import com.github.skanga.ajent.tools.web.WebTools;
 import com.github.skanga.ajent.tools.web.WebTransport;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
@@ -46,6 +48,12 @@ class ToolDispatcherTest {
     var dispatcher = dispatcher(root);
     assertSuccess(dispatcher.execute("read", JSON.createObjectNode().put("path", "sample.txt")));
     assertSuccess(dispatcher.execute("bash", JSON.createObjectNode().put("command", "echo ok")));
+    var processProgress = new ArrayList<String>();
+    assertSuccess(dispatcher.execute("bash",
+        JSON.createObjectNode().put("command", "echo progress_probe"), new CancellationSignal(),
+        processProgress::add));
+    assertThat(processProgress).isNotEmpty();
+    assertThat(processProgress.getLast()).contains("progress_probe");
     assertSuccess(dispatcher.execute("grep", JSON.createObjectNode().put("pattern", "needle")));
     assertSuccess(dispatcher.execute("repo_map", JSON.createObjectNode()));
     assertThat(dispatcher.execute("git_status", JSON.createObjectNode())).isInstanceOf(ToolResult.Failure.class);

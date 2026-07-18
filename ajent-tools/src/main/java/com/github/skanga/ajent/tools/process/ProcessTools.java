@@ -13,6 +13,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /** AgenTTY-compatible bash and diagnostics tools. */
 public final class ProcessTools {
@@ -37,14 +39,19 @@ public final class ProcessTools {
   }
 
   public ToolResult execute(String name, JsonNode arguments) {
+    return execute(name, arguments, ignored -> {});
+  }
+
+  public ToolResult execute(String name, JsonNode arguments, Consumer<String> progress) {
+    Objects.requireNonNull(progress, "progress");
     return switch (name) {
-      case "bash" -> bash(arguments);
-      case "diagnostics" -> diagnostics(arguments);
+      case "bash" -> bash(arguments, progress);
+      case "diagnostics" -> diagnostics(arguments, progress);
       default -> failure(ToolErrorKind.UNKNOWN, "unknown tool: " + name);
     };
   }
 
-  private ToolResult bash(JsonNode arguments) {
+  private ToolResult bash(JsonNode arguments, Consumer<String> progress) {
     var args = new ArgReader(arguments);
     String command = args.requiredString("command").orElse(null);
     if (command == null) return failure(ToolErrorKind.INVALID_ARGS, "command required");
@@ -67,8 +74,8 @@ public final class ProcessTools {
           "bash: path is outside workspace: " + directory);
     }
     long started = System.nanoTime();
-    ProcessRunner.Result result = runner.shell(command, directory, CAPTURE_CAP,
-        Duration.ofSeconds(timeout));
+    ProcessRunner.Result result = runner.shellWithProgress(command, directory, CAPTURE_CAP,
+        Duration.ofSeconds(timeout), progress);
     if (!result.started()) return failure(ToolErrorKind.SPAWN,
         "failed to spawn command: " + result.startError());
     String output = stripAnsi(result.output());
@@ -145,17 +152,19 @@ public final class ProcessTools {
 
   private record Spill(String output, boolean truncated) {}
 
-  private ToolResult diagnostics(JsonNode arguments) {
+  private ToolResult diagnostics(JsonNode arguments, Consumer<String> progress) {
     var args = new ArgReader(arguments);
     String command = args.string("command", "");
     ProcessRunner.Result result;
-    if (!command.isEmpty()) result = runner.shell(command, sandbox.workspaceRoot(), 100_000,
-        Duration.ofSeconds(120));
+    if (!command.isEmpty()) result = runner.shellWithProgress(
+        command, sandbox.workspaceRoot(), 100_000,
+        Duration.ofSeconds(120), progress);
     else {
       List<String> detected = diagnosticCommand();
       if (detected.isEmpty()) return failure(ToolErrorKind.NOT_FOUND,
           "no build system detected; pass a command");
-      result = runner.argv(detected, sandbox.workspaceRoot(), 100_000, Duration.ofSeconds(120));
+      result = runner.argvWithProgress(
+          detected, sandbox.workspaceRoot(), 100_000, Duration.ofSeconds(120), progress);
     }
     String output = legacy(result, 120);
     if (output.isEmpty()) return success("no diagnostics (clean build)");

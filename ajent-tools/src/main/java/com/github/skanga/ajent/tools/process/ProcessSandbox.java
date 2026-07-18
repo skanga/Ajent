@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /** AgenTTY-compatible process sandbox selection and command wrapping. */
 public final class ProcessSandbox {
@@ -100,6 +101,14 @@ public final class ProcessSandbox {
     }
 
     @Override
+    public Result shellWithProgress(String command, Path directory, int maxBytes, Duration timeout,
+        Consumer<String> progress) {
+      List<String> wrapped = backend == Backend.BWRAP
+          ? bwrapShell(command, cwd(directory)) : sandboxExecShell(command);
+      return delegate.argvWithProgress(wrapped, null, maxBytes, timeout, progress);
+    }
+
+    @Override
     public Result argv(List<String> argv, Path directory, int maxBytes, Duration timeout) {
       if (argv.isEmpty()) {
         return new Result(false, -1, "", false, false, "empty argv");
@@ -107,6 +116,17 @@ public final class ProcessSandbox {
       List<String> wrapped = backend == Backend.BWRAP
           ? bwrapArgv(argv, cwd(directory)) : sandboxExecArgv(argv);
       return delegate.argv(wrapped, null, maxBytes, timeout);
+    }
+
+    @Override
+    public Result argvWithProgress(List<String> argv, Path directory, int maxBytes, Duration timeout,
+        Consumer<String> progress) {
+      if (argv.isEmpty()) {
+        return new Result(false, -1, "", false, false, "empty argv");
+      }
+      List<String> wrapped = backend == Backend.BWRAP
+          ? bwrapArgv(argv, cwd(directory)) : sandboxExecArgv(argv);
+      return delegate.argvWithProgress(wrapped, null, maxBytes, timeout, progress);
     }
 
     private Path cwd(Path directory) {

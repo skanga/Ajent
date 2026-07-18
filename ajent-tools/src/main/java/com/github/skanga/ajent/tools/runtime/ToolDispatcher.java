@@ -52,7 +52,7 @@ public final class ToolDispatcher {
     ToolKind kind = specification.orElseThrow().kind();
     return switch (family(kind)) {
       case FILESYSTEM -> files.execute(name, arguments);
-      case PROCESS -> processes.execute(name, arguments);
+      case PROCESS -> processes.execute(name, arguments, progress);
       case SEARCH -> search.execute(name, arguments);
       case REPOSITORY_MAP -> repoMap.execute(arguments);
       case GIT -> git.execute(name, arguments);

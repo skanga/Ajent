@@ -14,11 +14,13 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /** Bounded subprocess execution using the JDK process API. */
 public class ProcessRunner {
   public static final int INTERACTIVE_CAPTURE_BYTES = 2 * 1024 * 1024;
+  private static final long PROGRESS_INTERVAL_NANOS = Duration.ofMillis(80).toNanos();
 
   public record Result(boolean started, int exitCode, String output, boolean timedOut,
                        boolean truncated, String startError) {}
@@ -55,6 +57,14 @@ public class ProcessRunner {
     List<String> argv = isWindows() ? List.of("cmd.exe", "/S", "/C", command)
         : List.of("sh", "-c", command);
     return run(argv, directory, maxBytes, timeout);
+  }
+
+  /** Runs a captured shell and reports the complete accumulated output every 80 ms. */
+  public Result shellWithProgress(String command, Path directory, int maxBytes, Duration timeout,
+      Consumer<String> progress) {
+    List<String> argv = isWindows() ? List.of("cmd.exe", "/S", "/C", command)
+        : List.of("sh", "-c", command);
+    return run(argv, directory, maxBytes, timeout, Map.of(), progress);
   }
 
   /** Runs the captured shell while reporting elapsed time at the native 250 ms cadence. */
@@ -98,6 +108,12 @@ public class ProcessRunner {
   public Result argv(List<String> argv, Path directory, int maxBytes, Duration timeout,
       Map<String, String> environment) {
     return run(argv, directory, maxBytes, timeout, environment);
+  }
+
+  /** Runs captured argv and reports the complete accumulated output every 80 ms. */
+  public Result argvWithProgress(List<String> argv, Path directory, int maxBytes, Duration timeout,
+      Consumer<String> progress) {
+    return run(argv, directory, maxBytes, timeout, Map.of(), progress);
   }
 
   /** Runs a POSIX shell with inherited stdin while teeing merged output live and to a bounded copy. */
@@ -215,8 +231,14 @@ public class ProcessRunner {
 
   private Result run(List<String> argv, Path directory, int maxBytes, Duration timeout,
       Map<String, String> environment) {
+    return run(argv, directory, maxBytes, timeout, environment, ignored -> {});
+  }
+
+  private Result run(List<String> argv, Path directory, int maxBytes, Duration timeout,
+      Map<String, String> environment, Consumer<String> progress) {
     Objects.requireNonNull(argv, "argv");
     Objects.requireNonNull(timeout, "timeout");
+    Objects.requireNonNull(progress, "progress");
     if (maxBytes < 0) throw new IllegalArgumentException("negative capture bound");
     if (timeout.isNegative()) throw new IllegalArgumentException("negative timeout");
     Process process;
@@ -230,6 +252,7 @@ public class ProcessRunner {
       return new Result(false, -1, "", false, false, message(exception));
     }
     var bytes = new ByteArrayOutputStream(Math.min(maxBytes, 8192));
+    var outputLock = new Object();
     boolean[] truncated = {false};
     var lastActivity = new AtomicLong(System.nanoTime());
     Thread reader = Thread.ofVirtual().start(() -> {
@@ -238,9 +261,11 @@ public class ProcessRunner {
         for (int count; (count = input.read(buffer)) >= 0;) {
           if (count == 0) continue;
           lastActivity.set(System.nanoTime());
-          int room = maxBytes - bytes.size();
-          if (room > 0) bytes.write(buffer, 0, Math.min(room, count));
-          if (count > room) truncated[0] = true;
+          synchronized (outputLock) {
+            int room = maxBytes - bytes.size();
+            if (room > 0) bytes.write(buffer, 0, Math.min(room, count));
+            if (count > room) truncated[0] = true;
+          }
         }
       } catch (IOException ignored) {
         // Process termination closes the pipe.
@@ -249,8 +274,14 @@ public class ProcessRunner {
     boolean timedOut = false;
     try {
       long idleNanos = timeout.toNanos();
+      long lastProgress = System.nanoTime();
       while (process.isAlive()) {
-        if (process.waitFor(100, TimeUnit.MILLISECONDS)) break;
+        if (process.waitFor(80, TimeUnit.MILLISECONDS)) break;
+        long now = System.nanoTime();
+        if (now - lastProgress >= PROGRESS_INTERVAL_NANOS) {
+          emit(progress, snapshot(bytes, outputLock));
+          lastProgress = now;
+        }
         if (idleNanos > 0 && System.nanoTime() - lastActivity.get() >= idleNanos) {
           timedOut = true;
           process.descendants().forEach(ProcessHandle::destroy);
@@ -260,13 +291,31 @@ public class ProcessRunner {
         }
       }
       reader.join(Duration.ofSeconds(3));
-      return new Result(true, process.isAlive() ? 1 : process.exitValue(), bytes.toString(java.nio.charset.StandardCharsets.UTF_8),
+      String output = snapshot(bytes, outputLock);
+      emit(progress, output);
+      return new Result(true, process.isAlive() ? 1 : process.exitValue(), output,
           timedOut, truncated[0], "");
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
       process.destroyForcibly();
-      return new Result(true, 1, bytes.toString(java.nio.charset.StandardCharsets.UTF_8), true,
+      String output = snapshot(bytes, outputLock);
+      emit(progress, output);
+      return new Result(true, 1, output, true,
           truncated[0], "interrupted");
+    }
+  }
+
+  private static String snapshot(ByteArrayOutputStream output, Object lock) {
+    synchronized (lock) {
+      return output.toString(java.nio.charset.StandardCharsets.UTF_8);
+    }
+  }
+
+  private static void emit(Consumer<String> progress, String snapshot) {
+    try {
+      progress.accept(snapshot);
+    } catch (RuntimeException ignored) {
+      // Progress is best-effort and must never change subprocess completion.
     }
   }
 

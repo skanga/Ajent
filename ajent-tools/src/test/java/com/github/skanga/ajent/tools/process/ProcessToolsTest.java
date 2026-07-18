@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.List;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -174,10 +175,24 @@ class ProcessToolsTest {
     @Override public Result shell(String command, Path directory, int maxBytes, Duration timeout) {
       return results.remove();
     }
+    @Override public Result shellWithProgress(
+        String command, Path directory, int maxBytes, Duration timeout,
+        Consumer<String> progress) {
+      Result result = results.remove();
+      progress.accept(result.output());
+      return result;
+    }
     @Override public Result argv(List<String> arguments, Path directory, int maxBytes,
         Duration timeout) {
       argv = List.copyOf(arguments);
       return results.remove();
+    }
+    @Override public Result argvWithProgress(List<String> arguments, Path directory, int maxBytes,
+        Duration timeout, Consumer<String> progress) {
+      argv = List.copyOf(arguments);
+      Result result = results.remove();
+      progress.accept(result.output());
+      return result;
     }
   }
 
