@@ -1322,6 +1322,72 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("closed").contains("Tool outputs");
   }
 
+  @Test void settledTranscriptFreezesAndTrimsOnlyAfterItsRowsWerePainted() {
+    var messages = new ArrayList<Message>();
+    for (int index = 0; index < 40; index++) {
+      messages.add(new Message(Role.USER, "settled request " + index, List.of(), List.of()));
+    }
+    var state = new AtomicReference<>(AgentState.initial(thread(messages)));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+
+    ui.render();
+    long firstPaintRows = ui.frozenRows();
+    ui.render();
+
+    assertThat(ui.frozenThrough()).isEqualTo(messages.size());
+    assertThat(firstPaintRows).isGreaterThan(48);
+    assertThat(ui.frozenRows()).isLessThanOrEqualTo(48);
+    assertThat(ui.frozenBlocks()).isPositive();
+  }
+
+  @Test void activeStreamingBackRemainsMutableAndOutsideTheFrozenPrefix() {
+    var messages = new ArrayList<Message>();
+    for (int index = 0; index < 9; index++) {
+      messages.add(new Message(Role.USER, "history " + index, List.of(), List.of()));
+    }
+    Message live = new Message(Role.ASSISTANT, "first delta", List.of(), List.of());
+    messages.add(live);
+    AgentState streaming = withPhase(AgentState.initial(thread(messages)),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1)));
+    var state = new AtomicReference<>(streaming);
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    ui.render();
+
+    Message revised = new Message(live.id(), live.role(), "first delta and second delta",
+        live.images(), live.attachments(), live.thinking(), live.thinkingSignature(),
+        live.toolCalls(), live.timestamp(), live.checkpointId(), live.error(),
+        live.textBlockClosed(), live.isCompactSummary());
+    messages.set(messages.size() - 1, revised);
+    state.set(withPhase(AgentState.initial(thread(messages)),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 2))));
+    ui.render();
+
+    assertThat(ui.frozenThrough()).isEqualTo(messages.size() - 1);
+    assertThat(ui.liveRevealContent()).isEqualTo("first delta and second delta");
+  }
+
+  @Test void widthChangeRehydratesTheFrozenPrefixThroughAWholeSurfaceReset() {
+    List<Message> messages = List.of(
+        new Message(Role.USER, "one", List.of(), List.of()),
+        new Message(Role.USER, "two", List.of(), List.of()));
+    var state = new AtomicReference<>(AgentState.initial(thread(messages)));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    ui.render();
+    int before = terminal.bytes.length();
+
+    terminal.size = new JLineTerminalSession.Size(50, 12);
+    ui.render();
+
+    assertThat(terminal.bytes.substring(before)).contains("\u001b[2J\u001b[3J\u001b[H");
+    assertThat(ui.frozenThrough()).isEqualTo(messages.size());
+  }
+
   private InteractiveCommand command(Map<String, String> environment) {
     return new InteractiveCommand(directory, directory, environment,
         new CredentialStore(directory.resolve("credentials.json"), "seed"),

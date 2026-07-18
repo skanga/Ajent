@@ -100,9 +100,19 @@
       "classification": "property",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^frozen_invariant_fuzz$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/FrozenInvariantFuzz.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/FrozenInvariantFuzzTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/ScrollbackLedger.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/FrozenScrollbackTrimPolicy.java",
+        "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/ScrollbackLedgerTest.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java",
+        "ajent-cli/src/test/java/com/github/skanga/ajent/cli/InteractiveCommandTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "I1-I7 translated over four native widths, 120 exact-seed SplitMix64 walks per width, 20-59 operations, retired carve slots, active-back discipline, rehydrate, paint gate, conservative typed trim debt, and render smoke"
+      ]
     },
     {
       "id": "fsm_test",

@@ -271,6 +271,15 @@ public final class InlineFrameRenderer {
 
   private InlineFrameRenderer() {}
 
+  /** Consumes paint-minted debt verbatim; debt evaporates when no coherent shadow exists. */
+  public static Frame commitScrollback(Frame frame, ScrollbackLedger.ScrollbackDebt debt) {
+    java.util.Objects.requireNonNull(frame, "frame");
+    java.util.Objects.requireNonNull(debt, "debt");
+    int rows = debt.consumeRows();
+    if (rows <= 0 || !(frame instanceof Synced synced)) return frame;
+    return synced.commit(synced.scrollbackMarker(rows));
+  }
+
   private static Composed compose(TerminalCanvas canvas, CanvasSerializer.ContentRows rows,
       int terminalRows, TerminalStylePool styles, State state, boolean synchronizedOutput,
       String resetPrefix) {

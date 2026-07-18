@@ -42,9 +42,11 @@ import com.github.skanga.ajent.terminal.input.TerminalClipboardQuery;
 import com.github.skanga.ajent.terminal.input.TerminalKey;
 import com.github.skanga.ajent.terminal.render.CanvasSerializer;
 import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
+import com.github.skanga.ajent.terminal.render.FrozenScrollbackTrimPolicy;
 import com.github.skanga.ajent.terminal.render.InlineFrameRenderer;
 import com.github.skanga.ajent.terminal.render.MarkdownTerminalRenderer;
 import com.github.skanga.ajent.terminal.render.StreamingMarkdown;
+import com.github.skanga.ajent.terminal.render.ScrollbackLedger;
 import com.github.skanga.ajent.terminal.render.TerminalCanvas;
 import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
@@ -897,6 +899,11 @@ final class InteractiveCommand {
     private int cursor;
     private com.github.skanga.ajent.domain.MessageId revealMessage;
     private StreamingMarkdown reveal;
+    private final ScrollbackLedger<List<StyledLine>> frozen = new ScrollbackLedger<>();
+    private int frozenThrough;
+    private int frozenWidth = -1;
+    private ThreadId frozenThread;
+    private final List<com.github.skanga.ajent.domain.MessageId> frozenIds = new ArrayList<>();
 
     Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission) {
       this(terminal, agent, permission, new AnimationPort() {
@@ -1716,6 +1723,11 @@ final class InteractiveCommand {
         cursor = 0;
         revealMessage = null;
         reveal = null;
+        frozen.clear();
+        frozenThrough = 0;
+        frozenWidth = -1;
+        frozenThread = null;
+        frozenIds.clear();
         palette = new CommandPalette.Closed();
         toolViewer = new ToolOutputViewer.Closed();
         modelPicker = new PickerState.Closed();
@@ -2095,10 +2107,39 @@ final class InteractiveCommand {
           }
         }
         var rows = CanvasSerializer.contentRows(canvas);
+        recordFrozenPaint(width);
+        if (rendered.scrollbackDebt().isPresent()) {
+          frame = InlineFrameRenderer.commitScrollback(
+              frame, rendered.scrollbackDebt().orElseThrow());
+        }
         frame = render(frame, canvas, rows, Math.max(1, size.rows()), styles,
             value -> terminal.write(value));
         if (rendered.animating()) animations.request(this::render);
       }
+    }
+
+    private void recordFrozenPaint(int width) {
+      frozen.recordPaintWidth(width);
+      List<List<StyledLine>> blocks = frozen.elements();
+      for (int index = 0; index < blocks.size(); index++) {
+        frozen.recordPaint(index, blocks.get(index).size());
+      }
+    }
+
+    int frozenThrough() {
+      synchronized (lock) { return frozenThrough; }
+    }
+
+    long frozenRows() {
+      synchronized (lock) { return frozen.rowTotal(); }
+    }
+
+    int frozenBlocks() {
+      synchronized (lock) { return frozen.size(); }
+    }
+
+    String liveRevealContent() {
+      synchronized (lock) { return reveal == null ? "" : reveal.content(); }
     }
 
     private static InlineFrameRenderer.Frame render(InlineFrameRenderer.Frame frame,
@@ -2135,54 +2176,35 @@ final class InteractiveCommand {
         String composer, long nowNanos) {
       var output = new ArrayList<StyledLine>();
       boolean animating = false;
-      if (state.thread().messages().isEmpty()) {
-        output.add(new StyledLine("Ajent", Style.ACCENT));
-        output.add(new StyledLine("AI coding agent · Ctrl-D to quit", Style.MUTED));
-      }
       List<Message> messages = state.thread().messages();
-      for (int messageIndex = 0; messageIndex < messages.size(); messageIndex++) {
-        Message message = messages.get(messageIndex);
+      reconcileFrozenSurface(state, messages, width);
+      if (messages.isEmpty()) {
+        output.add(new StyledLine("Ajent", Style.ACCENT));
+        output.add(new StyledLine("AI coding agent \u00b7 Ctrl-D to quit", Style.MUTED));
+      }
+
+      int freezeLimit = freezeLimit(state, messages);
+      while (frozenThrough < freezeLimit) {
+        int messageIndex = frozenThrough;
+        if (!frozen.isEmpty()) {
+          frozen.seal(List.of(new StyledLine("", Style.NORMAL)), 1, true);
+        }
+        MessageRender rendered = renderMessage(state, messages.get(messageIndex), messageIndex,
+            messages.size(), width, terminalRows, nowNanos, false);
+        frozen.seal(rendered.lines(), Math.max(1, rendered.lines().size()), false);
+        frozenIds.add(messages.get(messageIndex).id());
+        frozenThrough++;
+      }
+
+      FrozenScrollbackTrimPolicy.TrimResult trim =
+          FrozenScrollbackTrimPolicy.trim(frozen, terminalRows);
+      for (List<StyledLine> block : frozen.elements()) output.addAll(block);
+      for (int messageIndex = frozenThrough; messageIndex < messages.size(); messageIndex++) {
         if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
-        output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
-        String text = AttachmentText.display(message.text(), message.attachments());
-        List<MarkdownTerminalRenderer.Line> revealFrame = null;
-        boolean revealable = message.role() == Role.ASSISTANT
-            && messageIndex == messages.size() - 1;
-        if (revealable) {
-          boolean streaming = !(state.phase() instanceof SessionPhase.Idle)
-              && !message.textBlockClosed();
-          if (!message.id().equals(revealMessage)) {
-            revealMessage = message.id();
-            reveal = new StreamingMarkdown();
-          }
-          reveal.setContent(text);
-          if (streaming) reveal.setLive(true);
-          else reveal.finish();
-          revealFrame = reveal.render(width, nowNanos);
-          animating |= reveal.requiresAnimation();
-        }
-        if (revealFrame != null) appendMarkdown(output, revealFrame);
-        else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, width);
-        else wrap(output, text, width, Style.NORMAL);
-        Map<String, java.util.Set<Integer>> grepHits =
-            ToolBodyPreview.collectGrepHits(message.toolCalls());
-        for (ToolUse call : message.toolCalls()) {
-          output.add(new StyledLine("  " + call.name().value() + " · "
-              + call.status().getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT),
-              call.status().isError() ? Style.DANGER : Style.MUTED));
-          ToolBodyPreview.Preview preview =
-              ToolBodyPreview.describe(call, terminalRows, grepHits);
-          for (ToolBodyPreview.Row row : ToolBodyPreview.render(preview)) {
-            output.add(new StyledLine(row.text(), switch (row.tone()) {
-              case NORMAL -> Style.NORMAL;
-              case MUTED -> Style.MUTED;
-              case DANGER -> Style.DANGER;
-              case SUCCESS -> Style.SUCCESS;
-              case ACCENT -> Style.ACCENT;
-            }));
-          }
-        }
-        message.error().ifPresent(error -> wrap(output, "error: " + error, width, Style.DANGER));
+        MessageRender rendered = renderMessage(state, messages.get(messageIndex), messageIndex,
+            messages.size(), width, terminalRows, nowNanos, true);
+        output.addAll(rendered.lines());
+        animating |= rendered.animating();
       }
       if (permission != null) {
         output.add(new StyledLine("", Style.NORMAL));
@@ -2196,7 +2218,81 @@ final class InteractiveCommand {
       output.add(new StyledLine("", Style.NORMAL));
       wrap(output, "> " + AttachmentText.display(composer, composerAttachments), width,
           Style.NORMAL);
-      return new RenderedLines(List.copyOf(output), animating);
+      return new RenderedLines(List.copyOf(output), animating, trim.debt());
+    }
+
+    private void reconcileFrozenSurface(AgentState state, List<Message> messages, int width) {
+      boolean differentThread = frozenThread != null && !frozenThread.equals(state.thread().id());
+      boolean invalidPrefix = frozenThrough > messages.size()
+          || frozenThrough > 0 && (frozenIds.size() < frozenThrough
+              || !frozenIds.get(frozenThrough - 1).equals(messages.get(frozenThrough - 1).id()));
+      boolean resized = frozenWidth > 0 && frozenWidth != width;
+      if (differentThread || invalidPrefix || resized) {
+        frozen.clear();
+        frozenIds.clear();
+        frozenThrough = 0;
+        frame = new InlineFrameRenderer.HardReset();
+      }
+      frozenThread = state.thread().id();
+      frozenWidth = width;
+    }
+
+    private int freezeLimit(AgentState state, List<Message> messages) {
+      if (messages.isEmpty()) return 0;
+      int limit = messages.size() - 1;
+      Message last = messages.getLast();
+      if (state.phase() instanceof SessionPhase.Idle
+          && (last.role() == Role.USER || last.id().equals(revealMessage)
+              && reveal != null && reveal.settled())) {
+        limit = messages.size();
+      }
+      return Math.max(frozenThrough, limit);
+    }
+
+    private MessageRender renderMessage(AgentState state, Message message, int messageIndex,
+        int messageCount, int width, int terminalRows, long nowNanos, boolean allowReveal) {
+      var output = new ArrayList<StyledLine>();
+      output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
+      String text = AttachmentText.display(message.text(), message.attachments());
+      List<MarkdownTerminalRenderer.Line> revealFrame = null;
+      boolean animating = false;
+      boolean revealable = allowReveal && message.role() == Role.ASSISTANT
+          && messageIndex == messageCount - 1;
+      if (revealable) {
+        boolean streaming = !(state.phase() instanceof SessionPhase.Idle)
+            && !message.textBlockClosed();
+        if (!message.id().equals(revealMessage)) {
+          revealMessage = message.id();
+          reveal = new StreamingMarkdown();
+        }
+        reveal.setContent(text);
+        if (streaming) reveal.setLive(true);
+        else reveal.finish();
+        revealFrame = reveal.render(width, nowNanos);
+        animating = reveal.requiresAnimation();
+      }
+      if (revealFrame != null) appendMarkdown(output, revealFrame);
+      else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, width);
+      else wrap(output, text, width, Style.NORMAL);
+      Map<String, java.util.Set<Integer>> grepHits =
+          ToolBodyPreview.collectGrepHits(message.toolCalls());
+      for (ToolUse call : message.toolCalls()) {
+        output.add(new StyledLine("  " + call.name().value() + " \u00b7 "
+            + call.status().getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT),
+            call.status().isError() ? Style.DANGER : Style.MUTED));
+        ToolBodyPreview.Preview preview = ToolBodyPreview.describe(call, terminalRows, grepHits);
+        for (ToolBodyPreview.Row row : ToolBodyPreview.render(preview)) {
+          output.add(new StyledLine(row.text(), switch (row.tone()) {
+            case NORMAL -> Style.NORMAL;
+            case MUTED -> Style.MUTED;
+            case DANGER -> Style.DANGER;
+            case SUCCESS -> Style.SUCCESS;
+            case ACCENT -> Style.ACCENT;
+          }));
+        }
+      }
+      message.error().ifPresent(error -> wrap(output, "error: " + error, width, Style.DANGER));
+      return new MessageRender(List.copyOf(output), animating);
     }
 
     private static void wrap(List<StyledLine> lines, String text, int width, Style style) {
@@ -2224,7 +2320,9 @@ final class InteractiveCommand {
       private StyledLine(String text, Style style) { this(text, style, List.of()); }
       private StyledLine { spans = List.copyOf(spans); }
     }
-    private record RenderedLines(List<StyledLine> lines, boolean animating) {}
+    private record MessageRender(List<StyledLine> lines, boolean animating) {}
+    private record RenderedLines(List<StyledLine> lines, boolean animating,
+                                 Optional<ScrollbackLedger.ScrollbackDebt> scrollbackDebt) {}
 
     private static String displayTool(String name) {
       if (name.isEmpty()) return name;
