@@ -13,6 +13,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class SettingsStoreTest {
+  @Test void profileCopyPreservesEveryOtherSetting() {
+    Settings defaults = Settings.defaults();
+    assertThat(defaults.withProfile(Profile.MINIMAL))
+        .isEqualTo(new Settings(defaults.modelId(), Profile.MINIMAL,
+            defaults.favoriteModels(), defaults.provider(), defaults.providerKeys(),
+            defaults.providerModels(), defaults.effort(), defaults.alwaysAllowTools()));
+  }
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @Test

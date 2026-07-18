@@ -116,9 +116,17 @@ public final class AgentReducer {
       case RuntimeMessage.RetryStream retry -> retryStream(state, retry);
       case RuntimeMessage.TokenRefreshed refreshed -> tokenRefreshed(state, refreshed);
       case RuntimeMessage.CompactContext ignored -> compactContext(state);
+      case RuntimeMessage.ProfileChanged ignored -> profileChanged(state);
       case RuntimeMessage.Tick ignored -> tick(state);
       case RuntimeMessage.Cancel ignored -> cancel(state);
     };
+  }
+
+  private static Step profileChanged(AgentState state) {
+    return new Step(new AgentState(state.thread(), state.phase(), state.activeTurnId(),
+        state.turnCounter(), state.tokensIn(), state.tokensOut(), state.lastTickNanos(),
+        state.status(), state.toolDraft(), state.queued(), state.compaction(),
+        state.oauthRefreshInFlight(), state.truncatedToolIds(), Set.of()), List.of());
   }
 
   private Step tick(AgentState state) {

@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 /** Composes one independent live agent loop for an ACP or terminal session. */
 public final class AgentSessionFactory {
@@ -53,12 +54,23 @@ public final class AgentSessionFactory {
       BiConsumer<RuntimeMessage, AgentState> observer) {
     Objects.requireNonNull(thread, "thread");
     Objects.requireNonNull(profile, "profile");
+    return create(thread, () -> profile, model, permissions, observer);
+  }
+
+  public AgentLoop create(
+      Thread thread,
+      Supplier<Profile> profile,
+      String model,
+      PermissionPort permissions,
+      BiConsumer<RuntimeMessage, AgentState> observer) {
+    Objects.requireNonNull(thread, "thread");
+    Objects.requireNonNull(profile, "profile");
     Objects.requireNonNull(permissions, "permissions");
     Objects.requireNonNull(observer, "observer");
     LiveProviderFactory.Configuration provider = withModel(model);
     var reducer = new AgentReducer(new AgentReducer.Context(
         System::nanoTime, Instant::now, MessageId::random,
-        call -> permission(call, profile),
+        call -> permission(call, Objects.requireNonNull(profile.get(), "profile value")),
         () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(0.80, 1.20),
         () -> contextMax(provider)));
     return new AgentLoop(

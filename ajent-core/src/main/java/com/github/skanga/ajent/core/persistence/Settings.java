@@ -32,4 +32,9 @@ public record Settings(
     return new Settings(new ModelId(""), Profile.WRITE, List.of(), "",
         Map.of(), Map.of(), "", List.of());
   }
+
+  public Settings withProfile(Profile value) {
+    return new Settings(modelId, value, favoriteModels, provider, providerKeys,
+        providerModels, effort, alwaysAllowTools);
+  }
 }

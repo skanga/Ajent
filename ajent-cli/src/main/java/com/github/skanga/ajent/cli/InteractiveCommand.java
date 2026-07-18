@@ -95,23 +95,61 @@ final class InteractiveCommand {
 
   private int runSession(Configuration configured, JLineTerminalSession terminal) throws IOException {
     var state = new AtomicReference<AgentState>();
+    var activeLoop = new AtomicReference<AgentLoop>();
+    var activeProfile = new AtomicReference<>(configured.profile());
+    var activeUi = new AtomicReference<Ui>();
     var permission = new PermissionGate();
     try (var animations = new FrameScheduler()) {
       var ui = new Ui(new TerminalPort() {
         @Override public JLineTerminalSession.Size size() { return terminal.size(); }
         @Override public void write(String value) { terminal.write(value); }
       }, state, permission, animations);
+      activeUi.set(ui);
       permission.onChange(ui::render);
       var threadStore = new ThreadStore(configured.dataDirectory());
       var conversation = new com.github.skanga.ajent.domain.Thread(
           threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
-      AgentLoop loop = configured.sessions().create(conversation, configured.profile(),
+      AgentLoop initialLoop = configured.sessions().create(conversation, activeProfile::get,
           configured.model(), permission, (message, next) -> {
             state.set(next);
-            ui.render();
+            Ui current = activeUi.get();
+            if (current != null) current.render();
           });
-      state.set(loop.state());
-      try (loop) {
+      activeLoop.set(initialLoop);
+      state.set(initialLoop.state());
+      AgentControl control = new AgentControl() {
+        @Override public AgentState state() { return activeLoop.get().state(); }
+        @Override public void dispatch(RuntimeMessage message) {
+          activeLoop.get().dispatch(message);
+        }
+        @Override public void newThread() {
+          permission.cancel();
+          AgentLoop previous = activeLoop.get();
+          previous.close();
+          var fresh = new com.github.skanga.ajent.domain.Thread(
+              threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
+          AgentLoop replacement = configured.sessions().create(fresh, activeProfile::get,
+              configured.model(), permission, (message, next) -> {
+                state.set(next);
+                Ui current = activeUi.get();
+                if (current != null) current.render();
+              });
+          activeLoop.set(replacement);
+          state.set(replacement.state());
+        }
+        @Override public Profile cycleProfile() {
+          Profile next = switch (activeProfile.get()) {
+            case WRITE -> Profile.ASK;
+            case ASK -> Profile.MINIMAL;
+            case MINIMAL -> Profile.WRITE;
+          };
+          activeProfile.set(next);
+          activeLoop.get().dispatch(new RuntimeMessage.ProfileChanged(next));
+          configured.settings().save(configured.settings().load().withProfile(next));
+          return next;
+        }
+      };
+      try {
         terminal.onResize(ignored -> ui.render());
         ui.render();
         boolean running = true;
@@ -120,10 +158,7 @@ final class InteractiveCommand {
           if (events.isEmpty()) events = terminal.flushEscape();
           for (TerminalEvent event : events) {
             if (event instanceof TerminalEvent.Key key) {
-              running = ui.key(key.value(), new AgentControl() {
-                @Override public AgentState state() { return loop.state(); }
-                @Override public void dispatch(RuntimeMessage message) { loop.dispatch(message); }
-              });
+              running = ui.key(key.value(), control);
             } else if (event instanceof TerminalEvent.Paste paste) {
               ui.insert(paste.text());
             }
@@ -133,6 +168,9 @@ final class InteractiveCommand {
         return 0;
       } finally {
         permission.cancel();
+        activeUi.set(null);
+        AgentLoop loop = activeLoop.get();
+        if (loop != null) loop.close();
       }
     }
   }
@@ -170,7 +208,8 @@ final class InteractiveCommand {
       return null;
     }
     Path dataDirectory = home.resolve(".agentty");
-    Settings settings = new SettingsStore(dataDirectory).load();
+    var settingsStore = new SettingsStore(dataDirectory);
+    Settings settings = settingsStore.load();
     String provider = arguments.provider().isBlank() ? settings.provider() : arguments.provider();
     if (provider.isBlank()) provider = "anthropic";
     String model = arguments.model().isBlank() ? settings.modelId().value() : arguments.model();
@@ -185,7 +224,7 @@ final class InteractiveCommand {
     var providers = new LiveProviderFactory.Configuration(provider, model, auth, settings.effort(),
         tools.systemPrompt(), 0, environment);
     return new Configuration(new AgentSessionFactory(tools, providers, client, dataDirectory),
-        dataDirectory, profile, model);
+        dataDirectory, profile, model, settingsStore);
   }
 
   private Path resolveDocs(Path workspace) {
@@ -228,7 +267,8 @@ final class InteractiveCommand {
   }
 
   record Configuration(
-      AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model) {}
+      AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
+      SettingsStore settings) {}
 
   interface TerminalPort {
     JLineTerminalSession.Size size();
@@ -238,6 +278,8 @@ final class InteractiveCommand {
   interface AgentControl {
     AgentState state();
     void dispatch(RuntimeMessage message);
+    void newThread();
+    Profile cycleProfile();
   }
 
   interface AnimationPort {
@@ -444,6 +486,14 @@ final class InteractiveCommand {
               if (command == CommandPalette.Command.QUIT) { render(); return false; }
               if (command == CommandPalette.Command.COMPACT_CONTEXT) {
                 loop.dispatch(new RuntimeMessage.CompactContext());
+              } else if (command == CommandPalette.Command.NEW_THREAD) {
+                loop.newThread();
+                resetForNewThread();
+              } else if (command == CommandPalette.Command.CYCLE_PROFILE) {
+                Profile profile = loop.cycleProfile();
+                uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
+              } else if (command == CommandPalette.Command.INSPECT_TOOL_OUTPUTS) {
+                openToolViewer(loop.state());
               }
             }
           }
@@ -455,6 +505,21 @@ final class InteractiveCommand {
       }
       render();
       return true;
+    }
+
+    private void resetForNewThread() {
+      synchronized (lock) {
+        composer = "";
+        cursor = 0;
+        revealMessage = null;
+        reveal = null;
+        palette = new CommandPalette.Closed();
+        toolViewer = new ToolOutputViewer.Closed();
+        uiStatus = "";
+        frame = new InlineFrameRenderer.Empty();
+        terminal.write("\u001b[2J\u001b[3J\u001b[H");
+      }
+      render();
     }
 
     void insert(String value) {

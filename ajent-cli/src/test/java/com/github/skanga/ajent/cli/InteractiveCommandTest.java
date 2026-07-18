@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -128,6 +129,9 @@ final class InteractiveCommandTest {
     assertThat(ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent)).isTrue();
     assertThat(ui.key(special(TerminalKey.SpecialKey.TAB), agent)).isTrue();
     assertThat(ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent)).isTrue();
+    ui.key(character('a'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER, false, true, false), agent);
+    ui.key(character('u', true), agent);
     ui.key(character('x'), agent);
     assertThat(ui.key(character('d', true), agent)).isTrue();
     ui.key(character('u', true), agent);
@@ -138,6 +142,22 @@ final class InteractiveCommandTest {
         new InteractiveCommand.PermissionGate());
     assertThat(another.key(new TerminalKey(new TerminalKey.CharacterKey('q'),
         new TerminalKey.Modifiers(false, true, false)), agent)).isTrue();
+    var notReady = new InteractiveCommand.Ui(new FakeTerminal(), new AtomicReference<>(),
+        new InteractiveCommand.PermissionGate());
+    notReady.render();
+  }
+
+  @Test void frameSchedulerCoalescesPendingWakeupsAndCanScheduleAgain() throws Exception {
+    var first = new CountDownLatch(1);
+    var second = new CountDownLatch(1);
+    try (var scheduler = new InteractiveCommand.FrameScheduler()) {
+      assertThat(scheduler.nowNanos()).isPositive();
+      scheduler.request(first::countDown);
+      scheduler.request(() -> { throw new AssertionError("not coalesced"); });
+      assertThat(first.await(2, TimeUnit.SECONDS)).isTrue();
+      scheduler.request(second::countDown);
+      assertThat(second.await(2, TimeUnit.SECONDS)).isTrue();
+    }
   }
 
   @Test void commandPaletteOwnsKeysFiltersDispatchesCompactAndCanQuit() {
@@ -164,6 +184,18 @@ final class InteractiveCommandTest {
     assertThat(ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent)).isTrue();
     ui.key(character('k', true), agent);
     assertThat(ui.key(special(TerminalKey.SpecialKey.ENTER), agent)).isTrue();
+    assertThat(agent.newThreads).isEqualTo(1);
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "cycle profile".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.profile).isEqualTo(Profile.MINIMAL);
+    assertThat(terminal.bytes.toString()).contains("profile: minimal");
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "inspect tool".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("no tool outputs");
   }
 
   @Test void permissionGateBlocksUntilModalKeysResolveAllDecisions() throws Exception {
@@ -191,6 +223,8 @@ final class InteractiveCommandTest {
     var ui = new InteractiveCommand.Ui(new FakeTerminal(), state, gate);
     var result = CompletableFuture.supplyAsync(() -> gate.request(tool("output")));
     while (gate.current() == null) java.lang.Thread.onSpinWait();
+    assertThat(gate.request(tool("second")))
+        .isEqualTo(new PermissionPort.Decision(false, false));
     assertThat(ui.key(character('x'), new FakeAgent(state))).isTrue();
     assertThat(result.isDone()).isFalse();
     assertThat(gate.resolve(false, false)).isTrue();
@@ -351,9 +385,20 @@ final class InteractiveCommandTest {
   private static final class FakeAgent implements InteractiveCommand.AgentControl {
     private final AtomicReference<AgentState> state;
     private final List<RuntimeMessage> messages = new ArrayList<>();
+    private int newThreads;
+    private Profile profile = Profile.ASK;
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
     @Override public AgentState state() { return state.get(); }
     @Override public void dispatch(RuntimeMessage message) { messages.add(message); }
+    @Override public void newThread() { newThreads++; }
+    @Override public Profile cycleProfile() {
+      profile = switch (profile) {
+        case WRITE -> Profile.ASK;
+        case ASK -> Profile.MINIMAL;
+        case MINIMAL -> Profile.WRITE;
+      };
+      return profile;
+    }
   }
 
   private static final class ManualAnimation implements InteractiveCommand.AnimationPort {

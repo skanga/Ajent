@@ -3,6 +3,7 @@ package com.github.skanga.ajent.runtime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.skanga.ajent.domain.MessageId;
+import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.SessionPhase;
 import com.github.skanga.ajent.domain.Thread;
@@ -17,10 +18,27 @@ import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 final class AgentReducerTest {
+  @Test void profileChangeDropsSessionAlwaysAllowGrantsWithoutDisturbingTurn() {
+    AgentState initial = AgentState.initial(thread());
+    AgentState granted = new AgentState(initial.thread(), initial.phase(), initial.activeTurnId(),
+        initial.turnCounter(), initial.tokensIn(), initial.tokensOut(), initial.lastTickNanos(),
+        initial.status(), initial.toolDraft(), initial.queued(), initial.compaction(),
+        initial.oauthRefreshInFlight(), initial.truncatedToolIds(), Set.of("bash"));
+
+    AgentReducer.Step changed = reducer(PermissionVerdict.ALLOW).update(granted,
+        new RuntimeMessage.ProfileChanged(Profile.MINIMAL));
+
+    assertThat(changed.state()).isEqualTo(new AgentState(granted.thread(), granted.phase(),
+        granted.activeTurnId(), granted.turnCounter(), granted.tokensIn(), granted.tokensOut(),
+        granted.lastTickNanos(), granted.status(), granted.toolDraft(), granted.queued(),
+        granted.compaction(), granted.oauthRefreshInFlight(), granted.truncatedToolIds(), Set.of()));
+    assertThat(changed.effects()).isEmpty();
+  }
   @Test void submitStartsADeterministicTurnAndDescribesProviderAndPersistenceEffects() {
     AgentReducer.Step step = reducer(PermissionVerdict.ALLOW).update(AgentState.initial(thread()),
         new RuntimeMessage.Submit("hello", List.of()));

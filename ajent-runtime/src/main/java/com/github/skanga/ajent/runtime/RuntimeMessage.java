@@ -1,6 +1,7 @@
 package com.github.skanga.ajent.runtime;
 
 import com.github.skanga.ajent.domain.ImageContent;
+import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
 import java.util.List;
 import java.util.Objects;
@@ -31,6 +32,9 @@ public sealed interface RuntimeMessage {
     public TokenRefreshed { result = Objects.requireNonNull(result, "result"); }
   }
   record CompactContext() implements RuntimeMessage {}
+  record ProfileChanged(Profile profile) implements RuntimeMessage {
+    public ProfileChanged { profile = Objects.requireNonNull(profile, "profile"); }
+  }
   record Tick() implements RuntimeMessage {}
   record Cancel() implements RuntimeMessage {}
 }

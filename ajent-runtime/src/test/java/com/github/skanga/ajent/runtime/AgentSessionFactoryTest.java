@@ -45,6 +45,15 @@ final class AgentSessionFactoryTest {
       assertThat(loop.state().thread().id().value()).isEqualTo("session");
     }
 
+    var liveProfile = new AtomicReference<>(Profile.WRITE);
+    try (var loop = factory.create(
+        new Thread(new ThreadId("dynamic"), "Dynamic", List.of()), liveProfile::get,
+        "qwen3:14b", call -> new PermissionPort.Decision(true, false),
+        (message, state) -> {})) {
+      liveProfile.set(Profile.MINIMAL);
+      assertThat(loop.state().thread().id().value()).isEqualTo("dynamic");
+    }
+
     assertThat(captured.get().model()).isEqualTo("qwen3:14b");
     assertThat(captured.get().provider()).isEqualTo("ollama");
     assertThat(factory.contextMax()).isEqualTo(32_768);

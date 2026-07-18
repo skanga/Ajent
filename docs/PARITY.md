@@ -82,5 +82,13 @@ Unicode-width table. `ColumnTextWrapperTest` proves CJK/emoji cell wrapping,
 supplementary-code-point atomicity, logical blank-line preservation, and
 forward progress in a one-column viewport.
 
+Live command interpretation now includes new-thread and profile-cycle in
+addition to compact, quit, and tool-output inspection. New-thread cancels and
+drains the abandoned loop, creates a fresh durable thread/session, clears UI
+draft/modal/reveal state, and emits AgenTTY's explicit `2J`/`3J`/home reset for
+a wholesale transcript swap. Profile cycling follows Write → Ask → Minimal,
+updates future permission classification without cancelling an active turn,
+clears session-level always-allow grants, and atomically persists the setting.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.
