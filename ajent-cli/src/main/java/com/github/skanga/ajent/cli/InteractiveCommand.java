@@ -44,11 +44,11 @@ import com.github.skanga.ajent.terminal.render.CanvasSerializer;
 import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
 import com.github.skanga.ajent.terminal.render.InlineFrameRenderer;
 import com.github.skanga.ajent.terminal.render.MarkdownTerminalRenderer;
+import com.github.skanga.ajent.terminal.render.StreamingMarkdown;
 import com.github.skanga.ajent.terminal.render.TerminalCanvas;
 import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
-import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
 import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
@@ -896,7 +896,7 @@ final class InteractiveCommand {
     private List<Attachment> composerAttachments = List.of();
     private int cursor;
     private com.github.skanga.ajent.domain.MessageId revealMessage;
-    private TextReveal reveal;
+    private StreamingMarkdown reveal;
 
     Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission) {
       this(terminal, agent, permission, new AnimationPort() {
@@ -2139,7 +2139,7 @@ final class InteractiveCommand {
         if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
         output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
         String text = AttachmentText.display(message.text(), message.attachments());
-        TextReveal.Frame revealFrame = null;
+        List<MarkdownTerminalRenderer.Line> revealFrame = null;
         boolean revealable = message.role() == Role.ASSISTANT
             && messageIndex == messages.size() - 1;
         if (revealable) {
@@ -2147,14 +2147,15 @@ final class InteractiveCommand {
               && !message.textBlockClosed();
           if (!message.id().equals(revealMessage)) {
             revealMessage = message.id();
-            reveal = new TextReveal();
-            revealFrame = reveal.begin(text, streaming, nowNanos);
-          } else {
-            revealFrame = reveal.update(text, streaming, nowNanos);
+            reveal = new StreamingMarkdown();
           }
-          animating |= revealFrame.requiresAnimation();
+          reveal.setContent(text);
+          if (streaming) reveal.setLive(true);
+          else reveal.finish();
+          revealFrame = reveal.render(width, nowNanos);
+          animating |= reveal.requiresAnimation();
         }
-        if (revealFrame != null) appendMarkdown(output, revealFrame, width);
+        if (revealFrame != null) appendMarkdown(output, revealFrame);
         else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, width);
         else wrap(output, text, width, Style.NORMAL);
         Map<String, java.util.Set<Integer>> grepHits =
@@ -2200,10 +2201,6 @@ final class InteractiveCommand {
 
     private static void appendMarkdown(List<StyledLine> lines, String source, int width) {
       appendMarkdown(lines, MarkdownTerminalRenderer.render(source, width));
-    }
-
-    private static void appendMarkdown(List<StyledLine> lines, TextReveal.Frame frame, int width) {
-      appendMarkdown(lines, MarkdownTerminalRenderer.render(frame, width));
     }
 
     private static void appendMarkdown(

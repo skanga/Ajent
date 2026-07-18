@@ -193,6 +193,22 @@ final class StreamingMarkdownTest {
         .isLessThanOrEqualTo(44));
   }
 
+  @Test
+  void statefulWidgetResetsHeightOnReplacementAndWidthChange() {
+    var markdown = new StreamingMarkdown();
+    markdown.setLive(true);
+    markdown.setContent("one two three four five six seven eight nine ten");
+    assertThat(markdown.render(10, 0)).hasSizeGreaterThan(1);
+
+    markdown.setContent("x");
+    assertThat(markdown.render(10, 16_000_000)).hasSize(1);
+    markdown.setContent("x plus enough words to wrap this row again");
+    assertThat(markdown.render(10, 32_000_000)).hasSizeGreaterThan(1);
+    assertThat(markdown.render(80, 48_000_000)).hasSize(1);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> markdown.render(0, 0))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
   private static long nonBlankContent(java.util.List<MarkdownTerminalRenderer.Line> lines) {
     return lines.stream().flatMap(line -> line.text().codePoints().boxed())
         .filter(codePoint -> !Character.isWhitespace(codePoint))

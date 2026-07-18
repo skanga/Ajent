@@ -25,7 +25,11 @@ public final class StreamingMarkdown {
 
   private String source = "";
   private List<Block> blocks = List.of();
+  private final TextReveal reveal = new TextReveal(90, 0.3, 0.2);
+  private TextReveal.Frame revealFrame;
   private boolean live;
+  private int rowFloor;
+  private int floorWidth = -1;
 
   /** Native top-level block kinds exposed by Maya's StreamingMarkdown. */
   public enum BlockKind {
@@ -51,7 +55,9 @@ public final class StreamingMarkdown {
   }
 
   public void setContent(String content) {
-    source = Objects.requireNonNull(content, "content");
+    Objects.requireNonNull(content, "content");
+    if (!content.startsWith(source)) resetVisualState();
+    source = content;
     blocks = parse(source);
   }
 
@@ -78,6 +84,43 @@ public final class StreamingMarkdown {
 
   public List<Block> blocks() {
     return blocks;
+  }
+
+  /** Builds a production frame while preserving the largest live height at this width. */
+  public List<MarkdownTerminalRenderer.Line> render(int width, long nowNanos) {
+    if (width <= 0) throw new IllegalArgumentException("Markdown width must be positive");
+    revealFrame = revealFrame == null
+        ? reveal.begin(source, live, nowNanos)
+        : reveal.update(source, live, nowNanos);
+    List<MarkdownTerminalRenderer.Line> rendered =
+        MarkdownTerminalRenderer.render(revealFrame, width);
+    if (width != floorWidth) {
+      floorWidth = width;
+      rowFloor = 0;
+    }
+    if (revealFrame.requiresAnimation()) {
+      rowFloor = Math.max(rowFloor, rendered.size());
+      if (rendered.size() < rowFloor) {
+        var padded = new ArrayList<>(rendered);
+        while (padded.size() < rowFloor) {
+          padded.add(new MarkdownTerminalRenderer.Line(List.of()));
+        }
+        rendered = List.copyOf(padded);
+      }
+    } else {
+      rowFloor = rendered.size();
+    }
+    return rendered;
+  }
+
+  public boolean requiresAnimation() {
+    return revealFrame != null && revealFrame.requiresAnimation();
+  }
+
+  private void resetVisualState() {
+    revealFrame = null;
+    rowFloor = 0;
+    floorWidth = -1;
   }
 
   private static Parser parser() {

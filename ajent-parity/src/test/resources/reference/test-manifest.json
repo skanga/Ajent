@@ -216,9 +216,12 @@
       "classification": "property",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^md_shape_sweep$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/MdShapeSweep.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/MarkdownShapeSweepTest.java",
+      "supportingCounterparts": [
+        "ajent-cli/src/test/java/com/github/skanga/ajent/cli/InteractiveCommandTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all 31 pinned shapes streamed at exact 1/3/7 UTF-8-byte chunk boundaries with monotonic live height"]
     },
     {
       "id": "md_shrink_debug",
