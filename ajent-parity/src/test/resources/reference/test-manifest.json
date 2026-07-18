@@ -488,9 +488,9 @@
       "classification": "property",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^reveal_smoothness_probe$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/RevealSmoothnessProbe.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/MarkdownRevealSmoothnessTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "exact seven-section fixture at six UTF-8 bytes per 16 ms frame; zero height shrink and 60-cell burst cap translated"]
     },
     {
       "id": "salvage_dedup_test",
