@@ -23,15 +23,24 @@ import java.util.stream.Stream;
 /** AgenTTY-compatible grep, glob, and definition-search bodies. */
 public final class SearchTools {
   private static final int PER_PAGE = 20;
+  private static final int CONTEXT_LINES = 2;
   private static final int MAX_MATCHES = 500;
+  private static final int MAX_OUTPUT_BYTES = 20_000;
   private static final long MAX_FILE_BYTES = 8L * 1024L * 1024L;
-  private static final Set<String> BINARY_EXTENSIONS = Set.of(".exe", ".dll", ".png", ".jpg",
-      ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".jar", ".class", ".wasm", ".lock");
+  private static final Set<String> BINARY_EXTENSIONS = Set.of(
+      ".exe", ".dll", ".lib", ".a", ".o", ".obj", ".pdb", ".so", ".dylib",
+      ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff",
+      ".pdf", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+      ".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".flac", ".ogg",
+      ".ttf", ".otf", ".woff", ".woff2", ".eot", ".class", ".jar", ".pyc",
+      ".pyo", ".wasm", ".bin", ".iso", ".dat", ".db", ".sqlite", ".sqlite3",
+      ".dmg", ".deb", ".rpm", ".msi", ".lock");
   private static final Set<String> CODE_EXTENSIONS = Set.of(".cpp", ".hpp", ".c", ".h", ".cc",
       ".hh", ".cxx", ".hxx", ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs",
       ".java", ".kt", ".rb", ".swift", ".zig", ".lua");
 
-  private record Match(Path path, int line, String text) {}
+  private record FileMatches(Path path, List<String> lines, List<Integer> matchLines) {}
+  private record LineRange(int start, int end) {}
   private final WorkspaceSandbox sandbox;
 
   public SearchTools(WorkspaceSandbox sandbox) { this.sandbox = sandbox; }
@@ -91,47 +100,172 @@ public final class SearchTools {
     if (expression.isBlank()) return invalidPattern(expression);
     Path root = root(args, "grep");
     if (root == null) return outside(args.string("path", "."), "grep");
-    int flags = args.bool("case_sensitive", false) ? 0 : Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
+    int flags = args.bool("case_sensitive", false) ? 0 : Pattern.CASE_INSENSITIVE;
     Pattern regex;
     try {
-      regex = Pattern.compile(expression, flags);
+      regex = Pattern.compile(isLiteral(expression) ? Pattern.quote(expression) : expression, flags);
     } catch (PatternSyntaxException exception) {
       return failure(ToolErrorKind.INVALID_REGEX,
           "invalid regex '" + expression + "': " + exception.getDescription());
     }
     String fileGlob = args.string("glob", "");
-    var matches = new ArrayList<Match>();
-    for (Path path : candidates(root, fileGlob, MAX_FILE_BYTES, null)) {
-      List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
-      for (int index = 0; index < lines.size() && matches.size() < MAX_MATCHES; index++) {
-        if (regex.matcher(lines.get(index)).find()) matches.add(new Match(path, index + 1, lines.get(index)));
+    List<Path> candidates = candidates(root, fileGlob, MAX_FILE_BYTES, null);
+    if (candidates.isEmpty()) return success("No matches found. The directory may be empty or "
+        + "every file was filtered (binary extension, size cap, or hidden).");
+    var files = new ArrayList<FileMatches>();
+    int total = 0;
+    for (Path path : candidates) {
+      byte[] bytes = Files.readAllBytes(path);
+      if (containsNull(bytes, Math.min(bytes.length, 4096))) continue;
+      String content = new String(bytes, StandardCharsets.UTF_8);
+      List<String> lines = List.of(content.split("\\n", -1));
+      var lineMatches = new ArrayList<Integer>();
+      var matcher = regex.matcher(content);
+      int cursor = 0;
+      int line = 0;
+      while (matcher.find() && total < MAX_MATCHES) {
+        while (cursor < matcher.start()) {
+          if (content.charAt(cursor++) == '\n') line++;
+        }
+        lineMatches.add(line);
+        total++;
       }
-      if (matches.size() >= MAX_MATCHES) break;
+      if (!lineMatches.isEmpty()) files.add(new FileMatches(path, lines, lineMatches));
+      if (total >= MAX_MATCHES) break;
     }
-    if (matches.isEmpty()) return success("No matches found. Check the pattern syntax (this is ECMAScript "
-        + "regex, not PCRE), try a broader pattern, or use `glob` first to narrow the file set.");
+    if (total == 0) return success("No matches found. Check the pattern syntax (this is ECMAScript "
+        + "regex, not PCRE — no look-behind, no named groups), try a broader pattern, or use "
+        + "`glob` first to narrow the file set.");
     int offset = Math.max(0, args.integer("offset", 0));
-    if (offset >= matches.size()) return success("No matches on this page. Total matches: "
-        + matches.size() + ". Try a smaller offset.");
-    int end = Math.min(matches.size(), offset + PER_PAGE);
-    long files = matches.stream().map(Match::path).distinct().count();
-    var output = new StringBuilder("Found ").append(matches.size()).append(matches.size() == 1
-        ? " match" : " matches").append(" across ").append(files).append(files == 1
+    if (offset >= total) return success("No matches on this page. Total matches: "
+        + total + ". Try a smaller offset.");
+    var output = new StringBuilder("Found ").append(total).append(total == 1
+        ? " match" : " matches").append(total >= MAX_MATCHES ? "+" : "")
+        .append(" across ").append(files.size()).append(files.size() == 1
         ? " file.\n\n" : " files.\n\n");
-    Path prior = null;
-    for (Match match : matches.subList(offset, end)) {
-      if (!match.path().equals(prior)) output.append("## Matches in ").append(match.path()).append("\n\n");
-      output.append("### L").append(match.line()).append('-').append(match.line()).append("\n```\n")
-          .append(match.text()).append("\n```\n\n");
-      prior = match.path();
+    int shown = 0;
+    int skipped = 0;
+    boolean sizeCapped = false;
+    for (FileMatches file : files) {
+      if (shown >= PER_PAGE) break;
+      if (utf8Length(output) >= MAX_OUTPUT_BYTES) {
+        sizeCapped = true;
+        break;
+      }
+      var ranges = new ArrayList<LineRange>();
+      for (int line : file.matchLines()) {
+        if (skipped < offset) {
+          skipped++;
+          continue;
+        }
+        if (shown >= PER_PAGE) break;
+        int start = Math.max(0, line - CONTEXT_LINES);
+        int end = Math.min(file.lines().size() - 1, line + CONTEXT_LINES);
+        if (!ranges.isEmpty() && start <= ranges.getLast().end() + 1) {
+          LineRange prior = ranges.removeLast();
+          ranges.add(new LineRange(prior.start(), Math.max(prior.end(), end)));
+        } else {
+          ranges.add(new LineRange(start, end));
+        }
+        shown++;
+      }
+      if (ranges.isEmpty()) continue;
+      output.append("## Matches in ").append(file.path()).append("\n\n");
+      for (LineRange range : ranges) {
+        int firstMatchLine = file.matchLines().stream()
+            .filter(line -> line >= range.start() && line <= range.end()).findFirst()
+            .orElse(range.start());
+        String symbol = enclosingSymbol(file.lines(), firstMatchLine + 1);
+        output.append("### ");
+        if (!symbol.isEmpty()) output.append(symbol).append(" › ");
+        output.append('L').append(range.start() + 1).append('-').append(range.end() + 1)
+            .append("\n```\n");
+        for (int line = range.start(); line <= range.end(); line++)
+          output.append(file.lines().get(line)).append('\n');
+        output.append("```\n\n");
+      }
     }
-    if (end < matches.size()) output.append("Showing matches ").append(offset + 1).append('-')
-        .append(end).append(" of ").append(matches.size()).append(". Use offset: ")
+    if (sizeCapped) output.append("[output capped at ").append(MAX_OUTPUT_BYTES)
+        .append(" bytes — narrow the pattern or use offset to page]\n\n");
+    int remaining = total - (offset + shown);
+    if (remaining > 0) output.append("Showing matches ").append(offset + 1).append('-')
+        .append(offset + shown).append(" of ").append(total)
+        .append(total >= MAX_MATCHES ? "+ (scan limit reached)" : "").append(". Use offset: ")
         .append(offset + PER_PAGE).append(" to see the next page.");
-    else if (offset > 0) output.append("Showing matches ").append(offset + 1).append('-')
-        .append(end).append(" of ").append(matches.size()).append('.');
-    else output.append("Showing all ").append(matches.size()).append(" matches.");
+    else if (shown == 0) return success("No matches on this page. Total matches: "
+        + total + ". Try a smaller offset.");
+    else output.append("Showing all ").append(total).append(" matches.");
     return described(args, output.toString());
+  }
+
+  private static boolean isLiteral(String expression) {
+    return expression.chars().noneMatch(character -> ".^$*+?()[]{}|\\".indexOf(character) >= 0);
+  }
+
+  private static boolean containsNull(byte[] bytes, int limit) {
+    for (int index = 0; index < limit; index++) if (bytes[index] == 0) return true;
+    return false;
+  }
+
+  private static int utf8Length(CharSequence text) {
+    return text.toString().getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  private static String enclosingSymbol(List<String> lines, int matchLineOneBased) {
+    if (matchLineOneBased < 2 || matchLineOneBased > lines.size()) return "";
+    int matchIndex = matchLineOneBased - 1;
+    int bestIndent = indentation(lines.get(matchIndex));
+    String fallback = "";
+    for (int index = matchIndex - 1; index >= Math.max(0, matchIndex - 400); index--) {
+      String raw = stripCr(lines.get(index));
+      if (raw.isBlank()) continue;
+      int indent = indentation(raw);
+      if (indent >= bestIndent) continue;
+      String candidate = raw.stripLeading();
+      int kind = symbolKind(candidate);
+      if (kind == 2) return truncateBreadcrumb(candidate);
+      if (kind == 1) {
+        if (fallback.isEmpty()) fallback = truncateBreadcrumb(candidate);
+        bestIndent = indent;
+        continue;
+      }
+      bestIndent = indent;
+    }
+    return fallback;
+  }
+
+  private static int indentation(String line) {
+    int width = 0;
+    for (int index = 0; index < line.length(); index++) {
+      if (line.charAt(index) == ' ') width++;
+      else if (line.charAt(index) == '\t') width += 4;
+      else break;
+    }
+    return width;
+  }
+
+  private static int symbolKind(String line) {
+    for (String keyword : List.of("fn ", "def ", "class ", "struct ", "enum ", "impl ",
+        "trait ", "interface ", "namespace ", "function", "func ", "public ", "private ",
+        "protected ", "static ", "void ", "template", "module ", "export ", "type "))
+      if (line.contains(keyword)) return 2;
+    for (String control : List.of("for ", "for(", "while ", "while(", "if ", "if(", "else",
+        "switch ", "switch(", "do ", "do{", "try", "catch", "} else", "} catch", "loop ",
+        "loop{", "match ", "match("))
+      if (line.startsWith(control)) return 0;
+    return line.endsWith("{") || line.endsWith("(") ? 1 : 0;
+  }
+
+  private static String truncateBreadcrumb(String line) {
+    if (line.getBytes(StandardCharsets.UTF_8).length <= 100) return line;
+    int end = Math.min(99, line.length());
+    while (end > 0 && line.substring(0, end).getBytes(StandardCharsets.UTF_8).length > 99) end--;
+    if (end > 0 && Character.isHighSurrogate(line.charAt(end - 1))) end--;
+    return line.substring(0, end) + '…';
+  }
+
+  private static String stripCr(String line) {
+    return line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
   }
 
   private ToolResult findDefinition(JsonNode arguments) throws IOException {
@@ -177,6 +311,7 @@ public final class SearchTools {
   }
 
   private Stream<Path> walk(Path root) throws IOException {
+    if (!Files.isDirectory(root)) return Stream.empty();
     return Files.walk(root).filter(path -> path.equals(root) || path.getParent() == null
         || !hasSkippedAncestor(root, path));
   }
@@ -191,7 +326,7 @@ public final class SearchTools {
 
   private Path root(ArgReader args, String operation) {
     Path path = sandbox.normalize(args.string("path", "."));
-    return sandbox.isReadable(path) && Files.isDirectory(path) ? path : null;
+    return sandbox.isWithin(path) ? path : null;
   }
 
   private static String extension(Path path) {

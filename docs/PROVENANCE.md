@@ -19,6 +19,7 @@ Reference-derived work currently includes:
 | Agent doom-loop breaker | `src/runtime/app/cmd_factory.cpp`, `tests/doom_loop_test.cpp` |
 | Provider-backed task subagents, role tool filters, retries, turn/depth bounds, progress, and report harvesting | `include/agentty/tool/subagent.hpp`, `src/tool/subagent.cpp`, `src/tool/mcp_tools_backends.cpp`, `src/runtime/main.cpp` |
 | Subprocess byte-idle watchdog, 80 ms accumulated-output progress, bounded capture, shell output spill, error extraction, and preview envelope | `mcp-cpp/include/mcp/tools/util/subprocess.hpp`, `mcp-cpp/include/mcp/tools/util/progress.hpp`, `mcp-cpp/src/tools/util/subprocess.cpp`, `mcp-cpp/src/tools/shell.cpp` |
+| Grep whole-file matching, context merging, symbol breadcrumbs, pagination, binary filtering, and output guard | `mcp-cpp/src/tools/search.cpp` |
 | Salvaged-call re-leak reducer | `src/runtime/app/cmd_factory.cpp`, `tests/salvage_dedup_test.cpp` |
 | Canonical reducer transition traces | `src/runtime/app/update.cpp`, `src/runtime/app/update/stream.cpp`, `src/runtime/app/update/tool.cpp`, `include/agentty/runtime/msg.hpp` |
 | Composer word deletion, attachment placeholders, and undo | `src/runtime/app/update/composer.cpp`, `src/runtime/composer_attachment.cpp`, `src/runtime/view/helpers.cpp`, `tests/composer_edit_test.cpp` |

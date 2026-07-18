@@ -57,12 +57,114 @@ class SearchToolsTest {
     assertThat(success(tools.execute("glob", JSON.createObjectNode().put("pattern", "*.java"))))
         .contains("Alpha.java").doesNotContain("hidden.java");
     assertThat(success(tools.execute("grep", JSON.createObjectNode().put("pattern", "VALUE")
-        .put("case_sensitive", true).put("offset", 1)))).contains("Showing matches 2-2 of 2");
+        .put("case_sensitive", true).put("offset", 1)))).contains("Showing all 2 matches");
     assertThat(failure(tools.execute("grep", JSON.createObjectNode().put("pattern", "[")
         .put("case_sensitive", true))).error().kind()).isEqualTo(ToolErrorKind.INVALID_REGEX);
     assertThat(failure(tools.execute("glob", JSON.createObjectNode()
         .put("pattern", "*").put("path", outside.toString()))).error().kind())
         .isEqualTo(ToolErrorKind.OUT_OF_WORKSPACE);
+    var sandbox = new WorkspaceSandbox(root, root, root);
+    sandbox.allowReadRoot(outside);
+    assertThat(failure(new SearchTools(sandbox).execute("grep", JSON.createObjectNode()
+        .put("pattern", "x").put("path", outside.toString()))).error().kind())
+        .isEqualTo(ToolErrorKind.OUT_OF_WORKSPACE);
+
+    Path absent = root.resolve("not-created");
+    assertThat(success(tools.execute("glob", JSON.createObjectNode()
+        .put("pattern", "*").put("path", absent.toString())))).startsWith("no matches");
+    assertThat(success(tools.execute("grep", JSON.createObjectNode()
+        .put("pattern", "x").put("path", absent.toString())))).contains("every file was filtered");
+  }
+
+  @Test
+  void grepPortsContextMergingOccurrenceCountsAndSymbolBreadcrumbs(@TempDir Path root)
+      throws Exception {
+    Files.writeString(root.resolve("Service.java"), String.join("\n",
+        "class Service {",
+        "  void calculate() {",
+        "    int before = 1;",
+        "    String text = \"NEEDLE then NEEDLE\";",
+        "    int after = 2;",
+        "  }",
+        "}") + '\n');
+
+    String result = success(tools(root).execute("grep", JSON.createObjectNode()
+        .put("pattern", "NEEDLE").put("case_sensitive", true)));
+
+    assertThat(result).contains("Found 2 matches across 1 file.",
+        "### void calculate() { › L2-6", "int before = 1", "int after = 2",
+        "Showing all 2 matches.");
+    assertThat(result).containsOnlyOnce("### void calculate() { › L2-6");
+  }
+
+  @Test
+  void grepPinsScanLimitAndTwentyMatchPagination(@TempDir Path root) throws Exception {
+    Files.writeString(root.resolve("many.txt"), "hit ".repeat(501));
+
+    String result = success(tools(root).execute("grep", JSON.createObjectNode()
+        .put("pattern", "hit").put("case_sensitive", true)));
+
+    assertThat(result).contains("Found 500 matches+ across 1 file.",
+        "Showing matches 1-20 of 500+ (scan limit reached). Use offset: 20");
+  }
+
+  @Test
+  void grepEvaluatesRegexAgainstTheWholeFileRatherThanEachLine(@TempDir Path root)
+      throws Exception {
+    Files.writeString(root.resolve("anchors.txt"), "first\nsecond\n");
+    var tools = tools(root);
+
+    assertThat(success(tools.execute("grep", JSON.createObjectNode()
+        .put("pattern", "^.").put("case_sensitive", true))))
+        .contains("Found 1 match across 1 file.");
+    assertThat(success(tools.execute("grep", JSON.createObjectNode()
+        .put("pattern", "first\\nsecond").put("case_sensitive", true))))
+        .contains("Found 1 match across 1 file.");
+  }
+
+  @Test
+  void grepHandlesFallbackAndLongUtf8BreadcrumbsAndNulContent(@TempDir Path root)
+      throws Exception {
+    Files.writeString(root.resolve("fallback.txt"),
+        "outer {\n  if (condition) {\n    \n    hit\n  }\n}\n");
+    String longSymbol = "void " + "é".repeat(60) + "() {";
+    Files.writeString(root.resolve("long.java"), longSymbol + "\n\thit\n}\n");
+    var tools = tools(root);
+
+    String breadcrumbs = success(tools.execute("grep", JSON.createObjectNode()
+        .put("pattern", "hit").put("case_sensitive", true)));
+    assertThat(breadcrumbs).contains("outer { ›", "void ").contains("… ›")
+        .doesNotContain(longSymbol + " ›");
+
+    Path nulRoot = root.resolve("nul-content");
+    Files.createDirectory(nulRoot);
+    Files.write(nulRoot.resolve("binary.txt"), new byte[] {'h', 'i', 't', 0, 'x'});
+    assertThat(success(tools.execute("grep", JSON.createObjectNode()
+        .put("pattern", "hit").put("path", nulRoot.toString()))))
+        .startsWith("No matches found. Check the pattern syntax");
+  }
+
+  @Test
+  void grepCapsRenderedPagesBetweenFilesAndExplainsFullyFilteredTrees(@TempDir Path root)
+      throws Exception {
+    var large = new StringBuilder();
+    for (int index = 0; index < 10; index++)
+      large.append("hit ").append("x".repeat(2_500)).append("\nplain\nplain\nplain\nplain\n");
+    Files.writeString(root.resolve("a.txt"), large);
+    Files.writeString(root.resolve("b.txt"), "hit final\n");
+
+    String capped = success(tools(root).execute("grep", JSON.createObjectNode()
+        .put("pattern", "hit").put("case_sensitive", true)));
+    assertThat(capped).contains("[output capped at 20000 bytes",
+        "Showing matches 1-10 of 11. Use offset: 20").doesNotContain("hit final");
+
+    Path filtered = root.resolve("filtered");
+    Files.createDirectory(filtered);
+    Files.writeString(filtered.resolve("only.dat"), "hit");
+    assertThat(success(tools(root).execute("grep", JSON.createObjectNode()
+        .put("pattern", "hit").put("path", filtered.toString()))))
+        .isEqualTo("No matches found. The directory may be empty or every file was filtered "
+            + "(binary extension, size cap, or hidden).");
   }
 
   @Test
