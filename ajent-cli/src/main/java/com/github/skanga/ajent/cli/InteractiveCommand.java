@@ -29,6 +29,7 @@ import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
+import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
@@ -45,6 +46,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.Base64;
 
 /** Interactive terminal composition root. */
 final class InteractiveCommand {
@@ -263,6 +265,8 @@ final class InteractiveCommand {
     private final TerminalStylePool styles = new TerminalStylePool();
     private InlineFrameRenderer.Frame frame = new InlineFrameRenderer.Empty();
     private CommandPalette.State palette = new CommandPalette.Closed();
+    private ToolOutputViewer.State toolViewer = new ToolOutputViewer.Closed();
+    private String uiStatus = "";
     private String composer = "";
     private int cursor;
 
@@ -287,10 +291,12 @@ final class InteractiveCommand {
         return true;
       }
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
+      if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
       if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
         int codePoint = Character.toLowerCase(character.codePoint());
         if (codePoint == 'c') return false;
         if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
+        if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
         if (codePoint == 'd' && composer.isEmpty()) return false;
         if (codePoint == 'u') { composer = composer.substring(cursor); cursor = 0; render(); return true; }
       }
@@ -330,6 +336,54 @@ final class InteractiveCommand {
         insert(new String(Character.toChars(character.codePoint())));
       }
       return true;
+    }
+
+    private void openToolViewer(AgentState state) {
+      List<ToolOutputViewer.Entry> entries = ToolOutputViewer.collect(state.thread().messages(),
+          call -> new ToolOutputViewer.Metadata(displayTool(call.name().value()),
+              call.name().value()));
+      ToolOutputViewer.Transition transition = ToolOutputViewer.open(entries);
+      toolViewer = transition.state();
+      uiStatus = transition.status();
+    }
+
+    private boolean toolViewerKey(TerminalKey key) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        toolViewer = switch (special) {
+          case ESCAPE -> ToolOutputViewer.close(toolViewer);
+          case ENTER -> ToolOutputViewer.select(toolViewer);
+          case UP -> ToolOutputViewer.move(toolViewer, -1);
+          case DOWN -> ToolOutputViewer.move(toolViewer, 1);
+          case PAGE_UP -> ToolOutputViewer.move(toolViewer, -10);
+          case PAGE_DOWN -> ToolOutputViewer.move(toolViewer, 10);
+          case HOME -> ToolOutputViewer.move(toolViewer, -1_000_000);
+          case END -> ToolOutputViewer.move(toolViewer, 1_000_000);
+          case LEFT -> ToolOutputViewer.step(toolViewer, -1);
+          case RIGHT -> ToolOutputViewer.step(toolViewer, 1);
+          default -> toolViewer;
+        };
+      } else if (key.key() instanceof TerminalKey.CharacterKey character) {
+        switch (Character.toLowerCase(character.codePoint())) {
+          case 'k' -> toolViewer = ToolOutputViewer.move(toolViewer, -1);
+          case 'j' -> toolViewer = ToolOutputViewer.move(toolViewer, 1);
+          case 'h' -> toolViewer = ToolOutputViewer.step(toolViewer, -1);
+          case 'l' -> toolViewer = ToolOutputViewer.step(toolViewer, 1);
+          case 'q' -> toolViewer = ToolOutputViewer.close(toolViewer);
+          case 'y' -> {
+            ToolOutputViewer.Transition copied = ToolOutputViewer.copy(toolViewer);
+            uiStatus = copied.status();
+            copied.clipboard().ifPresent(this::writeClipboard);
+          }
+          default -> { }
+        }
+      }
+      render();
+      return true;
+    }
+
+    private void writeClipboard(String value) {
+      String encoded = Base64.getEncoder().encodeToString(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      terminal.write("\u001b]52;c;" + encoded + '\u0007');
     }
 
     private boolean paletteKey(TerminalKey key, AgentControl loop) {
@@ -391,6 +445,24 @@ final class InteractiveCommand {
                 index == open.index() ? Style.ACCENT : Style.NORMAL));
           }
         }
+        if (toolViewer instanceof ToolOutputViewer.Open open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          if (open.viewing() && !open.entries().isEmpty()) {
+            ToolOutputViewer.Entry entry = open.entries().get(open.index());
+            lines.add(new StyledLine(entry.title() + "  " + entry.trailing(), Style.ACCENT));
+            wrap(lines, entry.output(), width, entry.failed() ? Style.DANGER : Style.NORMAL);
+          } else {
+            lines.add(new StyledLine("Tool outputs", Style.ACCENT));
+            for (int index = 0; index < open.entries().size(); index++) {
+              ToolOutputViewer.Entry entry = open.entries().get(index);
+              lines.add(new StyledLine((index == open.index() ? "› " : "  ")
+                  + entry.title() + "  " + entry.trailing(),
+                  entry.failed() ? Style.DANGER : index == open.index()
+                      ? Style.ACCENT : Style.NORMAL));
+            }
+          }
+        }
         var canvas = new TerminalCanvas(width, Math.max(1, lines.size()));
         int normal = 0;
         int accent = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.cyan()).withBold());
@@ -433,7 +505,7 @@ final class InteractiveCommand {
       };
     }
 
-    private static List<StyledLine> lines(
+    private List<StyledLine> lines(
         AgentState state, ToolUse permission, int width, String composer) {
       var output = new ArrayList<StyledLine>();
       if (state.thread().messages().isEmpty()) {
@@ -458,6 +530,8 @@ final class InteractiveCommand {
       }
       if (!state.status().isEmpty()) wrap(output, state.status(), width,
           state.status().startsWith("error:") ? Style.DANGER : Style.MUTED);
+      if (!uiStatus.isEmpty()) wrap(output, uiStatus, width,
+          uiStatus.startsWith("error:") ? Style.DANGER : Style.MUTED);
       output.add(new StyledLine("", Style.NORMAL));
       wrap(output, "> " + composer, width, Style.NORMAL);
       return List.copyOf(output);
@@ -479,5 +553,10 @@ final class InteractiveCommand {
 
     private enum Style { NORMAL, ACCENT, MUTED, DANGER }
     private record StyledLine(String text, Style style) {}
+
+    private static String displayTool(String name) {
+      if (name.isEmpty()) return name;
+      return Character.toUpperCase(name.charAt(0)) + name.substring(1).replace('_', ' ');
+    }
   }
 }

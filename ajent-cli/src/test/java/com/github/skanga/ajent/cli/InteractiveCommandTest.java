@@ -234,6 +234,47 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("read").contains("ready");
   }
 
+  @Test void liveToolViewerOwnsListBodyNavigationAndOsc52Copy() {
+    ToolUse first = new ToolUse(new ToolCallId("one"), new ToolName("read_file"), Map.of(),
+        new ToolStatus.Done(0, 100_000_000, "first"));
+    ToolUse second = new ToolUse(new ToolCallId("two"), new ToolName("bash"), Map.of(),
+        new ToolStatus.Failed(0, 100_000_000, "second"));
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(
+        new Message(Role.ASSISTANT, "", List.of(), List.of(first, second))))));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.key(character('o', true), agent);
+    assertThat(terminal.bytes.toString()).contains("Tool outputs");
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
+    ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+    ui.key(character('j'), agent);
+    ui.key(character('k'), agent);
+    ui.key(character('l'), agent);
+    ui.key(character('h'), agent);
+    ui.key(character('y'), agent);
+    assertThat(terminal.bytes.toString()).contains("\u001b]52;c;c2Vjb25k\u0007");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    ui.key(character('q'), agent);
+  }
+
+  @Test void liveToolViewerReportsEmptySnapshots() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    ui.key(character('o', true), new FakeAgent(state));
+    assertThat(terminal.bytes.toString()).contains("no tool outputs");
+  }
+
   private InteractiveCommand command(Map<String, String> environment) {
     return new InteractiveCommand(directory, directory, environment,
         new CredentialStore(directory.resolve("credentials.json"), "seed"),
