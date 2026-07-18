@@ -49,6 +49,7 @@ public final class McpClientSession implements AutoCloseable {
   private final String configuredName;
   private final Transport transport;
   private final Duration timeout;
+  private final Duration connectTimeout;
   private final String version;
   private final AtomicLong generation = new AtomicLong();
   private volatile List<RemoteTool> tools = List.of();
@@ -61,9 +62,15 @@ public final class McpClientSession implements AutoCloseable {
 
   public McpClientSession(
       String configuredName, Transport transport, Duration timeout, String version) {
+    this(configuredName, transport, timeout, timeout, version);
+  }
+
+  public McpClientSession(String configuredName, Transport transport, Duration timeout,
+                          Duration connectTimeout, String version) {
     this.configuredName = Objects.requireNonNull(configuredName, "configuredName");
     this.transport = Objects.requireNonNull(transport, "transport");
     this.timeout = Objects.requireNonNull(timeout, "timeout");
+    this.connectTimeout = Objects.requireNonNull(connectTimeout, "connectTimeout");
     this.version = Objects.requireNonNull(version, "version");
   }
 
@@ -74,7 +81,7 @@ public final class McpClientSession implements AutoCloseable {
     parameters.putObject("capabilities");
     ObjectNode info = parameters.putObject("clientInfo");
     info.put("name", "ajent"); info.put("version", version);
-    JsonNode initialized = transport.request("initialize", parameters, timeout);
+    JsonNode initialized = transport.request("initialize", parameters, connectTimeout);
     protocolVersion = initialized.path("protocolVersion").asText("2025-11-25");
     serverName = initialized.path("serverInfo").path("name").asText(configuredName);
     transport.notify("notifications/initialized", JSON.createObjectNode());
