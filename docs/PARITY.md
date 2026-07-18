@@ -63,5 +63,11 @@ unknown-SS3 suppression, horizontal-wheel reports, zero and extra mouse
 fields, saturating/private CSI parameters, and AgenTTY's padding-terminated
 base64 decoder.
 
+The reveal foundation includes Maya's rate-smoothed bounded-lag `RateCursor`.
+Translated pacing probes prove a 2,000-codepoint/s stream does not accumulate
+unbounded lag, a slow stream never runs past the wire, a 30,000-codepoint
+finalize backlog meets its deadline, and a 500-codepoint burst slides over
+multiple frames instead of teleporting.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.
