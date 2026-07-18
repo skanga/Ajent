@@ -8,6 +8,7 @@ import com.github.skanga.ajent.tools.host.HostTools;
 import com.github.skanga.ajent.tools.memory.JsonlMemoryStore;
 import com.github.skanga.ajent.tools.memory.MemoryTools;
 import com.github.skanga.ajent.tools.process.ProcessTools;
+import com.github.skanga.ajent.tools.process.ProcessRunner;
 import com.github.skanga.ajent.tools.rag.AgenttyDocRetriever;
 import com.github.skanga.ajent.tools.rag.MemoryKnowledgeSource;
 import com.github.skanga.ajent.tools.rag.SkillsKnowledgeSource;
@@ -32,19 +33,29 @@ public final class ToolRuntimeFactory {
       Path docsRoot,
       WebTransport webTransport,
       HostServices.TodoSink todoSink,
-      HostServices.SubagentRunner subagentRunner) {
+      HostServices.SubagentRunner subagentRunner,
+      ProcessRunner processRunner) {
+    public Configuration(
+        Path workspace, Path workingDirectory, Path home, Path docsRoot,
+        WebTransport webTransport, HostServices.TodoSink todoSink,
+        HostServices.SubagentRunner subagentRunner) {
+      this(workspace, workingDirectory, home, docsRoot, webTransport, todoSink, subagentRunner,
+          new ProcessRunner());
+    }
+
     public Configuration {
       workspace = normalizeRequired(workspace, "workspace");
       workingDirectory = workingDirectory == null
           ? workspace : workingDirectory.toAbsolutePath().normalize();
       home = normalizeRequired(home, "home");
       docsRoot = docsRoot == null ? null : docsRoot.toAbsolutePath().normalize();
+      processRunner = Objects.requireNonNull(processRunner, "processRunner");
     }
 
     public static Configuration standalone(Path workspace, Path home) {
       Path normalized = normalizeRequired(workspace, "workspace");
       return new Configuration(normalized, normalized, home, discoverDocs(normalized),
-          new JdkWebTransport(), null, null);
+          new JdkWebTransport(), null, null, new ProcessRunner());
     }
   }
 
@@ -60,7 +71,8 @@ public final class ToolRuntimeFactory {
     var host = new HostTools(
         configuration.todoSink(), skills.resolver(), retriever, configuration.subagentRunner());
     return new ToolDispatcher(
-        new FileTools(sandbox), new ProcessTools(sandbox), new SearchTools(sandbox),
+        new FileTools(sandbox), new ProcessTools(sandbox, configuration.processRunner()),
+        new SearchTools(sandbox),
         new RepoMapTools(sandbox), new GitTools(sandbox), host, new MemoryTools(memory),
         new WebTools(configuration.webTransport()));
   }

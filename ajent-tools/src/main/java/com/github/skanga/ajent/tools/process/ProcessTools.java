@@ -19,7 +19,7 @@ public final class ProcessTools {
   private final ProcessRunner runner;
 
   public ProcessTools(WorkspaceSandbox sandbox) { this(sandbox, new ProcessRunner()); }
-  ProcessTools(WorkspaceSandbox sandbox, ProcessRunner runner) {
+  public ProcessTools(WorkspaceSandbox sandbox, ProcessRunner runner) {
     this.sandbox = sandbox;
     this.runner = runner;
   }

@@ -3,6 +3,7 @@ package com.github.skanga.ajent.cli;
 import com.github.skanga.ajent.protocol.mcp.McpJsonRpcServer;
 import com.github.skanga.ajent.tools.catalog.NativeToolWireCatalog;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
+import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -48,9 +49,23 @@ final class McpServeCommand {
           + arguments.workspace() + "\n");
       return USAGE_ERROR;
     }
+    ProcessSandbox.Initialization processSandbox;
+    try {
+      processSandbox = ProcessSandbox.initialize(arguments.sandbox(), workspace);
+    } catch (IllegalArgumentException exception) {
+      error.print("ajent: " + exception.getMessage() + "\n");
+      return USAGE_ERROR;
+    }
+    if (!processSandbox.valid()) {
+      error.print("ajent: --sandbox=on but no backend available. "
+          + processSandbox.description() + "\n");
+      return USAGE_ERROR;
+    }
+    error.print("ajent: " + processSandbox.description() + "\n");
     Path docsRoot = resolveDocs(workspace);
     var configuration = new ToolRuntimeFactory.Configuration(
-        workspace, workspace, home, docsRoot, new JdkWebTransport(), null, null);
+        workspace, workspace, home, docsRoot, new JdkWebTransport(), null, null,
+        processSandbox.runner());
     var dispatcher = ToolRuntimeFactory.create(configuration);
     var published = NativeToolWireCatalog.all().stream()
         .map(specification -> new McpJsonRpcServer.PublishedTool(
