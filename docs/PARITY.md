@@ -67,6 +67,12 @@ The dispatcher applies the declared UTF-8 byte cap and head/tail/head-tail
 strategy while preserving structured file-change metadata; zero-budget tools
 and typed failures bypass truncation exactly as in AgenTTY.
 
+That same closed dispatcher normalizes null, scalar, and array arguments to an
+empty object, reports an absent tool as typed `not found`, and contains any
+runtime exception from a tool implementation as typed `unknown` with the
+native `tool crashed: ...` detail. These guarantees therefore apply uniformly
+to interactive, ACP, MCP-server, and isolated-subagent calls.
+
 The terminal input boundary tests additionally pin AgenTTY's 256-byte CSI and
 16 MiB OSC/bracketed-paste limits. They prove that invalid UTF-8 continuations
 and paste-overflow bytes are reprocessed in the ground state, while the byte

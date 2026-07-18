@@ -36,7 +36,7 @@ final class DispatcherToolPortTest {
         }));
     ToolCompletion failure = port.execute(call("does_not_exist", Map.of()));
     assertThat(failure).isInstanceOfSatisfying(ToolCompletion.Failure.class,
-        result -> assertThat(result.error()).contains("[unknown]", "unknown tool"));
+        result -> assertThat(result.error()).contains("[not found]", "unknown tool"));
   }
 
   private static ToolUse call(String name, Map<String, Object> arguments) {

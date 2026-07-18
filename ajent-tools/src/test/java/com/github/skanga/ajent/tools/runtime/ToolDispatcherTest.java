@@ -62,7 +62,22 @@ class ToolDispatcherTest {
     assertSuccess(dispatcher.execute("remember", JSON.createObjectNode().put("text", "fact")));
     assertSuccess(dispatcher.execute("web_fetch", JSON.createObjectNode().put("url", "https://example.test")));
     assertThat(((ToolResult.Failure) dispatcher.execute("nope", JSON.createObjectNode())).error().kind())
-        .isEqualTo(ToolErrorKind.UNKNOWN);
+        .isEqualTo(ToolErrorKind.NOT_FOUND);
+  }
+
+  @Test
+  void normalizesNonObjectArgumentsAndContainsToolCrashes(@TempDir Path root) {
+    var dispatcher = dispatcher(root);
+    ToolResult.Failure normalized = (ToolResult.Failure) dispatcher.execute(
+        "read", JSON.createArrayNode().add("not an object"));
+    assertThat(normalized.error()).isEqualTo(
+        new ToolError(ToolErrorKind.INVALID_ARGS, "path required"));
+
+    var broken = new ToolDispatcher(null, null, null, null, null, null, null, null);
+    ToolResult.Failure crashed = (ToolResult.Failure) broken.execute(
+        "read", JSON.createObjectNode().put("path", "sample.txt"));
+    assertThat(crashed.error().kind()).isEqualTo(ToolErrorKind.UNKNOWN);
+    assertThat(crashed.error().detail()).startsWith("tool crashed: ");
   }
 
   @Test

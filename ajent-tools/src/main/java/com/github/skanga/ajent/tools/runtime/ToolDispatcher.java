@@ -1,6 +1,7 @@
 package com.github.skanga.ajent.tools.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.github.skanga.ajent.tools.catalog.OutputBudget;
 import com.github.skanga.ajent.tools.catalog.ToolCatalog;
 import com.github.skanga.ajent.tools.catalog.ToolKind;
@@ -50,18 +51,25 @@ public final class ToolDispatcher {
   public ToolResult execute(String name, JsonNode arguments, CancellationSignal cancellation,
                             Consumer<String> progress) {
     var specification = ToolCatalog.byName(name);
-    if (specification.isEmpty()) return failure(ToolErrorKind.UNKNOWN, "unknown tool: " + name);
+    if (specification.isEmpty()) return failure(ToolErrorKind.NOT_FOUND, "unknown tool: " + name);
     ToolSpec spec = specification.orElseThrow();
-    ToolResult result = switch (family(spec.kind())) {
-      case FILESYSTEM -> files.execute(name, arguments);
-      case PROCESS -> processes.execute(name, arguments, progress);
-      case SEARCH -> search.execute(name, arguments);
-      case REPOSITORY_MAP -> repoMap.execute(arguments);
-      case GIT -> git.execute(name, arguments);
-      case HOST -> host.execute(name, arguments, cancellation, progress);
-      case MEMORY -> memory.execute(name, arguments);
-      case WEB -> web.execute(name, arguments);
-    };
+    JsonNode safeArguments = arguments != null && arguments.isObject()
+        ? arguments : JsonNodeFactory.instance.objectNode();
+    ToolResult result;
+    try {
+      result = switch (family(spec.kind())) {
+        case FILESYSTEM -> files.execute(name, safeArguments);
+        case PROCESS -> processes.execute(name, safeArguments, progress);
+        case SEARCH -> search.execute(name, safeArguments);
+        case REPOSITORY_MAP -> repoMap.execute(safeArguments);
+        case GIT -> git.execute(name, safeArguments);
+        case HOST -> host.execute(name, safeArguments, cancellation, progress);
+        case MEMORY -> memory.execute(name, safeArguments);
+        case WEB -> web.execute(name, safeArguments);
+      };
+    } catch (RuntimeException exception) {
+      return failure(ToolErrorKind.UNKNOWN, "tool crashed: " + exception.getMessage());
+    }
     return applyBudget(spec, result);
   }
 
