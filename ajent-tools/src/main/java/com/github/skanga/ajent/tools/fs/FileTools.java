@@ -35,14 +35,21 @@ public final class FileTools {
   private static final String STALE_READ = "File unchanged since last read. The content from the "
       + "earlier Read tool_result in this conversation is still current — refer to that instead "
       + "of re-reading.";
+  private static final String STALE_WRITE_WARNING = "⚠  The file has changed on disk since the "
+      + "last time a tool observed it this session. The write OVERWROTE those changes — if "
+      + "that's not what you wanted, re-read the file and rewrite with the intended merged "
+      + "content.\n\n";
+  private static final String STALE_EDIT_WARNING = "⚠  The file has changed on disk since the "
+      + "last time a tool observed it this session. The edit was applied to the CURRENT bytes; "
+      + "if the result looks wrong, re-read the file before making further edits.\n\n";
 
   private record ReadKey(Path path, int offset, int limit) {}
-  private record Snapshot(FileTime modified, long size) {}
+  private record Snapshot(FileTime modified, long size, long contentHash) {}
   private record Edit(String oldText, String newText, int line) {}
 
   private final WorkspaceSandbox sandbox;
-  private final Map<ReadKey, FileTime> readCache = new ConcurrentHashMap<>();
-  private final Map<Path, Snapshot> snapshots = new ConcurrentHashMap<>();
+  private static final Map<ReadKey, FileTime> READ_CACHE = new ConcurrentHashMap<>();
+  private static final Map<Path, Snapshot> SNAPSHOTS = new ConcurrentHashMap<>();
 
   public FileTools(WorkspaceSandbox sandbox) { this.sandbox = sandbox; }
 
@@ -79,7 +86,7 @@ public final class FileTools {
     if (limit <= 0) limit = 2000;
     FileTime modified = Files.getLastModifiedTime(path);
     ReadKey key = new ReadKey(path.toRealPath(), offset, limit);
-    if (modified.equals(readCache.get(key))) return success(STALE_READ);
+    if (modified.equals(READ_CACHE.get(key))) return success(STALE_READ);
     long size = Files.size(path);
     if (size > MAX_READ_BYTES) return failure(ToolErrorKind.TOO_LARGE,
         "file is " + (size / 1024) + " KiB (> 1 MiB cap). Read in chunks via offset/limit "
@@ -107,8 +114,8 @@ public final class FileTools {
     }
     String description = args.string("display_description", "");
     if (!description.isEmpty()) output.insert(0, description + "\n");
-    readCache.put(key, modified);
-    snapshots.put(path.toRealPath(), new Snapshot(modified, size));
+    READ_CACHE.put(key, modified);
+    recordSnapshot(path, modified, bytes);
     return success(output.toString());
   }
 
@@ -138,15 +145,17 @@ public final class FileTools {
     }
     String original = exists && Files.isRegularFile(path)
         ? new String(Files.readAllBytes(path), StandardCharsets.UTF_8) : "";
+    boolean stale = exists && isStale(path);
     if (exists && original.equals(content)) {
       return success("File already matches content — no changes written.");
     }
     FileChange change = change(path, original, content);
     atomicWrite(path, contentBytes);
     FileTime modified = Files.getLastModifiedTime(path);
-    snapshots.put(path.toRealPath(), new Snapshot(modified, contentBytes.length));
+    recordSnapshot(path, modified, contentBytes);
     String description = args.string("display_description", "");
-    String prefix = description.isEmpty() ? "" : description + "\n";
+    String prefix = stale ? STALE_WRITE_WARNING : "";
+    if (!description.isEmpty()) prefix += description + "\n";
     return success(new ToolOutput(prefix + (exists ? "Overwrote " : "Created ") + path
         + " (" + change.added() + "+ " + change.removed() + "-)", Optional.of(change)));
   }
@@ -162,6 +171,7 @@ public final class FileTools {
         "file not found: " + path + ". To create a new file use the `write` tool; `edit` only modifies existing files.");
     if (!Files.isRegularFile(path)) return failure(ToolErrorKind.NOT_A_FILE,
         "not a regular file: " + path + " (is it a directory or symlink to one?)");
+    boolean stale = isStale(path);
     byte[] bytes = Files.readAllBytes(path);
     if (containsNull(bytes, Math.min(512, bytes.length))) return failure(ToolErrorKind.BINARY,
         "refusing to edit binary file: " + path + " (contains NUL bytes — likely an image, archive, or compiled artifact).");
@@ -189,14 +199,17 @@ public final class FileTools {
           + updated.substring(match.position() + match.length());
       applied++;
     }
-    if (applied == 0) return success("No edits were applied — all " + noops
+    if (applied == 0) return success((stale ? STALE_EDIT_WARNING : "")
+        + "No edits were applied — all " + noops
         + " edit(s) had identical old_text and new_text (nothing to change). File on disk is unchanged.");
     FileChange change = change(path, original, updated);
-    atomicWrite(path, updated.getBytes(StandardCharsets.UTF_8));
+    byte[] updatedBytes = updated.getBytes(StandardCharsets.UTF_8);
+    atomicWrite(path, updatedBytes);
     FileTime modified = Files.getLastModifiedTime(path);
-    snapshots.put(path.toRealPath(), new Snapshot(modified, Files.size(path)));
+    recordSnapshot(path, modified, updatedBytes);
     String description = args.string("display_description", "");
-    String prefix = description.isEmpty() ? "" : description + "\n\n";
+    String prefix = stale ? STALE_EDIT_WARNING : "";
+    if (!description.isEmpty()) prefix += description + "\n\n";
     return success(new ToolOutput(prefix + "Edited " + path + " (" + change.added()
         + "+ " + change.removed() + "-)", Optional.of(change)));
   }
@@ -324,6 +337,31 @@ public final class FileTools {
   private static boolean containsNull(byte[] bytes, int limit) {
     for (int index = 0; index < limit; index++) if (bytes[index] == 0) return true;
     return false;
+  }
+
+  private static boolean isStale(Path path) {
+    try {
+      Snapshot snapshot = SNAPSHOTS.get(path.toRealPath());
+      if (snapshot == null) return false;
+      return !snapshot.modified().equals(Files.getLastModifiedTime(path))
+          || snapshot.size() != Files.size(path);
+    } catch (IOException exception) {
+      return false;
+    }
+  }
+
+  private static void recordSnapshot(Path path, FileTime modified, byte[] content)
+      throws IOException {
+    SNAPSHOTS.put(path.toRealPath(), new Snapshot(modified, content.length, fnv1a(content)));
+  }
+
+  private static long fnv1a(byte[] content) {
+    long hash = 0xcbf29ce484222325L;
+    for (byte value : content) {
+      hash ^= value & 0xffL;
+      hash *= 0x100000001b3L;
+    }
+    return hash;
   }
 
   private static String describeKeys(JsonNode arguments) {

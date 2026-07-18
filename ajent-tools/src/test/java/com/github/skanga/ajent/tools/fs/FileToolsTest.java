@@ -8,6 +8,7 @@ import com.github.skanga.ajent.tools.runtime.ToolErrorKind;
 import com.github.skanga.ajent.tools.runtime.ToolResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -97,6 +98,53 @@ class FileToolsTest {
     assertThat(failure(tools.execute("write", object()
         .put("path", directory.toString()).put("content", "x"))).error().kind())
         .isEqualTo(ToolErrorKind.NOT_A_FILE);
+  }
+
+  @Test
+  void editWarnsWhenFileChangedSinceAReadAndRefreshesTheSharedSnapshot(@TempDir Path directory)
+      throws Exception {
+    Path file = Files.writeString(directory.resolve("stale-edit.txt"), "alpha\nbeta\n");
+    var observingTools = tools(directory);
+    success(observingTools.execute("read", object().put("path", file.toString())));
+
+    FileTime changed = FileTime.fromMillis(Files.getLastModifiedTime(file).toMillis() + 2_000);
+    Files.writeString(file, "external\nbeta\n");
+    Files.setLastModifiedTime(file, changed);
+
+    ObjectNode firstEdit = object().put("old_text", "beta").put("new_text", "BETA");
+    String warning = success(tools(directory).execute("edit", object().put("path", file.toString())
+        .set("edits", JSON.createArrayNode().add(firstEdit)))).output().text();
+    assertThat(warning)
+        .startsWith("⚠  The file has changed on disk since the last time a tool observed it this session.")
+        .contains("The edit was applied to the CURRENT bytes", "Edited");
+    assertThat(Files.readString(file)).isEqualTo("external\nBETA\n");
+
+    ObjectNode secondEdit = object().put("old_text", "BETA").put("new_text", "final");
+    String refreshed = success(observingTools.execute("edit", object().put("path", file.toString())
+        .set("edits", JSON.createArrayNode().add(secondEdit)))).output().text();
+    assertThat(refreshed).startsWith("Edited").doesNotContain("changed on disk");
+  }
+
+  @Test
+  void writeWarnsOnSameTimestampSizeChangeAndThenRefreshesTheSnapshot(@TempDir Path directory)
+      throws Exception {
+    Path file = Files.writeString(directory.resolve("stale-write.txt"), "seen");
+    var tools = tools(directory);
+    success(tools.execute("read", object().put("path", file.toString())));
+    FileTime observed = Files.getLastModifiedTime(file);
+
+    Files.writeString(file, "externally enlarged");
+    Files.setLastModifiedTime(file, observed);
+
+    String warning = success(tools.execute("write", object().put("path", file.toString())
+        .put("content", "replacement"))).output().text();
+    assertThat(warning)
+        .startsWith("⚠  The file has changed on disk since the last time a tool observed it this session.")
+        .contains("The write OVERWROTE those changes", "Overwrote");
+
+    String refreshed = success(tools.execute("write", object().put("path", file.toString())
+        .put("content", "replacement again"))).output().text();
+    assertThat(refreshed).startsWith("Overwrote").doesNotContain("changed on disk");
   }
 
   @Test
