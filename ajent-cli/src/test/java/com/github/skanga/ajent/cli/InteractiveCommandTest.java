@@ -348,6 +348,73 @@ final class InteractiveCommandTest {
     assertThat(agent.changes).isEmpty();
   }
 
+  @Test void savedThreadPickerLoadsAtCurrentNavigatesAndSwapsWholeView() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.threads = List.of(
+        threadEntry("new", "Newest"), threadEntry("thread", ""), threadEntry("old", "Oldest"));
+
+    selectCommand(ui, agent, "open threads");
+    assertThat(terminal.bytes.toString()).contains("Threads", "â— (untitled)", "2/3");
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.loadedThreads).containsExactly(new ThreadId("old"));
+    assertThat(terminal.bytes.toString()).contains("\u001b[2J\u001b[3J\u001b[H");
+
+    ui.key(character('j', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    ui.key(special(TerminalKey.SpecialKey.LEFT, false, true, false), agent);
+    assertThat(agent.loadedThreads).containsExactly(new ThreadId("old"), new ThreadId("thread"));
+    assertThat(terminal.bytes.toString()).contains("thread 2/3 Â· (untitled)");
+  }
+
+  @Test void threadPickerHandlesSameThreadNewEmptyFailureAndActiveCycle() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.threads = List.of(threadEntry("thread", "Current"));
+    selectCommand(ui, agent, "open threads");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.loadedThreads).isEmpty();
+
+    selectCommand(ui, agent, "open threads");
+    ui.key(character('n'), agent);
+    assertThat(agent.newThreads).isEqualTo(1);
+
+    agent.threads = List.of();
+    ui.key(character('j', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    ui.key(special(TerminalKey.SpecialKey.RIGHT, false, true, false), agent);
+    assertThat(terminal.bytes.toString()).contains("no other threads yet");
+
+    agent.threads = List.of(threadEntry("other", "Other"));
+    ui.key(character('j', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    state.set(withPhase(state.get(), new SessionPhase.Streaming(
+        ActiveTurn.start(new CancellationSignal(), 1))));
+    ui.key(special(TerminalKey.SpecialKey.RIGHT, false, true, false), agent);
+    assertThat(terminal.bytes.toString()).contains("wait for the reply to finish");
+    state.set(AgentState.initial(thread(List.of())));
+    agent.threadFailure = "invalid JSON";
+    ui.key(special(TerminalKey.SpecialKey.RIGHT, false, true, false), agent);
+    assertThat(terminal.bytes.toString()).contains("error: invalid JSON");
+  }
+
+  private static com.github.skanga.ajent.terminal.ui.ThreadPicker.Entry threadEntry(
+      String id, String title) {
+    return new com.github.skanga.ajent.terminal.ui.ThreadPicker.Entry(
+        new ThreadId(id), title, Instant.EPOCH);
+  }
+
   @Test void structuredToolCompletionBuildsReviewPatch() {
     var changes = new AtomicReference<List<com.github.skanga.ajent.tools.runtime.FileChange>>(
         List.of());
@@ -683,12 +750,27 @@ final class InteractiveCommandTest {
     private boolean deferOAuth;
     private java.util.function.Consumer<String> pendingOAuth;
     private List<com.github.skanga.ajent.terminal.ui.DiffReview.File> changes = List.of();
+    private List<com.github.skanga.ajent.terminal.ui.ThreadPicker.Entry> threads = List.of();
+    private final List<ThreadId> loadedThreads = new ArrayList<>();
+    private String threadFailure = "";
     private java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>>
         pendingModels;
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
     @Override public AgentState state() { return state.get(); }
     @Override public void dispatch(RuntimeMessage message) { messages.add(message); }
     @Override public void newThread() { newThreads++; }
+    @Override public ThreadId threadId() { return state.get().thread().id(); }
+    @Override public void loadThreads(
+        java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ThreadPicker.Entry>> receiver) {
+      receiver.accept(threads);
+    }
+    @Override public void loadThread(ThreadId id, java.util.function.Consumer<String> completed) {
+      loadedThreads.add(id);
+      if (threadFailure.isEmpty()) {
+        state.set(AgentState.initial(new com.github.skanga.ajent.domain.Thread(id, "", List.of())));
+      }
+      completed.accept(threadFailure);
+    }
     @Override public Profile cycleProfile() {
       profile = switch (profile) {
         case WRITE -> Profile.ASK;

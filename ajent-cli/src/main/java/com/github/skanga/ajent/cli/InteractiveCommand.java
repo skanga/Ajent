@@ -3,12 +3,14 @@ package com.github.skanga.ajent.cli;
 import com.github.skanga.ajent.core.persistence.Settings;
 import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
+import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.SessionPhase;
 import com.github.skanga.ajent.domain.ToolUse;
+import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.provider.auth.Credential;
 import com.github.skanga.ajent.provider.ProviderModelCatalog;
 import com.github.skanga.ajent.provider.auth.CredentialResolver;
@@ -43,6 +45,7 @@ import com.github.skanga.ajent.terminal.ui.LoginModal;
 import com.github.skanga.ajent.terminal.ui.PickerState;
 import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
+import com.github.skanga.ajent.terminal.ui.ThreadPicker;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.runtime.FileChange;
@@ -68,6 +71,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Base64;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /** Interactive terminal composition root. */
 final class InteractiveCommand {
@@ -126,14 +130,15 @@ final class InteractiveCommand {
       var threadStore = new ThreadStore(configured.dataDirectory());
       var conversation = new com.github.skanga.ajent.domain.Thread(
           threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
+      BiConsumer<RuntimeMessage, AgentState> observe = (message, next) -> {
+        recordChange(message, pendingChanges);
+        state.set(next);
+        Ui current = activeUi.get();
+        if (current != null) current.render();
+      };
       AgentLoop initialLoop = configured.sessions().create(conversation, activeProfile::get,
           (AgentSessionFactory.ConfigurationSource) activeProvider::get,
-          permission, (message, next) -> {
-            recordChange(message, pendingChanges);
-            state.set(next);
-            Ui current = activeUi.get();
-            if (current != null) current.render();
-          });
+          permission, observe);
       activeLoop.set(initialLoop);
       state.set(initialLoop.state());
       AgentControl control = new AgentControl() {
@@ -145,20 +150,48 @@ final class InteractiveCommand {
         @Override public void newThread() {
           permission.cancel();
           AgentLoop previous = activeLoop.get();
+          if (!previous.state().thread().messages().isEmpty()) {
+            threadStore.save(previous.state().thread());
+          }
           previous.close();
           var fresh = new com.github.skanga.ajent.domain.Thread(
               threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
           AgentLoop replacement = configured.sessions().create(fresh, activeProfile::get,
               (AgentSessionFactory.ConfigurationSource) activeProvider::get,
-              permission, (message, next) -> {
-                recordChange(message, pendingChanges);
-                state.set(next);
-                Ui current = activeUi.get();
-                if (current != null) current.render();
-              });
+              permission, observe);
           activeLoop.set(replacement);
           state.set(replacement.state());
           pendingChanges.set(List.of());
+        }
+        @Override public ThreadId threadId() { return activeLoop.get().state().thread().id(); }
+        @Override public void loadThreads(Consumer<List<ThreadPicker.Entry>> receiver) {
+          Thread.startVirtualThread(() -> receiver.accept(threadStore.loadAllMetadata().stream()
+              .map(thread -> new ThreadPicker.Entry(
+                  thread.id(), thread.title(), thread.updatedAt())).toList()));
+        }
+        @Override public void loadThread(ThreadId id, Consumer<String> completed) {
+          Thread.startVirtualThread(() -> {
+            ThreadLoadResult result = threadStore.load(id);
+            if (result instanceof ThreadLoadResult.Failure failure) {
+              completed.accept(failure.error().detail());
+              return;
+            }
+            com.github.skanga.ajent.domain.Thread loaded =
+                ((ThreadLoadResult.Success) result).thread();
+            permission.cancel();
+            AgentLoop previous = activeLoop.get();
+            if (!previous.state().thread().messages().isEmpty()) {
+              threadStore.save(previous.state().thread());
+            }
+            previous.close();
+            AgentLoop replacement = configured.sessions().create(loaded, activeProfile::get,
+                (AgentSessionFactory.ConfigurationSource) activeProvider::get,
+                permission, observe);
+            activeLoop.set(replacement);
+            state.set(replacement.state());
+            pendingChanges.set(List.of());
+            completed.accept("");
+          });
         }
         @Override public Profile cycleProfile() {
           Profile next = switch (activeProfile.get()) {
@@ -444,6 +477,9 @@ final class InteractiveCommand {
     AgentState state();
     void dispatch(RuntimeMessage message);
     void newThread();
+    ThreadId threadId();
+    void loadThreads(Consumer<List<ThreadPicker.Entry>> receiver);
+    void loadThread(ThreadId id, Consumer<String> completed);
     Profile cycleProfile();
     String model();
     void loadModels(Consumer<List<ModelPicker.Model>> receiver);
@@ -522,6 +558,10 @@ final class InteractiveCommand {
     private ToolOutputViewer.State toolViewer = new ToolOutputViewer.Closed();
     private PickerState.OneAxis modelPicker = new PickerState.Closed();
     private PickerState.OneAxis providerPicker = new PickerState.Closed();
+    private PickerState.OneAxis threadPicker = new PickerState.Closed();
+    private List<ThreadPicker.Entry> threadRows = List.of();
+    private boolean threadsLoading;
+    private boolean threadLoading;
     private List<ProviderPicker.Provider> providerRows = List.of();
     private LoginModal.State login = new LoginModal.Closed();
     private PickerState.TwoAxis diffReview = new PickerState.CellClosed();
@@ -568,16 +608,24 @@ final class InteractiveCommand {
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
       if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
       if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
+      if (threadPicker instanceof PickerState.OpenAt) return threadPickerKey(key, loop);
       if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
       if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
         int codePoint = Character.toLowerCase(character.codePoint());
         if (codePoint == 'c') return false;
         if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
+        if (codePoint == 'j') { openThreadPicker(loop); render(); return true; }
         if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
         if (codePoint == 'd' && composer.isEmpty()) return false;
         if (codePoint == 'u') { composer = composer.substring(cursor); cursor = 0; render(); return true; }
       }
       if (key.key() instanceof TerminalKey.SpecialKey special) {
+        if (key.modifiers().alt()
+            && (special == TerminalKey.SpecialKey.LEFT
+                || special == TerminalKey.SpecialKey.RIGHT)) {
+          cycleThread(loop, special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
+          return true;
+        }
         switch (special) {
           case ENTER -> {
             if (key.modifiers().shift() || key.modifiers().alt()) insert("\n");
@@ -680,7 +728,9 @@ final class InteractiveCommand {
                 loop.dispatch(new RuntimeMessage.CompactContext());
               } else if (command == CommandPalette.Command.NEW_THREAD) {
                 loop.newThread();
-                resetForNewThread();
+                resetForThreadSwap();
+              } else if (command == CommandPalette.Command.OPEN_THREADS) {
+                openThreadPicker(loop);
               } else if (command == CommandPalette.Command.CYCLE_PROFILE) {
                 Profile profile = loop.cycleProfile();
                 uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
@@ -738,6 +788,106 @@ final class InteractiveCommand {
         }
         render();
       });
+    }
+
+    private void openThreadPicker(AgentControl loop) {
+      threadsLoading = true;
+      boolean openedFromEmptyCache = threadRows.isEmpty();
+      threadPicker = ThreadPicker.open(threadRows, loop.threadId());
+      loop.loadThreads(loaded -> {
+        synchronized (lock) {
+          threadRows = List.copyOf(loaded);
+          threadsLoading = false;
+          if (threadPicker instanceof PickerState.OpenAt open) {
+            threadPicker = openedFromEmptyCache
+                ? ThreadPicker.open(threadRows, loop.threadId())
+                : new PickerState.OpenAt(threadRows.isEmpty() ? 0
+                    : Math.max(0, Math.min(open.index(), threadRows.size() - 1)), "");
+          }
+        }
+        render();
+      });
+    }
+
+    private boolean threadPickerKey(TerminalKey key, AgentControl loop) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> threadPicker = ThreadPicker.close(threadPicker);
+          case UP -> threadPicker = ThreadPicker.move(threadPicker, threadRows, -1);
+          case DOWN -> threadPicker = ThreadPicker.move(threadPicker, threadRows, 1);
+          case HOME -> threadPicker = ThreadPicker.jump(
+              threadPicker, threadRows, ThreadPicker.Jump.HOME);
+          case END -> threadPicker = ThreadPicker.jump(
+              threadPicker, threadRows, ThreadPicker.Jump.END);
+          case PAGE_UP -> threadPicker = ThreadPicker.jump(
+              threadPicker, threadRows, ThreadPicker.Jump.PAGE_UP);
+          case PAGE_DOWN -> threadPicker = ThreadPicker.jump(
+              threadPicker, threadRows, ThreadPicker.Jump.PAGE_DOWN);
+          case ENTER -> selectThread(loop, "");
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character
+          && Character.toLowerCase(character.codePoint()) == 'n') {
+        loop.newThread();
+        resetForThreadSwap();
+        return true;
+      }
+      render();
+      return true;
+    }
+
+    private void selectThread(AgentControl loop, String successStatus) {
+      if (threadLoading) return;
+      ThreadPicker.Selection selection = ThreadPicker.select(threadPicker, threadRows);
+      threadPicker = selection.state();
+      selection.entry().ifPresent(entry -> {
+        if (entry.id().equals(loop.threadId())) return;
+        threadLoading = true;
+        uiStatus = "loading threadâ€¦";
+        loop.loadThread(entry.id(), failure -> {
+          synchronized (lock) {
+            threadLoading = false;
+            if (!failure.isEmpty()) {
+              uiStatus = "error: " + failure;
+            }
+          }
+          if (failure.isEmpty()) {
+            resetForThreadSwap(successStatus);
+          }
+          else render();
+        });
+      });
+    }
+
+    private void cycleThread(AgentControl loop, int delta) {
+      if (!(loop.state().phase() instanceof SessionPhase.Idle)) {
+        uiStatus = "wait for the reply to finish before switching threads";
+        render();
+        return;
+      }
+      if (threadLoading) return;
+      if (threadRows.isEmpty()) {
+        uiStatus = "no other threads yet";
+        loop.loadThreads(loaded -> { synchronized (lock) { threadRows = List.copyOf(loaded); } });
+        render();
+        return;
+      }
+      int current = -1;
+      for (int index = 0; index < threadRows.size(); index++) {
+        if (threadRows.get(index).id().equals(loop.threadId())) current = index;
+      }
+      if (current >= 0 && threadRows.size() == 1) {
+        uiStatus = "only one thread";
+        render();
+        return;
+      }
+      int target = current < 0 ? (delta >= 0 ? 0 : threadRows.size() - 1)
+          : Math.floorMod(current + delta, threadRows.size());
+      ThreadPicker.Entry entry = threadRows.get(target);
+      threadPicker = new PickerState.OpenAt(target, "");
+      uiStatus = "thread " + (target + 1) + "/" + threadRows.size()
+          + " Â· " + entry.displayTitle();
+      selectThread(loop, uiStatus);
     }
 
     private boolean modelPickerKey(TerminalKey key, AgentControl loop) {
@@ -908,7 +1058,11 @@ final class InteractiveCommand {
       });
     }
 
-    private void resetForNewThread() {
+    private void resetForThreadSwap() {
+      resetForThreadSwap("");
+    }
+
+    private void resetForThreadSwap(String status) {
       synchronized (lock) {
         composer = "";
         cursor = 0;
@@ -918,10 +1072,12 @@ final class InteractiveCommand {
         toolViewer = new ToolOutputViewer.Closed();
         modelPicker = new PickerState.Closed();
         providerPicker = new PickerState.Closed();
+        threadPicker = new PickerState.Closed();
         login = new LoginModal.Closed();
         diffReview = new PickerState.CellClosed();
         diffFiles = List.of();
-        uiStatus = "";
+        threadLoading = false;
+        uiStatus = status;
         frame = new InlineFrameRenderer.Empty();
         terminal.write("\u001b[2J\u001b[3J\u001b[H");
       }
@@ -1013,6 +1169,29 @@ final class InteractiveCommand {
             lines.add(new StyledLine((index == open.index() ? "› " : "  ") + label,
                 index == open.index() ? Style.ACCENT : Style.NORMAL));
           }
+        }
+        if (threadPicker instanceof PickerState.OpenAt open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Threads", Style.ACCENT));
+          if (threadRows.isEmpty()) {
+            lines.add(new StyledLine(threadsLoading
+                ? "  Loading conversationsâ€¦" : "  No threads yet.", Style.MUTED));
+          } else {
+            ThreadId current = state.thread().id();
+            for (int index = 0; index < threadRows.size(); index++) {
+              ThreadPicker.Entry entry = threadRows.get(index);
+              String selected = index == open.index() ? "â€º " : "  ";
+              String active = entry.id().equals(current) ? "â— " : "  ";
+              lines.add(new StyledLine(selected + active + entry.displayTitle()
+                  + "  " + entry.updatedAt(), index == open.index() || entry.id().equals(current)
+                      ? Style.ACCENT : Style.MUTED));
+            }
+            lines.add(new StyledLine("  " + (open.index() + 1) + "/" + threadRows.size(),
+                Style.MUTED));
+          }
+          lines.add(new StyledLine(
+              "â†‘â†“ move  PgUp/PgDn page  Enter open  N new  Esc close", Style.MUTED));
         }
         if (LoginModal.isOpen(login)) {
           lines = new ArrayList<>(lines);

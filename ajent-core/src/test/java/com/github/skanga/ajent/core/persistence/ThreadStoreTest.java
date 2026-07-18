@@ -56,7 +56,7 @@ class ThreadStoreTest {
     assertThat(raw.at("/compactions/0/up_to_index").intValue()).isEqualTo(1);
     assertThat(Files.exists(directory.resolve("threads/thread.json.tmp"))).isFalse();
 
-    Thread loaded = ((ThreadLoadResult.Success) store.load(file)).thread();
+    Thread loaded = ((ThreadLoadResult.Success) store.load(new ThreadId("thread"))).thread();
     assertThat(loaded.id()).isEqualTo(thread.id());
     assertThat(loaded.createdAt()).isEqualTo(thread.createdAt());
     Message restored = loaded.messages().getFirst();

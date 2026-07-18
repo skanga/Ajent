@@ -98,6 +98,11 @@ public final class ThreadStore {
     }
   }
 
+  /** Loads a saved conversation without exposing the persistence layout to callers. */
+  public ThreadLoadResult load(ThreadId id) {
+    return load(threadsDirectory.resolve(id.value() + ".json"));
+  }
+
   public List<Thread> loadAllMetadata() {
     if (!Files.isDirectory(threadsDirectory)) return List.of();
     var result = new ArrayList<Thread>();
