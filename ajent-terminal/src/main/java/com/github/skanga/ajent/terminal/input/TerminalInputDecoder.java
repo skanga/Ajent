@@ -8,20 +8,38 @@ import java.util.List;
 /** Incremental port of Maya's terminal input FSM. */
 public final class TerminalInputDecoder {
   private static final byte[] PASTE_END = {0x1b, '[', '2', '0', '1', '~'};
-  private static final int MAX_OSC_BYTES = 16 * 1024 * 1024;
+  private static final int DEFAULT_MAX_CSI_BYTES = 256;
+  private static final int DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
   private enum State { GROUND, ESCAPE, CSI, SS3, OSC, UTF8, BRACKETED_PASTE }
 
   private State state = State.GROUND;
   private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+  private final int maxCsiBytes;
+  private final int maxPayloadBytes;
   private int utf8CodePoint;
   private int utf8Remaining;
   private boolean kittyClipboardActive;
   private String kittyMime = "";
   private byte[] kittyData = new byte[0];
 
+  public TerminalInputDecoder() {
+    this(DEFAULT_MAX_CSI_BYTES, DEFAULT_MAX_PAYLOAD_BYTES);
+  }
+
+  TerminalInputDecoder(int maxCsiBytes, int maxPayloadBytes) {
+    if (maxCsiBytes < 1 || maxPayloadBytes < 1) {
+      throw new IllegalArgumentException("input buffer limits must be positive");
+    }
+    this.maxCsiBytes = maxCsiBytes;
+    this.maxPayloadBytes = maxPayloadBytes;
+  }
+
   public List<TerminalEvent> feed(byte[] input) {
     var events = new ArrayList<TerminalEvent>();
-    for (byte raw : input) accept(Byte.toUnsignedInt(raw), events);
+    for (int index = 0; index < input.length;) {
+      boolean reprocess = accept(Byte.toUnsignedInt(input[index]), events);
+      if (!reprocess) index++;
+    }
     return List.copyOf(events);
   }
 
@@ -48,16 +66,16 @@ public final class TerminalInputDecoder {
     abortKittyClipboard();
   }
 
-  private void accept(int value, List<TerminalEvent> events) {
-    switch (state) {
-      case GROUND -> ground(value, events);
-      case ESCAPE -> escape(value, events);
-      case CSI -> sequence(value, events, true);
-      case SS3 -> sequence(value, events, false);
-      case OSC -> osc(value, events);
+  private boolean accept(int value, List<TerminalEvent> events) {
+    return switch (state) {
+      case GROUND -> { ground(value, events); yield false; }
+      case ESCAPE -> { escape(value, events); yield false; }
+      case CSI -> { sequence(value, events, true); yield false; }
+      case SS3 -> { sequence(value, events, false); yield false; }
+      case OSC -> { osc(value, events); yield false; }
       case UTF8 -> utf8(value, events);
       case BRACKETED_PASTE -> paste(value, events);
-    }
+    };
   }
 
   private void ground(int value, List<TerminalEvent> events) {
@@ -111,6 +129,11 @@ public final class TerminalInputDecoder {
   }
 
   private void sequence(int value, List<TerminalEvent> events, boolean csi) {
+    if (csi && buffer.size() >= maxCsiBytes) {
+      state = State.GROUND;
+      buffer.reset();
+      return;
+    }
     buffer.write(value);
     if (value < 0x40 || value > 0x7e) return;
     if (csi) parseCsi(events); else parseSs3(value, events);
@@ -235,17 +258,24 @@ public final class TerminalInputDecoder {
     events.add(new TerminalEvent.Mouse(button, kind, values[1], values[2], mods));
   }
 
-  private void paste(int value, List<TerminalEvent> events) {
+  private boolean paste(int value, List<TerminalEvent> events) {
+    if (buffer.size() >= maxPayloadBytes) {
+      events.add(new TerminalEvent.Paste(buffer.toByteArray()));
+      state = State.GROUND;
+      buffer.reset();
+      return true;
+    }
     buffer.write(value);
     byte[] content = buffer.toByteArray();
-    if (content.length < PASTE_END.length) return;
+    if (content.length < PASTE_END.length) return false;
     int offset = content.length - PASTE_END.length;
     for (int index = 0; index < PASTE_END.length; index++) {
-      if (content[offset + index] != PASTE_END[index]) return;
+      if (content[offset + index] != PASTE_END[index]) return false;
     }
     events.add(new TerminalEvent.Paste(java.util.Arrays.copyOf(content, offset)));
     state = State.GROUND;
     buffer.reset();
+    return false;
   }
 
   private void startUtf8(int prefix, int remaining, int raw) {
@@ -256,24 +286,26 @@ public final class TerminalInputDecoder {
     state = State.UTF8;
   }
 
-  private void utf8(int value, List<TerminalEvent> events) {
-    buffer.write(value);
+  private boolean utf8(int value, List<TerminalEvent> events) {
     if ((value & 0xc0) != 0x80) {
-      events.add(character(value, TerminalKey.Modifiers.NONE));
       state = State.GROUND;
       buffer.reset();
-      return;
+      utf8CodePoint = 0;
+      utf8Remaining = 0;
+      return true;
     }
+    buffer.write(value);
     utf8CodePoint = (utf8CodePoint << 6) | (value & 0x3f);
     if (--utf8Remaining == 0) {
       events.add(character(utf8CodePoint, TerminalKey.Modifiers.NONE));
       state = State.GROUND;
       buffer.reset();
     }
+    return false;
   }
 
   private void osc(int value, List<TerminalEvent> events) {
-    if (buffer.size() >= MAX_OSC_BYTES) {
+    if (buffer.size() >= maxPayloadBytes) {
       state = State.GROUND;
       buffer.reset();
       return;
@@ -341,7 +373,7 @@ public final class TerminalInputDecoder {
         kittyData = new byte[0];
       }
       byte[] chunk = decodeBase64(payload);
-      if (chunk == null || kittyData.length + chunk.length > MAX_OSC_BYTES) {
+      if (chunk == null || kittyData.length + chunk.length > maxPayloadBytes) {
         abortKittyClipboard();
         return;
       }

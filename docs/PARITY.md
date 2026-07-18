@@ -54,5 +54,10 @@ are recorded in the machine-readable manifests under
 | Interactive UX and platform integration | planned | planned | planned | missing | planned |
 | Documentation/distribution | inventory pending | planned | planned | missing | planned |
 
+The terminal input boundary tests additionally pin AgenTTY's 256-byte CSI and
+16 MiB OSC/bracketed-paste limits. They prove that invalid UTF-8 continuations
+and paste-overflow bytes are reprocessed in the ground state, while the byte
+that overflows CSI or OSC is discarded with the partial sequence.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.

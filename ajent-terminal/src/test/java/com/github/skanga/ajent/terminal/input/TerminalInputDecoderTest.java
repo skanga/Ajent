@@ -161,6 +161,25 @@ final class TerminalInputDecoderTest {
     assertThat(decoder.feed(ascii("1;;A"))).containsExactly(special(TerminalKey.SpecialKey.UP));
   }
 
+  @Test void dropsAnOverlongCsiIncludingTheByteThatCrossesTheLimit() {
+    var decoder = new TerminalInputDecoder(4, 32);
+    assertThat(decoder.feed(ascii("\u001b[123x"))).containsExactly(character('x'));
+    assertThat(decoder.hasPending()).isFalse();
+  }
+
+  @Test void reprocessesAnInvalidUtf8ContinuationAsProtocolInput() {
+    var decoder = new TerminalInputDecoder();
+    assertThat(decoder.feed(new byte[] {(byte) 0xe2, 0x1b, '[', 'A'}))
+        .containsExactly(special(TerminalKey.SpecialKey.UP));
+  }
+
+  @Test void flushesBoundedPasteAndReprocessesTheOverflowByte() {
+    var decoder = new TerminalInputDecoder(32, 3);
+    assertThat(decoder.feed(ascii("\u001b[200~abc\u001b[A")))
+        .containsExactly(new TerminalEvent.Paste("abc"), special(TerminalKey.SpecialKey.UP));
+    assertThat(decoder.hasPending()).isFalse();
+  }
+
   @Test void decodesOsc52TextAndBinaryAcrossBothTerminatorsAndChunks() {
     var decoder = new TerminalInputDecoder();
     assertThat(decoder.feed(ascii("\u001b]52;c;aGk=\u001b\\")))
