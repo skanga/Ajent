@@ -19,6 +19,10 @@ class SettingsStoreTest {
         .isEqualTo(new Settings(defaults.modelId(), Profile.MINIMAL,
             defaults.favoriteModels(), defaults.provider(), defaults.providerKeys(),
             defaults.providerModels(), defaults.effort(), defaults.alwaysAllowTools()));
+    assertThat(defaults.withModel(new ModelId("selected")).modelId().value())
+        .isEqualTo("selected");
+    assertThat(defaults.withFavoriteModels(List.of(new ModelId("favorite"))).favoriteModels())
+        .containsExactly(new ModelId("favorite"));
   }
   private static final ObjectMapper JSON = new ObjectMapper();
 

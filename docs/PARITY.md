@@ -96,5 +96,13 @@ upstream display-name parsing, and the exact Opus/Sonnet/Haiku 4.5 seed when
 credentials or a usable response are absent. Loopback tests pin both auth
 shapes and fallback behavior; this catalog is the live model picker's source.
 
+The live model picker now opens from the command palette, fetches catalogs on
+a virtual thread, reconciles persisted favorites, and owns wraparound arrows,
+Home/End/Page navigation, Unicode filtering/backspace, favorite toggling, and
+selection. The active model is supplier-backed at provider-launch time: an
+in-flight HTTP request is never cancelled, while a tool continuation or later
+turn observes the new model. Selection and favorites are atomically persisted;
+an empty provider catalog retains the current model as a safe visible row.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.

@@ -4,11 +4,13 @@ import com.github.skanga.ajent.core.persistence.Settings;
 import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.domain.Message;
+import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.SessionPhase;
 import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.provider.auth.Credential;
+import com.github.skanga.ajent.provider.ProviderModelCatalog;
 import com.github.skanga.ajent.provider.auth.CredentialResolver;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
@@ -31,6 +33,8 @@ import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
+import com.github.skanga.ajent.terminal.ui.ModelPicker;
+import com.github.skanga.ajent.terminal.ui.PickerState;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
@@ -53,6 +57,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Base64;
+import java.util.function.Consumer;
 
 /** Interactive terminal composition root. */
 final class InteractiveCommand {
@@ -97,6 +102,7 @@ final class InteractiveCommand {
     var state = new AtomicReference<AgentState>();
     var activeLoop = new AtomicReference<AgentLoop>();
     var activeProfile = new AtomicReference<>(configured.profile());
+    var activeModel = new AtomicReference<>(configured.model());
     var activeUi = new AtomicReference<Ui>();
     var permission = new PermissionGate();
     try (var animations = new FrameScheduler()) {
@@ -110,7 +116,7 @@ final class InteractiveCommand {
       var conversation = new com.github.skanga.ajent.domain.Thread(
           threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
       AgentLoop initialLoop = configured.sessions().create(conversation, activeProfile::get,
-          configured.model(), permission, (message, next) -> {
+          activeModel::get, permission, (message, next) -> {
             state.set(next);
             Ui current = activeUi.get();
             if (current != null) current.render();
@@ -129,7 +135,7 @@ final class InteractiveCommand {
           var fresh = new com.github.skanga.ajent.domain.Thread(
               threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
           AgentLoop replacement = configured.sessions().create(fresh, activeProfile::get,
-              configured.model(), permission, (message, next) -> {
+              activeModel::get, permission, (message, next) -> {
                 state.set(next);
                 Ui current = activeUi.get();
                 if (current != null) current.render();
@@ -147,6 +153,33 @@ final class InteractiveCommand {
           activeLoop.get().dispatch(new RuntimeMessage.ProfileChanged(next));
           configured.settings().save(configured.settings().load().withProfile(next));
           return next;
+        }
+        @Override public String model() { return activeModel.get(); }
+        @Override public void loadModels(Consumer<List<ModelPicker.Model>> receiver) {
+          Thread.startVirtualThread(() -> {
+            List<com.github.skanga.ajent.provider.ProviderModel> discovered =
+                configured.provider().equals("anthropic")
+                    ? configured.models().listAnthropicModels(configured.auth())
+                    : configured.models().listModels(configured.auth(),
+                        com.github.skanga.ajent.provider.openai.Endpoint.fromSpec(
+                            configured.provider()));
+            Settings saved = configured.settings().load();
+            List<ModelPicker.Model> result = discovered.stream().map(model ->
+                new ModelPicker.Model(model.id(), model.displayName(),
+                    saved.favoriteModels().contains(new ModelId(model.id())))).toList();
+            if (result.isEmpty()) {
+              result = List.of(new ModelPicker.Model(activeModel.get(), activeModel.get(), false));
+            }
+            if (activeUi.get() != null) receiver.accept(result);
+          });
+        }
+        @Override public void selectModel(String model) {
+          activeModel.set(model);
+          configured.settings().save(configured.settings().load().withModel(new ModelId(model)));
+        }
+        @Override public void saveFavorites(List<String> models) {
+          configured.settings().save(configured.settings().load().withFavoriteModels(
+              models.stream().map(ModelId::new).toList()));
         }
       };
       try {
@@ -224,7 +257,8 @@ final class InteractiveCommand {
     var providers = new LiveProviderFactory.Configuration(provider, model, auth, settings.effort(),
         tools.systemPrompt(), 0, environment);
     return new Configuration(new AgentSessionFactory(tools, providers, client, dataDirectory),
-        dataDirectory, profile, model, settingsStore);
+        dataDirectory, profile, model, settingsStore, provider, auth,
+        new ProviderModelCatalog(client));
   }
 
   private Path resolveDocs(Path workspace) {
@@ -268,7 +302,7 @@ final class InteractiveCommand {
 
   record Configuration(
       AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
-      SettingsStore settings) {}
+      SettingsStore settings, String provider, ProviderAuth auth, ProviderModelCatalog models) {}
 
   interface TerminalPort {
     JLineTerminalSession.Size size();
@@ -280,6 +314,10 @@ final class InteractiveCommand {
     void dispatch(RuntimeMessage message);
     void newThread();
     Profile cycleProfile();
+    String model();
+    void loadModels(Consumer<List<ModelPicker.Model>> receiver);
+    void selectModel(String model);
+    void saveFavorites(List<String> models);
   }
 
   interface AnimationPort {
@@ -340,6 +378,9 @@ final class InteractiveCommand {
     private InlineFrameRenderer.Frame frame = new InlineFrameRenderer.Empty();
     private CommandPalette.State palette = new CommandPalette.Closed();
     private ToolOutputViewer.State toolViewer = new ToolOutputViewer.Closed();
+    private PickerState.OneAxis modelPicker = new PickerState.Closed();
+    private List<ModelPicker.Model> models = List.of();
+    private boolean modelsLoading;
     private String uiStatus = "";
     private String composer = "";
     private int cursor;
@@ -376,6 +417,7 @@ final class InteractiveCommand {
         return true;
       }
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
+      if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
       if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
       if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
         int codePoint = Character.toLowerCase(character.codePoint());
@@ -494,6 +536,8 @@ final class InteractiveCommand {
                 uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
               } else if (command == CommandPalette.Command.INSPECT_TOOL_OUTPUTS) {
                 openToolViewer(loop.state());
+              } else if (command == CommandPalette.Command.OPEN_MODELS) {
+                openModelPicker(loop);
               }
             }
           }
@@ -507,6 +551,61 @@ final class InteractiveCommand {
       return true;
     }
 
+    private void openModelPicker(AgentControl loop) {
+      modelsLoading = true;
+      if (models.isEmpty()) {
+        models = List.of(new ModelPicker.Model(loop.model(), loop.model(), false));
+      }
+      modelPicker = ModelPicker.open(models, loop.model());
+      loop.loadModels(loaded -> {
+        synchronized (lock) {
+          models = List.copyOf(loaded);
+          modelsLoading = false;
+          modelPicker = ModelPicker.open(models, loop.model());
+        }
+        render();
+      });
+    }
+
+    private boolean modelPickerKey(TerminalKey key, AgentControl loop) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> modelPicker = ModelPicker.close(modelPicker);
+          case ENTER -> {
+            ModelPicker.Selection selected = ModelPicker.select(modelPicker, models);
+            modelPicker = selected.state();
+            selected.model().ifPresent(model -> {
+              loop.selectModel(model.id());
+              uiStatus = "model: " + model.displayName();
+            });
+          }
+          case UP -> modelPicker = ModelPicker.move(modelPicker, models, -1);
+          case DOWN -> modelPicker = ModelPicker.move(modelPicker, models, 1);
+          case HOME -> modelPicker = ModelPicker.jump(modelPicker, models, ModelPicker.Jump.HOME);
+          case END -> modelPicker = ModelPicker.jump(modelPicker, models, ModelPicker.Jump.END);
+          case PAGE_UP -> modelPicker = ModelPicker.jump(
+              modelPicker, models, ModelPicker.Jump.PAGE_UP);
+          case PAGE_DOWN -> modelPicker = ModelPicker.jump(
+              modelPicker, models, ModelPicker.Jump.PAGE_DOWN);
+          case BACKSPACE -> modelPicker = ModelPicker.backspace(modelPicker, models);
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character
+          && !key.modifiers().ctrl() && !key.modifiers().alt()) {
+        if (Character.toLowerCase(character.codePoint()) == 'f') {
+          ModelPicker.FavoriteResult changed = ModelPicker.toggleFavorite(modelPicker, models);
+          modelPicker = changed.state();
+          models = changed.models();
+          loop.saveFavorites(models.stream().filter(ModelPicker.Model::favorite)
+              .map(ModelPicker.Model::id).toList());
+        } else {
+          modelPicker = ModelPicker.input(modelPicker, models, character.codePoint());
+        }
+      }
+      render();
+      return true;
+    }
+
     private void resetForNewThread() {
       synchronized (lock) {
         composer = "";
@@ -515,6 +614,7 @@ final class InteractiveCommand {
         reveal = null;
         palette = new CommandPalette.Closed();
         toolViewer = new ToolOutputViewer.Closed();
+        modelPicker = new PickerState.Closed();
         uiStatus = "";
         frame = new InlineFrameRenderer.Empty();
         terminal.write("\u001b[2J\u001b[3J\u001b[H");
@@ -571,6 +671,20 @@ final class InteractiveCommand {
                   entry.failed() ? Style.DANGER : index == open.index()
                       ? Style.ACCENT : Style.NORMAL));
             }
+          }
+        }
+        if (modelPicker instanceof PickerState.OpenAt open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Models  " + open.query()
+              + (modelsLoading ? "  loading…" : ""), Style.ACCENT));
+          List<Integer> visible = ModelPicker.filteredIndices(models, open.query());
+          for (int index = 0; index < visible.size(); index++) {
+            ModelPicker.Model model = models.get(visible.get(index));
+            String marker = index == open.index() ? "› " : "  ";
+            String favorite = model.favorite() ? "★ " : "  ";
+            lines.add(new StyledLine(marker + favorite + model.displayName(),
+                index == open.index() ? Style.ACCENT : Style.NORMAL));
           }
         }
         var canvas = new TerminalCanvas(width, Math.max(1, lines.size()));

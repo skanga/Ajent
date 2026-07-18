@@ -54,7 +54,7 @@ public final class AgentSessionFactory {
       BiConsumer<RuntimeMessage, AgentState> observer) {
     Objects.requireNonNull(thread, "thread");
     Objects.requireNonNull(profile, "profile");
-    return create(thread, () -> profile, model, permissions, observer);
+    return create(thread, () -> profile, () -> model, permissions, observer);
   }
 
   public AgentLoop create(
@@ -63,18 +63,30 @@ public final class AgentSessionFactory {
       String model,
       PermissionPort permissions,
       BiConsumer<RuntimeMessage, AgentState> observer) {
+    return create(thread, profile, () -> model, permissions, observer);
+  }
+
+  public AgentLoop create(
+      Thread thread,
+      Supplier<Profile> profile,
+      Supplier<String> model,
+      PermissionPort permissions,
+      BiConsumer<RuntimeMessage, AgentState> observer) {
     Objects.requireNonNull(thread, "thread");
     Objects.requireNonNull(profile, "profile");
+    Objects.requireNonNull(model, "model");
     Objects.requireNonNull(permissions, "permissions");
     Objects.requireNonNull(observer, "observer");
-    LiveProviderFactory.Configuration provider = withModel(model);
     var reducer = new AgentReducer(new AgentReducer.Context(
         System::nanoTime, Instant::now, MessageId::random,
         call -> permission(call, Objects.requireNonNull(profile.get(), "profile value")),
         () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(0.80, 1.20),
-        () -> contextMax(provider)));
+        () -> contextMax(withModel(Objects.requireNonNull(model.get(), "model value")))));
+    ProviderPort provider = (turnId, messages, cancellation, sink) ->
+        providers.apply(withModel(Objects.requireNonNull(model.get(), "model value")), client)
+            .stream(turnId, messages, cancellation, sink);
     return new AgentLoop(
-        AgentState.initial(thread), reducer, providers.apply(provider, client),
+        AgentState.initial(thread), reducer, provider,
         new DispatcherToolPort(tools.dispatcher()), permissions,
         new FilePersistencePort(dataDirectory), observer);
   }

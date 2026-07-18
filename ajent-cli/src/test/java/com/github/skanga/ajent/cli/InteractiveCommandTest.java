@@ -196,6 +196,31 @@ final class InteractiveCommandTest {
     for (int codePoint : "inspect tool".codePoints().toArray()) ui.key(character(codePoint), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(terminal.bytes.toString()).contains("no tool outputs");
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "open model".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_DOWN), agent);
+    ui.key(character('z'), agent);
+    ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent);
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('x'),
+        new TerminalKey.Modifiers(true, false, false)), agent);
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(character('f'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.model).isEqualTo("beta");
+    assertThat(agent.favorites).containsExactly("beta");
+    assertThat(terminal.bytes.toString()).contains("Models").contains("model: Beta");
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "open model".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
 
   @Test void permissionGateBlocksUntilModalKeysResolveAllDecisions() throws Exception {
@@ -387,6 +412,8 @@ final class InteractiveCommandTest {
     private final List<RuntimeMessage> messages = new ArrayList<>();
     private int newThreads;
     private Profile profile = Profile.ASK;
+    private String model = "alpha";
+    private List<String> favorites = List.of();
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
     @Override public AgentState state() { return state.get(); }
     @Override public void dispatch(RuntimeMessage message) { messages.add(message); }
@@ -399,6 +426,15 @@ final class InteractiveCommandTest {
       };
       return profile;
     }
+    @Override public String model() { return model; }
+    @Override public void loadModels(
+        java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>> receiver) {
+      receiver.accept(List.of(
+          new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("alpha", "Alpha", false),
+          new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("beta", "Beta", false)));
+    }
+    @Override public void selectModel(String value) { model = value; }
+    @Override public void saveFavorites(List<String> values) { favorites = List.copyOf(values); }
   }
 
   private static final class ManualAnimation implements InteractiveCommand.AnimationPort {

@@ -37,4 +37,14 @@ public record Settings(
     return new Settings(modelId, value, favoriteModels, provider, providerKeys,
         providerModels, effort, alwaysAllowTools);
   }
+
+  public Settings withModel(ModelId value) {
+    return new Settings(value, profile, favoriteModels, provider, providerKeys,
+        providerModels, effort, alwaysAllowTools);
+  }
+
+  public Settings withFavoriteModels(List<ModelId> values) {
+    return new Settings(modelId, profile, values, provider, providerKeys,
+        providerModels, effort, alwaysAllowTools);
+  }
 }
