@@ -72,6 +72,30 @@ public final class LiveProviderFactory {
         ? new HttpProviderPort.Request.Ollama(chat) : new HttpProviderPort.Request.OpenAi(chat);
   }
 
+  static HttpProviderPort.Request request(
+      Configuration configuration, List<Message> messages, String systemPrompt,
+      List<ToolSpecification> tools, int maximum) {
+    Objects.requireNonNull(configuration, "configuration");
+    Objects.requireNonNull(systemPrompt, "systemPrompt");
+    List<Message> history = List.copyOf(messages);
+    List<ToolSpecification> selectedTools = List.copyOf(tools);
+    if (maximum <= 0) throw new IllegalArgumentException("maximum must be positive");
+    if (configuration.provider().equals("anthropic")) {
+      String effort = Effort.fromWire(configuration.effort())
+          .clamp(ModelCapabilities.fromId(configuration.model())).wire();
+      return new HttpProviderPort.Request.Anthropic(new AnthropicRequest(
+          configuration.model(), systemPrompt, history, selectedTools,
+          maximum, configuration.auth(), 0, effort));
+    }
+    Endpoint endpoint = Endpoint.fromSpec(configuration.provider());
+    boolean weak = ModelCapabilities.isWeakModel(configuration.model());
+    var chat = new ChatRequest(configuration.model(), systemPrompt, history, selectedTools,
+        maximum, configuration.auth(), endpoint, configuration.contextWindow(),
+        weak && endpoint.nativeApi());
+    return endpoint.nativeApi()
+        ? new HttpProviderPort.Request.Ollama(chat) : new HttpProviderPort.Request.OpenAi(chat);
+  }
+
   private static List<ToolSpecification> toolsFor(String model) {
     if (!ModelCapabilities.isWeakModel(model)) {
       return NativeToolWireCatalog.all();

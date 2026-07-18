@@ -13,6 +13,8 @@ import com.github.skanga.ajent.provider.openai.ProviderAuthResolver;
 import com.github.skanga.ajent.protocol.acp.AcpJsonRpcServer;
 import com.github.skanga.ajent.runtime.AgentSessionFactory;
 import com.github.skanga.ajent.runtime.LiveProviderFactory;
+import com.github.skanga.ajent.runtime.ProviderBackedSubagentRunner;
+import com.github.skanga.ajent.runtime.DispatcherToolPort;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
@@ -106,12 +108,18 @@ final class AcpCommand {
         settings.providerKeys().getOrDefault(provider, ""), environment);
     var activeAuth = new AtomicReference<>(auth);
     Path docsRoot = resolveDocs(workspace);
+    var subagents = new ProviderBackedSubagentRunner(client);
     var toolConfiguration = new ToolRuntimeFactory.Configuration(
-        workspace, workspace, home, docsRoot, new JdkWebTransport(), null, null,
+        workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
         sandbox.runner());
     var tools = ToolRuntimeFactory.compose(toolConfiguration);
+    subagents.bind(new DispatcherToolPort(tools.dispatcher()));
     var providerConfiguration = new LiveProviderFactory.Configuration(
         provider, model, auth, settings.effort(), tools.systemPrompt(), 0, environment);
+    subagents.install(() -> new LiveProviderFactory.Configuration(
+        providerConfiguration.provider(), providerConfiguration.model(), activeAuth.get(),
+        providerConfiguration.effort(), providerConfiguration.systemPrompt(),
+        providerConfiguration.contextWindow(), providerConfiguration.environment()));
     var sessions = new AgentSessionFactory(
         tools, providerConfiguration, client, dataDirectory);
     boolean keylessLocal = !provider.equals("anthropic") && !Endpoint.fromSpec(provider).useTls();

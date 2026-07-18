@@ -17,6 +17,7 @@ Reference-derived work currently includes:
 | Ollama native/JSON-protocol HTTP transport, prompt/memory tiers, messages, options, model probing, streamed events, response extraction, and argument repair | `include/agentty/provider/ollama/transport.hpp`, `src/provider/ollama/transport.cpp`, `tests/ollama_transport_test.cpp` |
 | Tool effects and path-aware scheduling | `include/agentty/tool/effects.hpp`, `include/agentty/tool/spec.hpp`, `src/runtime/app/cmd_factory.cpp`, `tests/scheduler_path_test.cpp` |
 | Agent doom-loop breaker | `src/runtime/app/cmd_factory.cpp`, `tests/doom_loop_test.cpp` |
+| Provider-backed task subagents, role tool filters, retries, turn/depth bounds, progress, and report harvesting | `include/agentty/tool/subagent.hpp`, `src/tool/subagent.cpp`, `src/tool/mcp_tools_backends.cpp`, `src/runtime/main.cpp` |
 | Salvaged-call re-leak reducer | `src/runtime/app/cmd_factory.cpp`, `tests/salvage_dedup_test.cpp` |
 | Canonical reducer transition traces | `src/runtime/app/update.cpp`, `src/runtime/app/update/stream.cpp`, `src/runtime/app/update/tool.cpp`, `include/agentty/runtime/msg.hpp` |
 | Composer word deletion, attachment placeholders, and undo | `src/runtime/app/update/composer.cpp`, `src/runtime/composer_attachment.cpp`, `src/runtime/view/helpers.cpp`, `tests/composer_edit_test.cpp` |

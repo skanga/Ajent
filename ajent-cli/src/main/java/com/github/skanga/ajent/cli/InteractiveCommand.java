@@ -31,6 +31,8 @@ import com.github.skanga.ajent.runtime.AgentSessionFactory;
 import com.github.skanga.ajent.runtime.AgentState;
 import com.github.skanga.ajent.runtime.CheckpointPort;
 import com.github.skanga.ajent.runtime.LiveProviderFactory;
+import com.github.skanga.ajent.runtime.ProviderBackedSubagentRunner;
+import com.github.skanga.ajent.runtime.DispatcherToolPort;
 import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.RuntimeMessage;
 import com.github.skanga.ajent.runtime.ToolCompletion;
@@ -142,6 +144,7 @@ final class InteractiveCommand {
     var activeLoop = new AtomicReference<AgentLoop>();
     var activeProfile = new AtomicReference<>(configured.profile());
     var activeProvider = new AtomicReference<>(configured.providerConfiguration());
+    configured.subagents().install(activeProvider::get);
     var activeUi = new AtomicReference<Ui>();
     var pendingChanges = new AtomicReference<List<FileChange>>(List.of());
     var permission = new PermissionGate();
@@ -541,8 +544,11 @@ final class InteractiveCommand {
     var todos = new TodoLedger();
     var checkpoints = new GitCheckpointStore(workspace, sandbox.runner());
     var workspaceIndex = new WorkspaceIndex(workspace);
+    var subagents = new ProviderBackedSubagentRunner(client);
     var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
-        workspace, workspace, home, docs, new JdkWebTransport(), todos, null, sandbox.runner()));
+        workspace, workspace, home, docs, new JdkWebTransport(), todos, subagents,
+        sandbox.runner()));
+    subagents.bind(new DispatcherToolPort(tools.dispatcher()));
     String effort = Effort.fromWire(settings.effort()).clamp(ModelCapabilities.fromId(model)).wire();
     var providers = new LiveProviderFactory.Configuration(provider, model, auth, effort,
         tools.systemPrompt(), 0, environment);
@@ -554,7 +560,7 @@ final class InteractiveCommand {
         tools, providers, client, dataDirectory, checkpointPort, workspaceIndex::attachmentBody),
         dataDirectory, profile, model, settingsStore, providers,
         new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints,
-        workspaceIndex);
+        workspaceIndex, subagents);
   }
 
   static void recordChange(
@@ -743,7 +749,8 @@ final class InteractiveCommand {
       AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
       SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
       ProviderModelCatalog models, TodoLedger todos, Path workspace, ProcessRunner codeRunner,
-      GitCheckpointStore checkpoints, WorkspaceIndex workspaceIndex) {}
+      GitCheckpointStore checkpoints, WorkspaceIndex workspaceIndex,
+      ProviderBackedSubagentRunner subagents) {}
 
   static final class TodoLedger implements HostServices.TodoSink {
     private final AtomicReference<List<PlanModal.Item>> items =

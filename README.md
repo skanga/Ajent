@@ -124,6 +124,10 @@ include:
 
 Write, execution, and network tools are governed by the active permission
 profile. The default `ask` profile prompts before consequential operations.
+The `task` tool delegates a self-contained job to an isolated subagent using
+the currently selected provider and model. Explorer and reviewer delegates are
+read-only; tester, coder, and general delegates receive their native scoped
+tool sets. Cancelling the parent turn also cancels an active delegate.
 
 ## Other process modes
 

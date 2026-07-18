@@ -18,6 +18,7 @@ import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.domain.RetryState;
 import com.github.skanga.ajent.core.scheduling.ToolScheduler;
+import com.github.skanga.ajent.core.loop.DoomLoopBreaker;
 import com.github.skanga.ajent.provider.ErrorClass;
 import com.github.skanga.ajent.provider.ProviderErrorPolicy;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
@@ -140,6 +141,7 @@ public final class AgentReducer {
       case RuntimeMessage.Submit submit -> submit(state, submit);
       case RuntimeMessage.ProviderEvent event -> providerEvent(state, event);
       case RuntimeMessage.ToolCompleted completed -> toolCompleted(state, completed);
+      case RuntimeMessage.ToolProgress progress -> toolProgress(state, progress);
       case RuntimeMessage.PermissionResolved resolved -> permissionResolved(state, resolved);
       case RuntimeMessage.RetryStream retry -> retryStream(state, retry);
       case RuntimeMessage.TokenRefreshed refreshed -> tokenRefreshed(state, refreshed);
@@ -583,6 +585,16 @@ public final class AgentReducer {
     return kickTools(revised);
   }
 
+  private Step toolProgress(AgentState state, RuntimeMessage.ToolProgress progress) {
+    if (progress.turnId() != state.activeTurnId() || state.phase() instanceof SessionPhase.Idle)
+      return done(state);
+    return done(updateTool(state, progress.callId(), call ->
+        call.status() instanceof ToolStatus.Running running
+            ? new ToolUse(call.id(), call.name(), call.arguments(),
+                new ToolStatus.Running(running.startedNanos(), progress.text()))
+            : call));
+  }
+
   private Step permissionResolved(AgentState state, RuntimeMessage.PermissionResolved resolved) {
     if (!(state.phase() instanceof SessionPhase.AwaitingPermission)) return done(state);
     Optional<ToolUse> selected = findTool(state, resolved.callId());
@@ -644,7 +656,11 @@ public final class AgentReducer {
       boolean running = calls.stream().anyMatch(call -> call.status() instanceof ToolStatus.Running);
       boolean waiting = calls.stream().anyMatch(call -> call.status() instanceof ToolStatus.Pending
           || call.status() instanceof ToolStatus.Approved);
-      return running || waiting ? done(state) : continueStream(state);
+      if (running || waiting) return done(state);
+      Optional<DoomLoopBreaker.LoopBreak> loop =
+          DoomLoopBreaker.shouldBreak(state.thread().messages(), true);
+      return loop.isPresent() ? finishTurn(state, loop.orElseThrow().reason())
+          : continueStream(state);
     }
 
     AgentState revised = state;

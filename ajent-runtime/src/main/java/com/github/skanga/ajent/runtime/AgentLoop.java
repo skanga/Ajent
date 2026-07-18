@@ -1,11 +1,13 @@
 package com.github.skanga.ajent.runtime;
 
+import com.github.skanga.ajent.domain.CancellationSignal;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -142,6 +144,23 @@ public final class AgentLoop implements AutoCloseable {
     }
   }
 
+  /** Waits until the loop reaches idle, or returns false when the bound expires. */
+  public boolean awaitIdle(Duration timeout) throws InterruptedException {
+    Objects.requireNonNull(timeout, "timeout");
+    if (timeout.isNegative()) throw new IllegalArgumentException("timeout cannot be negative");
+    long remaining = timeout.toNanos();
+    long started = System.nanoTime();
+    synchronized (lock) {
+      while (!closed
+          && !(state.phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle)) {
+        if (remaining <= 0) return false;
+        TimeUnit.NANOSECONDS.timedWait(lock, remaining);
+        remaining = timeout.toNanos() - Math.max(0, System.nanoTime() - started);
+      }
+      return state.phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle;
+    }
+  }
+
   private void execute(RuntimeEffect effect) {
     switch (effect) {
       case RuntimeEffect.Persist persist -> tasks.submit(() -> persistence.save(persist.thread()));
@@ -160,7 +179,9 @@ public final class AgentLoop implements AutoCloseable {
       case RuntimeEffect.ExecuteTool execute -> tasks.submit(() -> {
         ToolCompletion result;
         try {
-          result = tools.execute(execute.call());
+          result = tools.execute(execute.call(), cancellation(execute.turnId()), progress ->
+              dispatchIfOpen(new RuntimeMessage.ToolProgress(execute.turnId(),
+                  execute.call().id().value(), progress)));
         } catch (RuntimeException exception) {
           result = new ToolCompletion.Failure("[INTERNAL] " + exception.getMessage());
         }
@@ -190,6 +211,16 @@ public final class AgentLoop implements AutoCloseable {
       case RuntimeEffect.Schedule schedule -> scheduler.schedule(
           () -> dispatchIfOpen(schedule.message()), schedule.delay().toNanos(),
           TimeUnit.NANOSECONDS);
+    }
+  }
+
+  private CancellationSignal cancellation(long turnId) {
+    synchronized (lock) {
+      if (state.activeTurnId() == turnId && state.phase().active().isPresent())
+        return state.phase().active().orElseThrow().cancellation();
+      var cancelled = new CancellationSignal();
+      cancelled.cancel();
+      return cancelled;
     }
   }
 

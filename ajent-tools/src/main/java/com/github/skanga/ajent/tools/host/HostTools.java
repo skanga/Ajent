@@ -11,8 +11,10 @@ import com.github.skanga.ajent.tools.runtime.ToolError;
 import com.github.skanga.ajent.tools.runtime.ToolErrorKind;
 import com.github.skanga.ajent.tools.runtime.ToolOutput;
 import com.github.skanga.ajent.tools.runtime.ToolResult;
+import com.github.skanga.ajent.domain.CancellationSignal;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.function.Consumer;
 
 /** Protocol shells for tools whose work is supplied by the application host. */
 public final class HostTools {
@@ -30,11 +32,20 @@ public final class HostTools {
   }
 
   public ToolResult execute(String name, JsonNode arguments) {
+    return execute(name, arguments, new CancellationSignal());
+  }
+
+  public ToolResult execute(String name, JsonNode arguments, CancellationSignal cancellation) {
+    return execute(name, arguments, cancellation, ignored -> {});
+  }
+
+  public ToolResult execute(String name, JsonNode arguments, CancellationSignal cancellation,
+                            Consumer<String> progress) {
     return switch (name) {
       case "todo" -> todo(arguments);
       case "skill" -> skill(arguments);
       case "search_docs" -> searchDocs(arguments);
-      case "task" -> task(arguments);
+      case "task" -> task(arguments, cancellation, progress);
       default -> failure(ToolErrorKind.UNKNOWN, "unknown tool: " + name);
     };
   }
@@ -94,14 +105,15 @@ public final class HostTools {
     return success(body.toString());
   }
 
-  private ToolResult task(JsonNode arguments) {
+  private ToolResult task(JsonNode arguments, CancellationSignal cancellation,
+                          Consumer<String> progress) {
     if (subagentRunner == null || !subagentRunner.available()) return failure(ToolErrorKind.NOT_FOUND,
         "task: subagent unavailable (not configured, or max nesting depth reached).");
     var args = new ArgReader(arguments);
     String prompt = args.string("prompt", "");
     if (prompt.isEmpty()) return failure(ToolErrorKind.INVALID_ARGS, "task: `prompt` is required.");
     var response = subagentRunner.run(new HostServices.SubagentRequest(prompt,
-        args.string("agent_type", "general")));
+        args.string("agent_type", "general")), cancellation, progress);
     return response.error() ? failure(ToolErrorKind.UNKNOWN, response.report()) : success(response.report());
   }
 

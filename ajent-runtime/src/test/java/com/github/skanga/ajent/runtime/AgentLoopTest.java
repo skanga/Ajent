@@ -279,6 +279,50 @@ final class AgentLoopTest {
     assertThat(refreshCalls).hasValue(1);
   }
 
+  @Test void propagatesToolProgressAndParentCancellationThroughTheExecutionPort()
+      throws Exception {
+    var toolEntered = new CountDownLatch(1);
+    var progressObserved = new CountDownLatch(1);
+    var cancellationObserved = new CountDownLatch(1);
+    ProviderPort provider = (turn, messages, cancellation, sink) -> {
+      sink.accept(new StreamEvent.ToolUseStart("task-1", "task"));
+      sink.accept(new StreamEvent.ToolUseDelta("{\"prompt\":\"inspect\"}"));
+      sink.accept(new StreamEvent.ToolUseEnd());
+      sink.accept(new StreamEvent.Finished(StopReason.TOOL_USE));
+    };
+    ToolPort tools = new ToolPort() {
+      @Override public ToolCompletion execute(com.github.skanga.ajent.domain.ToolUse call) {
+        throw new AssertionError("context-aware execution overload was not used");
+      }
+
+      @Override public ToolCompletion execute(com.github.skanga.ajent.domain.ToolUse call,
+          com.github.skanga.ajent.domain.CancellationSignal cancellation,
+          java.util.function.Consumer<String> progress) {
+        toolEntered.countDown();
+        progress.accept("◆ explorer agent\n  ⚙ read README.md");
+        while (!cancellation.isCancelled()) java.lang.Thread.onSpinWait();
+        cancellationObserved.countDown();
+        return new ToolCompletion.Failure("cancelled");
+      }
+    };
+    try (var loop = new AgentLoop(AgentState.initial(thread()), reducer(PermissionVerdict.ALLOW),
+        provider, tools, call -> new PermissionPort.Decision(true, false), ignored -> {},
+        state -> state.thread().messages().stream()
+            .flatMap(message -> message.toolCalls().stream())
+            .filter(call -> call.status() instanceof com.github.skanga.ajent.domain.ToolStatus.Running)
+            .map(call -> (com.github.skanga.ajent.domain.ToolStatus.Running) call.status())
+            .filter(running -> running.progressText().contains("explorer agent"))
+            .findAny().ifPresent(ignored -> progressObserved.countDown()))) {
+      loop.dispatch(new RuntimeMessage.Submit("delegate", List.of()));
+      assertThat(toolEntered.await(5, TimeUnit.SECONDS)).isTrue();
+      assertThat(progressObserved.await(5, TimeUnit.SECONDS)).isTrue();
+      loop.dispatch(new RuntimeMessage.Cancel());
+      assertThat(cancellationObserved.await(5, TimeUnit.SECONDS)).isTrue();
+      assertThat(loop.state().phase()).isInstanceOf(SessionPhase.Idle.class);
+      assertThat(loop.state().status()).isEqualTo("cancelled");
+    }
+  }
+
   private static AgentReducer reducer(PermissionVerdict verdict) {
     var ids = new AtomicInteger();
     return new AgentReducer(new AgentReducer.Context(System::nanoTime,

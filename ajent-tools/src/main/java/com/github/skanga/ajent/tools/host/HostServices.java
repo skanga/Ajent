@@ -1,7 +1,9 @@
 package com.github.skanga.ajent.tools.host;
 
+import com.github.skanga.ajent.domain.CancellationSignal;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 public final class HostServices {
   private HostServices() {}
@@ -27,5 +29,12 @@ public final class HostServices {
   public interface SubagentRunner {
     boolean available();
     SubagentResponse run(SubagentRequest request);
+    default SubagentResponse run(SubagentRequest request, CancellationSignal cancellation) {
+      return run(request);
+    }
+    default SubagentResponse run(SubagentRequest request, CancellationSignal cancellation,
+                                 Consumer<String> progress) {
+      return run(request, cancellation);
+    }
   }
 }

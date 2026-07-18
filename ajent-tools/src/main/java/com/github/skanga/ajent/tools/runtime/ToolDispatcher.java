@@ -11,6 +11,8 @@ import com.github.skanga.ajent.tools.process.ProcessTools;
 import com.github.skanga.ajent.tools.search.RepoMapTools;
 import com.github.skanga.ajent.tools.search.SearchTools;
 import com.github.skanga.ajent.tools.web.WebTools;
+import com.github.skanga.ajent.domain.CancellationSignal;
+import java.util.function.Consumer;
 
 /** Single catalog-backed dispatch point for every built-in tool. */
 public final class ToolDispatcher {
@@ -36,6 +38,15 @@ public final class ToolDispatcher {
   }
 
   public ToolResult execute(String name, JsonNode arguments) {
+    return execute(name, arguments, new CancellationSignal());
+  }
+
+  public ToolResult execute(String name, JsonNode arguments, CancellationSignal cancellation) {
+    return execute(name, arguments, cancellation, ignored -> {});
+  }
+
+  public ToolResult execute(String name, JsonNode arguments, CancellationSignal cancellation,
+                            Consumer<String> progress) {
     var specification = ToolCatalog.byName(name);
     if (specification.isEmpty()) return failure(ToolErrorKind.UNKNOWN, "unknown tool: " + name);
     ToolKind kind = specification.orElseThrow().kind();
@@ -45,7 +56,7 @@ public final class ToolDispatcher {
       case SEARCH -> search.execute(name, arguments);
       case REPOSITORY_MAP -> repoMap.execute(arguments);
       case GIT -> git.execute(name, arguments);
-      case HOST -> host.execute(name, arguments);
+      case HOST -> host.execute(name, arguments, cancellation, progress);
       case MEMORY -> memory.execute(name, arguments);
       case WEB -> web.execute(name, arguments);
     };

@@ -411,6 +411,28 @@ final class AgentReducerTest {
     assertThat(completed.effects()).anyMatch(RuntimeEffect.StartStream.class::isInstance);
   }
 
+  @Test void liveToolProgressUpdatesOnlyTheMatchingRunningCallAndIgnoresStaleEvents() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("call-1", "task"));
+    state = event(reducer, state, 1,
+        new StreamEvent.ToolUseDelta("{\"prompt\":\"inspect\"}"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
+    state = event(reducer, state, 1, new StreamEvent.Finished(StopReason.TOOL_USE));
+    assertThat(state.phase()).isInstanceOf(SessionPhase.ExecutingTool.class);
+
+    AgentState progressed = reducer.update(state,
+        new RuntimeMessage.ToolProgress(1, "call-1", "◆ explorer agent\n  ⚙ read README"))
+        .state();
+    assertThat(progressed.thread().messages().get(1).toolCalls().getFirst().status())
+        .isInstanceOfSatisfying(ToolStatus.Running.class, running ->
+            assertThat(running.progressText()).contains("explorer agent", "read README"));
+    assertThat(reducer.update(progressed,
+        new RuntimeMessage.ToolProgress(99, "call-1", "stale")).state()).isEqualTo(progressed);
+    assertThat(reducer.update(progressed,
+        new RuntimeMessage.ToolProgress(1, "unknown", "wrong call")).state()).isEqualTo(progressed);
+  }
+
   @Test void permissionApprovalAndRejectionDriveTypedPhaseTransitions() {
     AgentReducer prompting = reducer(PermissionVerdict.PROMPT);
     AgentState state = toolFinished(prompting);

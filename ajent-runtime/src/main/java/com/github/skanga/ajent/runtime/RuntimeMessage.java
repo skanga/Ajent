@@ -39,6 +39,12 @@ public sealed interface RuntimeMessage {
       result = Objects.requireNonNull(result, "result");
     }
   }
+  record ToolProgress(long turnId, String callId, String text) implements RuntimeMessage {
+    public ToolProgress {
+      callId = Objects.requireNonNull(callId, "callId");
+      text = Objects.requireNonNull(text, "text");
+    }
+  }
   record PermissionResolved(String callId, boolean approved, boolean always)
       implements RuntimeMessage {
     public PermissionResolved { callId = Objects.requireNonNull(callId, "callId"); }
