@@ -248,7 +248,7 @@ final class RevealScrollbackTest {
 
   private static SessionPhase idle() { return new SessionPhase.Idle(); }
 
-  private static final class Harness {
+  static final class Harness {
     private final List<Message> messages;
     private final AtomicReference<AgentState> state;
     private final ManualAnimation animation = new ManualAnimation();
@@ -256,7 +256,7 @@ final class RevealScrollbackTest {
     private final InteractiveCommand.Ui ui;
     private List<String> committed = List.of();
 
-    private Harness(List<Message> messages, int columns, int rows) {
+    Harness(List<Message> messages, int columns, int rows) {
       this.messages = messages;
       state = new AtomicReference<>(state(idle()));
       terminal = new WireTerminal(columns, rows);
@@ -264,7 +264,7 @@ final class RevealScrollbackTest {
           new InteractiveCommand.PermissionGate(), animation);
     }
 
-    private void frame(SessionPhase phase) {
+    void frame(SessionPhase phase) {
       animation.now += 20_000_000;
       animation.frame = null;
       state.set(state(phase));
@@ -279,7 +279,7 @@ final class RevealScrollbackTest {
       assertNoDuplicates();
     }
 
-    private void settle() {
+    void settle() {
       for (int guard = 0; guard < 500; guard++) {
         frame(idle());
         if (animation.frame == null) return;
@@ -287,15 +287,31 @@ final class RevealScrollbackTest {
       throw new AssertionError("reveal did not settle");
     }
 
-    private void assertNoDuplicates() {
+    void assertNoDuplicates() {
       var seen = new HashSet<String>();
-      for (String row : terminal.emulator.transcript()) {
+      List<String> transcript = terminal.emulator.transcript();
+      int scrollbackRows = terminal.emulator.scrollback().size();
+      var tokens = new HashSet<String>();
+      for (int rowIndex = 0; rowIndex < transcript.size(); rowIndex++) {
+        String row = transcript.get(rowIndex);
         boolean oracleRow = row.contains("tracing call path-")
             || row.contains("serializes runs batch-")
             || row.contains("diffs canvas-") || row.contains("builds tree-");
         if (oracleRow) {
           assertThat(seen.add(row)).as("duplicate transcript row <%s> at %sx%s", row,
               terminal.size.columns(), terminal.size.rows()).isTrue();
+        }
+        int marker = row.indexOf("uniq-");
+        if (marker >= 0) {
+          int end = marker;
+          while (end < row.length() && row.charAt(end) != ' ' && row.charAt(end) != '.') end++;
+          String token = row.substring(marker, end);
+          if (rowIndex < scrollbackRows) {
+            assertThat(tokens.add(token)).as("committed duplicate token <%s> at %sx%s", token,
+                terminal.size.columns(), terminal.size.rows()).isTrue();
+          } else {
+            tokens.add(token);
+          }
         }
       }
     }

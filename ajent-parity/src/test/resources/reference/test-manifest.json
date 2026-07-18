@@ -579,9 +579,18 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^scrollback_oracle_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/ScrollbackOracleTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-cli/src/test/java/com/github/skanga/ajent/cli/ScrollbackOracleTest.java",
+      "supportingCounterparts": [
+        "ajent-cli/src/test/java/com/github/skanga/ajent/cli/RevealScrollbackTest.java",
+        "ajent-cli/src/test/java/com/github/skanga/ajent/cli/MidrunWireTest.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/InlineFrameRenderer.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "all four native geometries translate the complete eight-turn rotation: prose, bursty bash with committed chrome and a parallel pair, write tail-to-full growth, five streamed edit hunks switching to settled diff, repeated trim, a 3*height+10 deep edit run with a growing running edge, and the immediate prose follow-up preserve append-only scrollback and committed-only uniq-token uniqueness"
+      ]
     },
     {
       "id": "scrollback_prefix_harness",

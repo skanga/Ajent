@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 38 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 39 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -92,6 +92,15 @@ while an ANSI emulator proves native scrollback is immutable and globally unique
 rows never duplicate. The shared Markdown renderer now also mirrors AgenTTY's fold boundary: a
 closed fenced-code body above 40 lines becomes one `â–¸ N lines hidden` row in both live and frozen
 paths, while an open fence or exactly 40 body lines stays expanded.
+
+The broader `scrollback_oracle_test.cpp` program is translated in `ScrollbackOracleTest` over its
+exact `80Ã—30`, `60Ã—18`, `100Ã—50`, and `46Ã—76` shapes. Each run rotates six complete turns through
+long prose, bursty bash progress, a two-tool parallel committed-chrome seam, write
+tail-window-to-full expansion, and five incrementally arriving edit hunks that switch to the
+settled diff path. After repeated front trims it adds the source-sized `3 Ã— height + 10` deep edit
+run, a growing running-tool edge, and the immediate prose follow-up. Across all 32 turns, physical
+scrollback never shrinks or rewrites, the inline frame remains synchronized, and AgenTTY's
+committed-only `uniq-*` token rule finds no stranded card or prose copy.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The
