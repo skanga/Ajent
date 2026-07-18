@@ -9,6 +9,7 @@ import com.github.skanga.ajent.tools.memory.JsonlMemoryStore;
 import com.github.skanga.ajent.tools.memory.MemoryTools;
 import com.github.skanga.ajent.tools.process.ProcessTools;
 import com.github.skanga.ajent.tools.process.ProcessRunner;
+import com.github.skanga.ajent.tools.prompt.AgentSystemPrompt;
 import com.github.skanga.ajent.tools.rag.AgenttyDocRetriever;
 import com.github.skanga.ajent.tools.rag.MemoryKnowledgeSource;
 import com.github.skanga.ajent.tools.rag.SkillsKnowledgeSource;
@@ -25,6 +26,19 @@ import java.util.Objects;
 /** Production composition root for the complete local AgenTTY-compatible toolset. */
 public final class ToolRuntimeFactory {
   private ToolRuntimeFactory() {}
+
+  public record Components(
+      ToolDispatcher dispatcher,
+      JsonlMemoryStore memory,
+      SkillEngine skills,
+      AgentSystemPrompt systemPrompt) {
+    public Components {
+      dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
+      memory = Objects.requireNonNull(memory, "memory");
+      skills = Objects.requireNonNull(skills, "skills");
+      systemPrompt = Objects.requireNonNull(systemPrompt, "systemPrompt");
+    }
+  }
 
   public record Configuration(
       Path workspace,
@@ -60,6 +74,10 @@ public final class ToolRuntimeFactory {
   }
 
   public static ToolDispatcher create(Configuration configuration) {
+    return compose(configuration).dispatcher();
+  }
+
+  public static Components compose(Configuration configuration) {
     Objects.requireNonNull(configuration, "configuration");
     var sandbox = new WorkspaceSandbox(
         configuration.workspace(), configuration.workingDirectory(), configuration.home());
@@ -70,11 +88,14 @@ public final class ToolRuntimeFactory {
         new MemoryKnowledgeSource(memory), null, true, true);
     var host = new HostTools(
         configuration.todoSink(), skills.resolver(), retriever, configuration.subagentRunner());
-    return new ToolDispatcher(
+    var dispatcher = new ToolDispatcher(
         new FileTools(sandbox), new ProcessTools(sandbox, configuration.processRunner()),
         new SearchTools(sandbox),
         new RepoMapTools(sandbox), new GitTools(sandbox), host, new MemoryTools(memory),
         new WebTools(configuration.webTransport()));
+    return new Components(dispatcher, memory, skills, new AgentSystemPrompt(
+        configuration.workspace(), configuration.home(), memory, skills,
+        System.getProperty("os.name", "unknown")));
   }
 
   private static Path discoverDocs(Path workspace) {

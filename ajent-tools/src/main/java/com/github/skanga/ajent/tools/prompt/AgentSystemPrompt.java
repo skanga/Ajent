@@ -105,6 +105,12 @@ public final class AgentSystemPrompt {
     return prompt + collectMemory() + skills.catalogBlock();
   }
 
+  /** Concise local/OpenAI-compatible prompt used by the native Ollama path. */
+  public String local() {
+    return com.github.skanga.ajent.provider.ollama.OllamaWire.systemPrompt(
+        workspace, home, operatingSystem);
+  }
+
   private String collectMemory() {
     String user = readMemory(home.resolve("CLAUDE.md"));
     String project = readMemory(workspace.resolve("CLAUDE.md"));

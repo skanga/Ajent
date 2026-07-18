@@ -51,7 +51,7 @@ public record ModelCapabilities(
     return maxOutputTokensFor(modelId, System.getenv("AGENTTY_MAX_OUTPUT_TOKENS"));
   }
 
-  static int maxOutputTokensFor(String modelId, String override) {
+  public static int maxOutputTokensFor(String modelId, String override) {
     if (override != null) {
       int length = 0;
       while (length < override.length() && Character.isDigit(override.charAt(length))) length++;
