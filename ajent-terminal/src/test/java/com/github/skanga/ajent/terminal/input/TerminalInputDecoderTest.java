@@ -161,8 +161,64 @@ final class TerminalInputDecoderTest {
     assertThat(decoder.feed(ascii("1;;A"))).containsExactly(special(TerminalKey.SpecialKey.UP));
   }
 
+  @Test void decodesOsc52TextAndBinaryAcrossBothTerminatorsAndChunks() {
+    var decoder = new TerminalInputDecoder();
+    assertThat(decoder.feed(ascii("\u001b]52;c;aGk=\u001b\\")))
+        .containsExactly(new TerminalEvent.Paste("hi"));
+    assertThat(decoder.feed(ascii("\u001b]52;c;bWF5YQ==\u0007")))
+        .containsExactly(new TerminalEvent.Paste("maya"));
+    assertThat(decoder.feed(ascii("\u001b]52;c;iVBORw0KGgo=\u001b\\")))
+        .singleElement().satisfies(event -> assertThat(((TerminalEvent.Paste) event).content())
+            .containsExactly((byte) 0x89, (byte) 0x50, (byte) 0x4e, (byte) 0x47,
+                (byte) 0x0d, (byte) 0x0a, (byte) 0x1a, (byte) 0x0a));
+    assertThat(decoder.feed(ascii("\u001b]52;c;b2"))).isEmpty();
+    assertThat(decoder.feed(ascii("s=\u001b\\")))
+        .containsExactly(new TerminalEvent.Paste("ok"));
+  }
+
+  @Test void dropsEmptyRefusedMalformedAndUnrelatedOscReplies() {
+    var decoder = new TerminalInputDecoder();
+    assertThat(decoder.feed(ascii("\u001b]52;c;\u001b\\\u001b]52;c;?\u001b\\"))).isEmpty();
+    assertThat(decoder.feed(ascii("\u001b]52;c;%%%\u001b\\\u001b]52-no-semi\u0007"))).isEmpty();
+    assertThat(decoder.feed(ascii("\u001b]0;title\u0007\u001b]11;rgb:0/0/0\u001b\\"))).isEmpty();
+  }
+
+  @Test void reassemblesKittyImageChunksAndPrefersImagesOverText() {
+    var decoder = new TerminalInputDecoder();
+    String frames = osc("type=read:status=OK")
+        + osc("type=read:status=DATA:mime=dGV4dC9wbGFpbg==;aGVsbG8=")
+        + osc("type=read:status=DATA:mime=aW1hZ2UvcG5n;iVBORw0K")
+        + osc("type=read:status=DATA:mime=aW1hZ2UvcG5n;Ggo=")
+        + osc("type=read:status=DATA:mime=dGV4dC9wbGFpbg==;aWdub3JlZA==")
+        + osc("type=read:status=DONE");
+    assertThat(decoder.feed(ascii(frames))).singleElement().satisfies(event ->
+        assertThat(((TerminalEvent.Paste) event).content())
+            .containsExactly((byte) 0x89, (byte) 0x50, (byte) 0x4e, (byte) 0x47,
+                (byte) 0x0d, (byte) 0x0a, (byte) 0x1a, (byte) 0x0a));
+  }
+
+  @Test void handlesKittyTextErrorsStraysAndRecovery() {
+    var decoder = new TerminalInputDecoder();
+    String text = osc("type=read:status=OK")
+        + osc("type=read:status=DATA:mime=dGV4dC9wbGFpbg==;aGVsbG8=")
+        + osc("type=read:status=DONE");
+    assertThat(decoder.feed(ascii(text))).containsExactly(new TerminalEvent.Paste("hello"));
+    assertThat(decoder.feed(ascii(osc("type=read:status=DATA:mime=dGV4dC9wbGFpbg==;b2s=")
+        + osc("type=read:status=DONE") + osc("type=write:status=DONE")))).isEmpty();
+    assertThat(decoder.feed(ascii(osc("type=read:status=OK")
+        + osc("type=read:status=DATA:mime=%%%25;bad")
+        + osc("type=read:status=DONE")))).isEmpty();
+    assertThat(decoder.feed(ascii(osc("type=read:status=OK")
+        + osc("type=read:status=EPERM") + text))).containsExactly(
+            new TerminalEvent.Paste("hello"));
+  }
+
   private static byte[] ascii(String value) {
     return value.getBytes(StandardCharsets.US_ASCII);
+  }
+
+  private static String osc(String body) {
+    return "\u001b]5522;" + body + "\u001b\\";
   }
 
   private static TerminalEvent.Key special(TerminalKey.SpecialKey key) {

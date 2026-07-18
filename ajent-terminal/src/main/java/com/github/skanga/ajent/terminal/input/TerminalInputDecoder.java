@@ -8,12 +8,16 @@ import java.util.List;
 /** Incremental port of Maya's terminal input FSM. */
 public final class TerminalInputDecoder {
   private static final byte[] PASTE_END = {0x1b, '[', '2', '0', '1', '~'};
-  private enum State { GROUND, ESCAPE, CSI, SS3, UTF8, BRACKETED_PASTE }
+  private static final int MAX_OSC_BYTES = 16 * 1024 * 1024;
+  private enum State { GROUND, ESCAPE, CSI, SS3, OSC, UTF8, BRACKETED_PASTE }
 
   private State state = State.GROUND;
   private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
   private int utf8CodePoint;
   private int utf8Remaining;
+  private boolean kittyClipboardActive;
+  private String kittyMime = "";
+  private byte[] kittyData = new byte[0];
 
   public List<TerminalEvent> feed(byte[] input) {
     var events = new ArrayList<TerminalEvent>();
@@ -41,6 +45,7 @@ public final class TerminalInputDecoder {
     buffer.reset();
     utf8CodePoint = 0;
     utf8Remaining = 0;
+    abortKittyClipboard();
   }
 
   private void accept(int value, List<TerminalEvent> events) {
@@ -49,6 +54,7 @@ public final class TerminalInputDecoder {
       case ESCAPE -> escape(value, events);
       case CSI -> sequence(value, events, true);
       case SS3 -> sequence(value, events, false);
+      case OSC -> osc(value, events);
       case UTF8 -> utf8(value, events);
       case BRACKETED_PASTE -> paste(value, events);
     }
@@ -90,6 +96,8 @@ public final class TerminalInputDecoder {
       state = State.CSI;
     } else if (value == 'O') {
       state = State.SS3;
+    } else if (value == ']') {
+      state = State.OSC;
     } else {
       TerminalKey.Modifiers alt = new TerminalKey.Modifiers(false, true, false);
       if (value == '\r' || value == '\n') events.add(key(TerminalKey.SpecialKey.ENTER, alt));
@@ -235,8 +243,7 @@ public final class TerminalInputDecoder {
     for (int index = 0; index < PASTE_END.length; index++) {
       if (content[offset + index] != PASTE_END[index]) return;
     }
-    events.add(new TerminalEvent.Paste(
-        new String(content, 0, offset, StandardCharsets.UTF_8)));
+    events.add(new TerminalEvent.Paste(java.util.Arrays.copyOf(content, offset)));
     state = State.GROUND;
     buffer.reset();
   }
@@ -262,6 +269,124 @@ public final class TerminalInputDecoder {
       events.add(character(utf8CodePoint, TerminalKey.Modifiers.NONE));
       state = State.GROUND;
       buffer.reset();
+    }
+  }
+
+  private void osc(int value, List<TerminalEvent> events) {
+    if (buffer.size() >= MAX_OSC_BYTES) {
+      state = State.GROUND;
+      buffer.reset();
+      return;
+    }
+    buffer.write(value);
+    byte[] raw = buffer.toByteArray();
+    boolean bell = value == 0x07;
+    boolean stringTerminator = raw.length >= 2
+        && raw[raw.length - 2] == 0x1b && value == '\\';
+    if (!bell && !stringTerminator) return;
+    int end = raw.length - (bell ? 1 : 2);
+    String body = new String(raw, 2, end - 2, StandardCharsets.US_ASCII);
+    parseOsc(body, events);
+    state = State.GROUND;
+    buffer.reset();
+  }
+
+  private void parseOsc(String body, List<TerminalEvent> events) {
+    if (body.startsWith("5522;")) {
+      parseKittyClipboard(body.substring(5), events);
+      return;
+    }
+    if (!body.startsWith("52;")) return;
+    int separator = body.indexOf(';', 3);
+    if (separator < 0) return;
+    String encoded = body.substring(separator + 1);
+    if (encoded.isEmpty() || encoded.equals("?")) return;
+    byte[] decoded = decodeBase64(encoded);
+    if (decoded != null) events.add(new TerminalEvent.Paste(decoded));
+  }
+
+  private void parseKittyClipboard(String body, List<TerminalEvent> events) {
+    int separator = body.indexOf(';');
+    String metadata = separator < 0 ? body : body.substring(0, separator);
+    String payload = separator < 0 ? "" : body.substring(separator + 1);
+    String type = "";
+    String status = "";
+    String mimeEncoded = "";
+    for (String field : metadata.split(":")) {
+      int equals = field.indexOf('=');
+      if (equals < 0) continue;
+      String key = field.substring(0, equals);
+      String fieldValue = field.substring(equals + 1);
+      switch (key) {
+        case "type" -> type = fieldValue;
+        case "status" -> status = fieldValue;
+        case "mime" -> mimeEncoded = fieldValue;
+        default -> { }
+      }
+    }
+    if (!type.equals("read")) return;
+    if (status.equals("OK")) {
+      abortKittyClipboard();
+      kittyClipboardActive = true;
+      return;
+    }
+    if (!kittyClipboardActive) return;
+    if (status.equals("DATA")) {
+      byte[] mimeBytes = decodeBase64(mimeEncoded);
+      if (mimeBytes == null) { abortKittyClipboard(); return; }
+      String mime = new String(mimeBytes, StandardCharsets.UTF_8);
+      if (!mime.equals(kittyMime)) {
+        if (!kittyMime.isEmpty() && rank(mime) <= rank(kittyMime)) return;
+        kittyMime = mime;
+        kittyData = new byte[0];
+      }
+      byte[] chunk = decodeBase64(payload);
+      if (chunk == null || kittyData.length + chunk.length > MAX_OSC_BYTES) {
+        abortKittyClipboard();
+        return;
+      }
+      byte[] combined = java.util.Arrays.copyOf(kittyData, kittyData.length + chunk.length);
+      System.arraycopy(chunk, 0, combined, kittyData.length, chunk.length);
+      kittyData = combined;
+      return;
+    }
+    if (status.equals("DONE")) {
+      if (kittyData.length > 0) events.add(new TerminalEvent.Paste(kittyData));
+      abortKittyClipboard();
+      return;
+    }
+    abortKittyClipboard();
+  }
+
+  private void abortKittyClipboard() {
+    kittyClipboardActive = false;
+    kittyMime = "";
+    kittyData = new byte[0];
+  }
+
+  private static int rank(String mime) {
+    return switch (mime) {
+      case "image/png" -> 5;
+      case "image/jpeg" -> 4;
+      case "image/webp" -> 3;
+      case "image/gif" -> 2;
+      default -> mime.startsWith("image/") ? 1 : 0;
+    };
+  }
+
+  private static byte[] decodeBase64(String value) {
+    String normalized = value.replaceAll("[ \\t\\r\\n]", "");
+    for (int index = 0; index < normalized.length(); index++) {
+      char character = normalized.charAt(index);
+      if (!(character >= 'A' && character <= 'Z'
+          || character >= 'a' && character <= 'z'
+          || character >= '0' && character <= '9'
+          || character == '+' || character == '/' || character == '=')) return null;
+    }
+    try {
+      return java.util.Base64.getDecoder().decode(normalized);
+    } catch (IllegalArgumentException exception) {
+      return null;
     }
   }
 

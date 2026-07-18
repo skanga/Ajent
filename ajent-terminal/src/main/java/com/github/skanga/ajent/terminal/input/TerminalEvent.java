@@ -8,8 +8,28 @@ public sealed interface TerminalEvent {
     public Key { Objects.requireNonNull(value, "value"); }
   }
 
-  record Paste(String content) implements TerminalEvent {
-    public Paste { Objects.requireNonNull(content, "content"); }
+  final class Paste implements TerminalEvent {
+    private final byte[] content;
+
+    public Paste(byte[] content) {
+      this.content = Objects.requireNonNull(content, "content").clone();
+    }
+
+    public Paste(String content) {
+      this(Objects.requireNonNull(content, "content")
+          .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    public byte[] content() { return content.clone(); }
+    public String text() { return new String(content, java.nio.charset.StandardCharsets.UTF_8); }
+
+    @Override public boolean equals(Object other) {
+      return other instanceof Paste paste && java.util.Arrays.equals(content, paste.content);
+    }
+
+    @Override public int hashCode() { return java.util.Arrays.hashCode(content); }
+
+    @Override public String toString() { return "Paste[content=" + content.length + " bytes]"; }
   }
 
   record Focus(boolean focused) implements TerminalEvent {}
