@@ -13,6 +13,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /** Bounded subprocess execution using the JDK process API. */
@@ -214,6 +215,10 @@ public class ProcessRunner {
 
   private Result run(List<String> argv, Path directory, int maxBytes, Duration timeout,
       Map<String, String> environment) {
+    Objects.requireNonNull(argv, "argv");
+    Objects.requireNonNull(timeout, "timeout");
+    if (maxBytes < 0) throw new IllegalArgumentException("negative capture bound");
+    if (timeout.isNegative()) throw new IllegalArgumentException("negative timeout");
     Process process;
     try {
       var builder = new ProcessBuilder(argv).redirectErrorStream(true);
@@ -226,10 +231,13 @@ public class ProcessRunner {
     }
     var bytes = new ByteArrayOutputStream(Math.min(maxBytes, 8192));
     boolean[] truncated = {false};
+    var lastActivity = new AtomicLong(System.nanoTime());
     Thread reader = Thread.ofVirtual().start(() -> {
       try (var input = process.getInputStream()) {
         byte[] buffer = new byte[4096];
         for (int count; (count = input.read(buffer)) >= 0;) {
+          if (count == 0) continue;
+          lastActivity.set(System.nanoTime());
           int room = maxBytes - bytes.size();
           if (room > 0) bytes.write(buffer, 0, Math.min(room, count));
           if (count > room) truncated[0] = true;
@@ -240,11 +248,16 @@ public class ProcessRunner {
     });
     boolean timedOut = false;
     try {
-      if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-        timedOut = true;
-        process.descendants().forEach(ProcessHandle::destroy);
-        process.destroy();
-        if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly();
+      long idleNanos = timeout.toNanos();
+      while (process.isAlive()) {
+        if (process.waitFor(100, TimeUnit.MILLISECONDS)) break;
+        if (idleNanos > 0 && System.nanoTime() - lastActivity.get() >= idleNanos) {
+          timedOut = true;
+          process.descendants().forEach(ProcessHandle::destroy);
+          process.destroy();
+          if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly();
+          break;
+        }
       }
       reader.join(Duration.ofSeconds(3));
       return new Result(true, process.isAlive() ? 1 : process.exitValue(), bytes.toString(java.nio.charset.StandardCharsets.UTF_8),

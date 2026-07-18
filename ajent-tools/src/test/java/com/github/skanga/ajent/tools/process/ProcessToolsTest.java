@@ -109,6 +109,54 @@ class ProcessToolsTest {
     assertThat(result.output().getBytes()).hasSize(2);
   }
 
+  @Test
+  void persistsOversizedBashOutputAndReturnsTheNativeBoundedEnvelope(@TempDir Path root)
+      throws Exception {
+    var fake = new FakeRunner();
+    String errors = String.join("\n", "error: lowercase", "Error: title case", "ERROR: uppercase",
+        "FAILED build", "error[E123]", "thread panicked", "Traceback follows",
+        "RuntimeException") + '\n';
+    String full = "H".repeat(2_100) + '\n' + errors + "M".repeat(31_000) + "T".repeat(1_100);
+    fake.add(new ProcessRunner.Result(true, 0, full, false, true, ""));
+    var sandbox = new WorkspaceSandbox(root, root, root);
+    Path spill = root.resolve("spill");
+    var tools = new ProcessTools(sandbox, fake, spill);
+
+    String result = success(tools.execute("bash",
+        JSON.createObjectNode().put("command", "large output")));
+
+    assertThat(result).contains("<persisted-output>", "Output too large (",
+        "Full output saved to: ",
+        "Preview (first 2000 bytes):", "❌ Errors found", "error: lowercase",
+        "Error: title case", "ERROR: uppercase", "FAILED build", "error[E123]",
+        "thread panicked", "Traceback follows", "RuntimeException",
+        "Tail (last 1000 bytes):", "bytes elided", "</persisted-output>")
+        .doesNotContain("[output truncated at");
+    String marker = "Full output saved to: ";
+    int pathStart = result.indexOf(marker) + marker.length();
+    String pathText = result.substring(pathStart, result.indexOf('\n', pathStart));
+    Path persisted = Path.of(pathText);
+    assertThat(Files.readString(persisted)).isEqualTo(full);
+    assertThat(sandbox.isReadable(persisted)).isTrue();
+  }
+
+  @Test
+  void returnsBoundedNativeEnvelopeWhenSpillFileCannotBeCreated(@TempDir Path root)
+      throws Exception {
+    var fake = new FakeRunner();
+    fake.add(new ProcessRunner.Result(true, 0, "plain output\n".repeat(3_000), false, true, ""));
+    Path blockedSpillRoot = root.resolve("not-a-directory");
+    Files.writeString(blockedSpillRoot, "occupied");
+    var tools = new ProcessTools(new WorkspaceSandbox(root, root, root), fake, blockedSpillRoot);
+
+    String result = success(tools.execute("bash",
+        JSON.createObjectNode().put("command", "large output")));
+
+    assertThat(result).contains("<persisted-output>",
+        "(spill file unavailable; output truncated.)", "Tail (last 1000 bytes):")
+        .doesNotContain("Full output saved to:", "❌ Errors found", "[output truncated at");
+  }
+
   private static void assertDetected(Path root, String marker, List<String> expected) throws Exception {
     Files.createDirectories(root.resolve(marker).getParent());
     Files.writeString(root.resolve(marker), "");

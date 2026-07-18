@@ -7,6 +7,8 @@ import com.github.skanga.ajent.tools.runtime.ToolError;
 import com.github.skanga.ajent.tools.runtime.ToolErrorKind;
 import com.github.skanga.ajent.tools.runtime.ToolOutput;
 import com.github.skanga.ajent.tools.runtime.ToolResult;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -15,13 +17,23 @@ import java.util.List;
 /** AgenTTY-compatible bash and diagnostics tools. */
 public final class ProcessTools {
   private static final int CAPTURE_CAP = 8 * 1024 * 1024;
+  private static final int MODEL_PREVIEW_BYTES = 30_000;
+  private static final int SPILL_PREVIEW_HEAD = 2_000;
+  private static final int SPILL_PREVIEW_TAIL = 1_000;
   private final WorkspaceSandbox sandbox;
   private final ProcessRunner runner;
+  private final Path spillRoot;
 
   public ProcessTools(WorkspaceSandbox sandbox) { this(sandbox, new ProcessRunner()); }
   public ProcessTools(WorkspaceSandbox sandbox, ProcessRunner runner) {
+    this(sandbox, runner, Path.of(System.getProperty("java.io.tmpdir"), "agentty-bash"));
+  }
+
+  ProcessTools(WorkspaceSandbox sandbox, ProcessRunner runner, Path spillRoot) {
     this.sandbox = sandbox;
     this.runner = runner;
+    this.spillRoot = spillRoot.toAbsolutePath().normalize();
+    sandbox.allowReadRoot(this.spillRoot);
   }
 
   public ToolResult execute(String name, JsonNode arguments) {
@@ -60,6 +72,8 @@ public final class ProcessTools {
     if (!result.started()) return failure(ToolErrorKind.SPAWN,
         "failed to spawn command: " + result.startError());
     String output = stripAnsi(result.output());
+    Spill spill = spill(output, result.truncated());
+    output = spill.output();
     String body;
     if (result.timedOut()) body = output.isEmpty() ? "Command \"" + command + "\" timed out after "
         + timeout + "s. No output was captured." : "Command \"" + command + "\" timed out after "
@@ -68,13 +82,68 @@ public final class ProcessTools {
         + "\" failed with exit code " + result.exitCode() + "." : "Command \"" + command
         + "\" failed with exit code " + result.exitCode() + ".\n\n" + fence(output);
     else body = output.isEmpty() ? "Command executed successfully." : fence(output);
-    if (result.truncated()) body += "\n\n[output truncated at " + CAPTURE_CAP + " bytes]";
+    if (spill.truncated()) body += "\n\n[output truncated at " + CAPTURE_CAP + " bytes]";
     long elapsed = (System.nanoTime() - started) / 1_000_000;
     if (elapsed >= 500) body += elapsed < 10_000 ? "\n\n[elapsed: " + elapsed + " ms]"
         : "\n\n[elapsed: " + (elapsed / 1000) + "." + ((elapsed % 1000) / 100) + " s]";
     String description = args.string("display_description", "");
     return success(description.isEmpty() ? body : description + '\n' + body);
   }
+
+  private Spill spill(String output, boolean truncated) {
+    byte[] bytes = output.getBytes(StandardCharsets.UTF_8);
+    if (bytes.length <= MODEL_PREVIEW_BYTES) return new Spill(output, truncated);
+    String spillPath = "";
+    try {
+      Files.createDirectories(spillRoot);
+      Path path = Files.createTempFile(spillRoot, "out-", ".txt");
+      Files.write(path, bytes);
+      spillPath = path.toString();
+    } catch (IOException | SecurityException ignored) {
+      // The native tool still returns a bounded preview when persistence is unavailable.
+    }
+    String head = utf8Slice(bytes, 0, Math.min(SPILL_PREVIEW_HEAD, bytes.length));
+    String tail = bytes.length > SPILL_PREVIEW_HEAD + SPILL_PREVIEW_TAIL + 100
+        ? utf8Slice(bytes, bytes.length - SPILL_PREVIEW_TAIL, bytes.length) : "";
+    var errors = output.lines().filter(ProcessTools::looksLikeError).limit(10).toList();
+    var envelope = new StringBuilder("<persisted-output>\nOutput too large (")
+        .append(bytes.length / 1024).append(" KB total). ");
+    if (spillPath.isEmpty()) {
+      envelope.append("(spill file unavailable; output truncated.)\n\n");
+    } else {
+      envelope.append("Full output saved to: ").append(spillPath)
+          .append("\n\nIf you need bytes past the preview, use the read tool on that path with "
+              + "offset/limit.\n\n");
+    }
+    envelope.append("Preview (first ").append(SPILL_PREVIEW_HEAD).append(" bytes):\n")
+        .append(head);
+    if (!errors.isEmpty()) {
+      envelope.append("\n\n❌ Errors found (extracted from full output):\n");
+      errors.forEach(line -> envelope.append("  ").append(line).append('\n'));
+    }
+    if (!tail.isEmpty()) {
+      envelope.append("\n\n... [")
+          .append(bytes.length - SPILL_PREVIEW_HEAD - SPILL_PREVIEW_TAIL)
+          .append(" bytes elided] ...\n\nTail (last ").append(SPILL_PREVIEW_TAIL)
+          .append(" bytes):\n").append(tail);
+    }
+    envelope.append("\n</persisted-output>");
+    return new Spill(envelope.toString(), false);
+  }
+
+  private static boolean looksLikeError(String line) {
+    return line.contains("error:") || line.contains("Error:") || line.contains("ERROR:")
+        || line.contains("FAILED") || line.contains("error[") || line.contains("panicked")
+        || line.contains("Traceback") || line.contains("Exception");
+  }
+
+  private static String utf8Slice(byte[] bytes, int start, int end) {
+    while (start < end && (bytes[start] & 0xc0) == 0x80) start++;
+    while (end > start && end < bytes.length && (bytes[end] & 0xc0) == 0x80) end--;
+    return new String(bytes, start, end - start, StandardCharsets.UTF_8);
+  }
+
+  private record Spill(String output, boolean truncated) {}
 
   private ToolResult diagnostics(JsonNode arguments) {
     var args = new ArgReader(arguments);
