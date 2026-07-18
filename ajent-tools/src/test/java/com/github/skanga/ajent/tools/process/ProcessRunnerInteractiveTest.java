@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +24,7 @@ final class ProcessRunnerInteractiveTest {
     byte[] output = "abcdefgh".getBytes(StandardCharsets.UTF_8);
     var process = new FakeProcess(output, 7);
     var events = new ArrayList<String>();
+    var heartbeats = new ArrayList<Long>();
     var live = new ByteArrayOutputStream();
     var runner = new ProcessRunner(builder -> {
       assertThat(builder.command()).containsExactly("/bin/sh", "-c", "printf test", "sh");
@@ -40,7 +42,7 @@ final class ProcessRunnerInteractiveTest {
         }, () -> {
           events.add("guard-open");
           return () -> events.add("guard-close");
-        });
+        }, heartbeats::add);
 
     assertThat(live.toByteArray()).containsExactly(output);
     assertThat(result.started()).isTrue();
@@ -50,6 +52,7 @@ final class ProcessRunnerInteractiveTest {
     assertThat(result.truncated()).isTrue();
     assertThat(result.timedOut()).isFalse();
     assertThat(events).containsExactly("spawn", "guard-open", "output", "guard-close");
+    assertThat(heartbeats).containsExactly(0L);
     assertThat(process.stdinRequested).isFalse();
   }
 
@@ -80,6 +83,23 @@ final class ProcessRunnerInteractiveTest {
     assertThat(result.output()).isEqualTo("visible");
     assertThat(result.exitCode()).isZero();
     assertThat(closed).isTrue();
+  }
+
+  @Test void capturedShellHeartbeatStartsImmediatelyAndCallbackFailureIsNonFatal() {
+    var pulses = new ArrayList<Long>();
+    var runner = new ProcessRunner(builder -> new FakeProcess(
+        "done".getBytes(StandardCharsets.UTF_8), 0));
+
+    ProcessRunner.Result result = runner.shell(
+        "echo done", directory, 20, Duration.ofSeconds(2), pulses::add);
+    ProcessRunner.Result callbackFailed = runner.shell(
+        "echo done", directory, 20, Duration.ofSeconds(2), elapsed -> {
+          throw new IllegalStateException("terminal gone");
+        });
+
+    assertThat(result.output()).isEqualTo("done");
+    assertThat(pulses).containsExactly(0L);
+    assertThat(callbackFailed.exitCode()).isZero();
   }
 
   private static final class FakeProcess extends Process {

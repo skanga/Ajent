@@ -68,6 +68,13 @@ public final class JLineTerminalSession implements AutoCloseable {
     return new Size(Math.max(0, terminal.getWidth()), Math.max(0, terminal.getHeight()));
   }
 
+  /** Whether JLine owns a real terminal rather than its redirected dumb fallback. */
+  public boolean interactive() {
+    requireOpen();
+    String type = terminal.getType();
+    return type != null && !type.toLowerCase(java.util.Locale.ROOT).startsWith("dumb");
+  }
+
   public Terminal.SignalHandler onResize(Consumer<Size> handler) {
     Objects.requireNonNull(handler, "handler");
     return terminal.handle(Terminal.Signal.WINCH, ignored -> handler.accept(size()));
@@ -97,6 +104,20 @@ public final class JLineTerminalSession implements AutoCloseable {
   public List<TerminalEvent> flushEscape() {
     requireOpen();
     return decoder.flushEscape();
+  }
+
+  /** Reads one key without requiring Enter or echoing it, then restores the prior attributes. */
+  public int readSingleKey() {
+    requireOpen();
+    Attributes previous = terminal.getAttributes();
+    terminal.enterRawMode();
+    try {
+      return terminal.input().read();
+    } catch (IOException exception) {
+      throw new java.io.UncheckedIOException(exception);
+    } finally {
+      terminal.setAttributes(previous);
+    }
   }
 
   public void write(String value) {

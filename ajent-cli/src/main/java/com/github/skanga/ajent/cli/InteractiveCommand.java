@@ -91,6 +91,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Base64;
 import java.util.function.Consumer;
@@ -228,15 +229,30 @@ final class InteractiveCommand {
           String command = CodeBlockPicker.commandFor(shell, block.body());
           ProcessRunner.Result result = terminal.suspend(() -> {
             terminal.write(codeBlockHeader(windows, block.body()));
+            int rows = terminal.size().rows();
+            if (!windows && rows >= 3) terminal.write(codeBlockStatusBegin(rows));
+            String label = codeBlockLabel(block.body());
+            var spinner = new AtomicInteger();
             long started = System.nanoTime();
-            ProcessRunner.Result executed = executeCodeBlock(windows, configured.codeRunner(),
-                command, configured.workspace(), terminal::write,
-                () -> {
-                  JLineTerminalSession.SignalGuard guard = terminal.ignoreInterrupts();
-                  return guard::close;
-                });
+            ProcessRunner.Result executed;
+            try {
+              executed = executeCodeBlock(windows, configured.codeRunner(), command,
+                  configured.workspace(), terminal::write,
+                  () -> {
+                    JLineTerminalSession.SignalGuard guard = terminal.ignoreInterrupts();
+                    return guard::close;
+                  }, elapsed -> terminal.write(codeBlockHeartbeat(
+                      windows, rows, label, elapsed, spinner.getAndIncrement())));
+            } finally {
+              if (!windows) terminal.write(codeBlockStatusEnd(rows));
+            }
             terminal.write(codeBlockFooter(windows, executed,
                 Duration.ofNanos(System.nanoTime() - started).toSeconds()));
+            if (!windows && terminal.interactive()) {
+              terminal.write("\u001b[2m   press any key to return to ajent…\u001b[0m");
+              terminal.readSingleKey();
+              terminal.write("\r\u001b[2K");
+            }
             return executed;
           });
           String output = result.started() ? result.output()
@@ -656,9 +672,17 @@ final class InteractiveCommand {
   static ProcessRunner.Result executeCodeBlock(boolean windows, ProcessRunner runner,
       String command, Path workspace, ProcessRunner.LiveOutput liveOutput,
       java.util.function.Supplier<ProcessRunner.SignalGuard> signalGuard) {
+    return executeCodeBlock(
+        windows, runner, command, workspace, liveOutput, signalGuard, ignored -> {});
+  }
+
+  static ProcessRunner.Result executeCodeBlock(boolean windows, ProcessRunner runner,
+      String command, Path workspace, ProcessRunner.LiveOutput liveOutput,
+      java.util.function.Supplier<ProcessRunner.SignalGuard> signalGuard,
+      ProcessRunner.Heartbeat heartbeat) {
     return windows
-        ? runner.shell(command, workspace, 30_000, Duration.ofSeconds(120))
-        : runner.interactivePosixShell(command, workspace, liveOutput, signalGuard);
+        ? runner.shell(command, workspace, 30_000, Duration.ofSeconds(120), heartbeat)
+        : runner.interactivePosixShell(command, workspace, liveOutput, signalGuard, heartbeat);
   }
 
   static String codeBlockHeader(boolean windows, String command) {
@@ -680,6 +704,38 @@ final class InteractiveCommand {
     return prefix + status + "\u001b[0m\u001b[2m  exit "
         + (result.started() ? result.exitCode() : -1) + "  ·  " + elapsedSeconds
         + "s\u001b[0m\n";
+  }
+
+  static String codeBlockLabel(String command) {
+    int end = 0;
+    while (end < command.length() && !Character.isWhitespace(command.charAt(end))) end++;
+    return command.substring(0, Math.min(end, 24));
+  }
+
+  static String codeBlockHeartbeat(
+      boolean windows, int rows, String label, long elapsedSeconds, int spinnerIndex) {
+    String[] frames = {"⣷", "⣯", "⣟", "⡿", "⣾", "⣽", "⣻", "⣷"};
+    String spinner = frames[Math.floorMod(spinnerIndex, frames.length)];
+    String title = "\u001b]2;● " + elapsedSeconds + "s — " + label + " — ajent\u0007";
+    if (windows) {
+      return title + "\r\u001b[2K\u001b[2m" + spinner + " running… "
+          + elapsedSeconds + "s\u001b[0m";
+    }
+    if (rows < 3) return title;
+    return title + "\u001b[s\u001b[" + rows + ";1H\u001b[2K\u001b[2m" + spinner
+        + " running… " + elapsedSeconds + "s · " + label
+        + " · Ctrl-C to stop\u001b[0m\u001b[u";
+  }
+
+  static String codeBlockStatusBegin(int rows) {
+    return rows < 3 ? "" : "\u001b[1;" + (rows - 1) + "r\u001b[" + (rows - 1) + ";1H";
+  }
+
+  static String codeBlockStatusEnd(int rows) {
+    String title = "\u001b]2;\u0007";
+    if (rows < 3) return title;
+    return "\u001b[r\u001b[" + rows + ";1H\u001b[2K\u001b[" + (rows - 1)
+        + ";1H" + title;
   }
 
   record Configuration(

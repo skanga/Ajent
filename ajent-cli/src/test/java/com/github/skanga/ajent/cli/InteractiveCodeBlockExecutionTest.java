@@ -19,9 +19,11 @@ final class InteractiveCodeBlockExecutionTest {
     var runner = new RecordingRunner();
     var live = new ByteArrayOutputStream();
     var signalGuardClosed = new AtomicBoolean();
+    var heartbeat = new java.util.ArrayList<Long>();
 
     ProcessRunner.Result result = InteractiveCommand.executeCodeBlock(false, runner,
-        "printf hello", workspace, live::write, () -> () -> signalGuardClosed.set(true));
+        "printf hello", workspace, live::write, () -> () -> signalGuardClosed.set(true),
+        heartbeat::add);
 
     assertThat(result.output()).isEqualTo("posix capture");
     assertThat(runner.posixCalls).isEqualTo(1);
@@ -30,13 +32,16 @@ final class InteractiveCodeBlockExecutionTest {
     assertThat(runner.directory).isEqualTo(workspace);
     assertThat(live.toString()).isEqualTo("live output");
     assertThat(signalGuardClosed).isTrue();
+    assertThat(heartbeat).containsExactly(2L);
   }
 
   @Test void windowsPreservesBoundedCapturedRunnerFallback() {
     var runner = new RecordingRunner();
+    var heartbeat = new java.util.ArrayList<Long>();
 
     ProcessRunner.Result result = InteractiveCommand.executeCodeBlock(true, runner,
-        "powershell encoded", workspace, (bytes, offset, length) -> {}, () -> () -> {});
+        "powershell encoded", workspace, (bytes, offset, length) -> {}, () -> () -> {},
+        heartbeat::add);
 
     assertThat(result.output()).isEqualTo("windows capture");
     assertThat(runner.capturedCalls).isEqualTo(1);
@@ -45,6 +50,7 @@ final class InteractiveCodeBlockExecutionTest {
     assertThat(runner.directory).isEqualTo(workspace);
     assertThat(runner.maxBytes).isEqualTo(30_000);
     assertThat(runner.timeout).isEqualTo(Duration.ofSeconds(120));
+    assertThat(heartbeat).containsExactly(4L);
   }
 
   @Test void terminalDecorationDistinguishesPlatformAndCompletionKind() {
@@ -71,6 +77,23 @@ final class InteractiveCodeBlockExecutionTest {
     assertThat(InteractiveCommand.codeBlockFooter(false,
         new ProcessRunner.Result(false, -1, "", false, false, "no shell"), 0))
         .contains("╰─ ✕ failed").contains("exit -1");
+    assertThat(InteractiveCommand.codeBlockLabel("./very-long-command-name-here --flag"))
+        .isEqualTo("./very-long-command-name");
+    assertThat(InteractiveCommand.codeBlockLabel("mvn test")).isEqualTo("mvn");
+    assertThat(InteractiveCommand.codeBlockLabel("")).isEmpty();
+    assertThat(InteractiveCommand.codeBlockHeartbeat(false, 30, "mvn", 12, 1))
+        .contains("\u001b]2;● 12s — mvn — ajent\u0007")
+        .contains("\u001b[30;1H").contains("⣯ running… 12s · mvn · Ctrl-C to stop");
+    assertThat(InteractiveCommand.codeBlockHeartbeat(true, 30, "mvn", 4, 2))
+        .contains("\r\u001b[2K").contains("⣟ running… 4s");
+    assertThat(InteractiveCommand.codeBlockHeartbeat(false, 2, "mvn", 0, -1))
+        .isEqualTo("\u001b]2;● 0s — mvn — ajent\u0007");
+    assertThat(InteractiveCommand.codeBlockStatusBegin(30))
+        .isEqualTo("\u001b[1;29r\u001b[29;1H");
+    assertThat(InteractiveCommand.codeBlockStatusBegin(2)).isEmpty();
+    assertThat(InteractiveCommand.codeBlockStatusEnd(30))
+        .isEqualTo("\u001b[r\u001b[30;1H\u001b[2K\u001b[29;1H\u001b]2;\u0007");
+    assertThat(InteractiveCommand.codeBlockStatusEnd(2)).isEqualTo("\u001b]2;\u0007");
   }
 
   private static final class RecordingRunner extends ProcessRunner {
@@ -82,7 +105,7 @@ final class InteractiveCodeBlockExecutionTest {
     private Duration timeout;
 
     @Override public Result interactivePosixShell(String command, Path directory,
-        LiveOutput liveOutput, Supplier<SignalGuard> signalGuard) {
+        LiveOutput liveOutput, Supplier<SignalGuard> signalGuard, Heartbeat heartbeat) {
       posixCalls++;
       this.command = command;
       this.directory = directory;
@@ -93,17 +116,24 @@ final class InteractiveCodeBlockExecutionTest {
         throw new AssertionError(exception);
       }
       try (SignalGuard ignored = signalGuard.get()) {
+        heartbeat.pulse(2);
         return new Result(true, 0, "posix capture", false, false, "");
       }
     }
 
     @Override public Result shell(
         String command, Path directory, int maxBytes, Duration timeout) {
+      return shell(command, directory, maxBytes, timeout, ignored -> {});
+    }
+
+    @Override public Result shell(String command, Path directory, int maxBytes, Duration timeout,
+        Heartbeat heartbeat) {
       capturedCalls++;
       this.command = command;
       this.directory = directory;
       this.maxBytes = maxBytes;
       this.timeout = timeout;
+      heartbeat.pulse(4);
       return new Result(true, 0, "windows capture", false, false, "");
     }
   }

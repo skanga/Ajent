@@ -107,6 +107,16 @@ final class JLineTerminalSessionTest {
     session.close();
   }
 
+  @Test void interactiveTerminalCanReadOneRawAcknowledgementKeyWhileSuspended() throws Exception {
+    var output = new ByteArrayOutputStream();
+    var session = JLineTerminalSession.forTerminal(virtual(new byte[] {'z'}, output));
+
+    assertThat(session.interactive()).isTrue();
+    assertThat(session.suspend(session::readSingleKey)).isEqualTo((int) 'z');
+
+    session.close();
+  }
+
   private static Terminal virtual(byte[] input, ByteArrayOutputStream output) throws Exception {
     return new DumbTerminal("test", "xterm-256color", new ByteArrayInputStream(input), output,
         StandardCharsets.UTF_8);

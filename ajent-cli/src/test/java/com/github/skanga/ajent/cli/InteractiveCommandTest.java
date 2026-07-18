@@ -87,6 +87,11 @@ final class InteractiveCommandTest {
     var invalidDocs = command(Map.of("AGENTTY_DOCS_DIR", "\0"));
     assertThat(invalidDocs.configure(CliArguments.parse(new String[] {
         "--sandbox", "off", "--provider", "ollama"}), stream(error))).isNotNull();
+    Path knowledgeWorkspace = directory.resolve("knowledge-workspace");
+    java.nio.file.Files.createDirectories(knowledgeWorkspace.resolve(".agentty/knowledge"));
+    assertThat(command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off", "--provider", "ollama", "--workspace",
+        knowledgeWorkspace.toString()}), stream(error))).isNotNull();
     new CredentialStore(directory.resolve("credentials.json"), "seed").save(
         new com.github.skanga.ajent.provider.auth.Credential.OAuth(
             "access", "refresh", System.currentTimeMillis() + 60_000));

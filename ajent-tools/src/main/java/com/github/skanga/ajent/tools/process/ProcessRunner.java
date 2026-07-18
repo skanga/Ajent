@@ -5,10 +5,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /** Bounded subprocess execution using the JDK process API. */
@@ -26,6 +30,11 @@ public class ProcessRunner {
   @FunctionalInterface
   public interface SignalGuard extends AutoCloseable {
     @Override void close();
+  }
+
+  @FunctionalInterface
+  public interface Heartbeat {
+    void pulse(long elapsedSeconds);
   }
 
   @FunctionalInterface
@@ -47,6 +56,40 @@ public class ProcessRunner {
     return run(argv, directory, maxBytes, timeout);
   }
 
+  /** Runs the captured shell while reporting elapsed time at the native 250 ms cadence. */
+  public Result shell(String command, Path directory, int maxBytes, Duration timeout,
+      Heartbeat heartbeat) {
+    Objects.requireNonNull(heartbeat, "heartbeat");
+    var finished = new AtomicBoolean();
+    boolean pulses = pulse(heartbeat, 0);
+    Thread ticker = !pulses ? null : Thread.startVirtualThread(() -> {
+      long started = System.nanoTime();
+      while (!finished.get()) {
+        try {
+          Thread.sleep(250);
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        if (!finished.get() && !pulse(
+            heartbeat, Duration.ofNanos(System.nanoTime() - started).toSeconds())) return;
+      }
+    });
+    try {
+      return shell(command, directory, maxBytes, timeout);
+    } finally {
+      finished.set(true);
+      if (ticker != null) {
+        ticker.interrupt();
+        try {
+          ticker.join();
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }
+  }
+
   public Result argv(List<String> argv, Path directory, int maxBytes, Duration timeout) {
     return run(argv, directory, maxBytes, timeout, Map.of());
   }
@@ -60,14 +103,28 @@ public class ProcessRunner {
   public Result interactivePosixShell(String command, Path directory, LiveOutput liveOutput,
       Supplier<SignalGuard> signalGuard) {
     return interactivePosixShell(
-        command, directory, INTERACTIVE_CAPTURE_BYTES, liveOutput, signalGuard);
+        command, directory, INTERACTIVE_CAPTURE_BYTES, liveOutput, signalGuard, ignored -> {});
+  }
+
+  /** Adds a one-second idle/output-independent elapsed callback to the interactive POSIX run. */
+  public Result interactivePosixShell(String command, Path directory, LiveOutput liveOutput,
+      Supplier<SignalGuard> signalGuard, Heartbeat heartbeat) {
+    return interactivePosixShell(
+        command, directory, INTERACTIVE_CAPTURE_BYTES, liveOutput, signalGuard, heartbeat);
   }
 
   Result interactivePosixShell(String command, Path directory, int maxBytes,
       LiveOutput liveOutput, Supplier<SignalGuard> signalGuard) {
+    return interactivePosixShell(
+        command, directory, maxBytes, liveOutput, signalGuard, ignored -> {});
+  }
+
+  Result interactivePosixShell(String command, Path directory, int maxBytes,
+      LiveOutput liveOutput, Supplier<SignalGuard> signalGuard, Heartbeat heartbeat) {
     Objects.requireNonNull(command, "command");
     Objects.requireNonNull(liveOutput, "liveOutput");
     Objects.requireNonNull(signalGuard, "signalGuard");
+    Objects.requireNonNull(heartbeat, "heartbeat");
     if (maxBytes < 0) throw new IllegalArgumentException("negative capture bound");
     Process process;
     try {
@@ -89,13 +146,48 @@ public class ProcessRunner {
     var captured = new ByteArrayOutputStream(Math.min(maxBytes, 8192));
     boolean truncated = false;
     boolean live = true;
-    try (InputStream input = process.getInputStream()) {
-      byte[] buffer = new byte[8192];
-      for (int count; (count = input.read(buffer)) >= 0;) {
+    boolean pulses = pulse(heartbeat, 0);
+    long started = System.nanoTime();
+    byte[] end = new byte[0];
+    BlockingQueue<byte[]> chunks = new ArrayBlockingQueue<>(8);
+    Thread reader = Thread.startVirtualThread(() -> {
+      boolean interrupted = false;
+      try (InputStream input = process.getInputStream()) {
+        byte[] buffer = new byte[8192];
+        for (int count; (count = input.read(buffer)) >= 0;) {
+          if (count > 0) chunks.put(Arrays.copyOf(buffer, count));
+        }
+      } catch (IOException ignored) {
+        // AgenTTY treats a pipe read failure as end-of-output and still reaps the child.
+      } catch (InterruptedException exception) {
+        interrupted = true;
+        Thread.currentThread().interrupt();
+      } finally {
+        if (!interrupted) {
+          try {
+            chunks.put(end);
+          } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+          }
+        }
+      }
+    });
+    try {
+      long lastPulse = 0;
+      for (;;) {
+        byte[] buffer = chunks.poll(1, TimeUnit.SECONDS);
+        long elapsed = Duration.ofNanos(System.nanoTime() - started).toSeconds();
+        if (pulses && elapsed != lastPulse) {
+          pulses = pulse(heartbeat, elapsed);
+          lastPulse = elapsed;
+        }
+        if (buffer == null) continue;
+        if (buffer == end) break;
+        int count = buffer.length;
         if (live) {
           try {
             liveOutput.write(buffer, 0, count);
-          } catch (IOException exception) {
+          } catch (IOException | RuntimeException exception) {
             live = false;
           }
         }
@@ -108,15 +200,8 @@ public class ProcessRunner {
       if (truncated) output += "\n[capture truncated at " + formatBytes(maxBytes)
           + " — full output was shown on screen]";
       return new Result(true, exitCode, output, false, truncated, "");
-    } catch (IOException exception) {
-      try {
-        int exitCode = process.waitFor();
-        return new Result(true, exitCode,
-            captured.toString(java.nio.charset.StandardCharsets.UTF_8), false, truncated, "");
-      } catch (InterruptedException interrupted) {
-        return interrupted(process, captured, truncated);
-      }
     } catch (InterruptedException exception) {
+      reader.interrupt();
       return interrupted(process, captured, truncated);
     } finally {
       guard.close();
@@ -186,6 +271,14 @@ public class ProcessRunner {
       return bytes / (1024 * 1024) + " MB";
     if (bytes >= 1024 && bytes % 1024 == 0) return bytes / 1024 + " KB";
     return bytes + " B";
+  }
+  private static boolean pulse(Heartbeat heartbeat, long elapsedSeconds) {
+    try {
+      heartbeat.pulse(elapsedSeconds);
+      return true;
+    } catch (RuntimeException exception) {
+      return false;
+    }
   }
   private static String message(Exception exception) {
     return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
