@@ -1,8 +1,10 @@
 package com.github.skanga.ajent.tools.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.github.skanga.ajent.tools.catalog.OutputBudget;
 import com.github.skanga.ajent.tools.catalog.ToolCatalog;
 import com.github.skanga.ajent.tools.catalog.ToolKind;
+import com.github.skanga.ajent.tools.catalog.ToolSpec;
 import com.github.skanga.ajent.tools.fs.FileTools;
 import com.github.skanga.ajent.tools.git.GitTools;
 import com.github.skanga.ajent.tools.host.HostTools;
@@ -49,8 +51,8 @@ public final class ToolDispatcher {
                             Consumer<String> progress) {
     var specification = ToolCatalog.byName(name);
     if (specification.isEmpty()) return failure(ToolErrorKind.UNKNOWN, "unknown tool: " + name);
-    ToolKind kind = specification.orElseThrow().kind();
-    return switch (family(kind)) {
+    ToolSpec spec = specification.orElseThrow();
+    ToolResult result = switch (family(spec.kind())) {
       case FILESYSTEM -> files.execute(name, arguments);
       case PROCESS -> processes.execute(name, arguments, progress);
       case SEARCH -> search.execute(name, arguments);
@@ -60,6 +62,17 @@ public final class ToolDispatcher {
       case MEMORY -> memory.execute(name, arguments);
       case WEB -> web.execute(name, arguments);
     };
+    return applyBudget(spec, result);
+  }
+
+  static ToolResult applyBudget(ToolSpec spec, ToolResult result) {
+    if (!(result instanceof ToolResult.Success success) || spec.maxOutputCharacters() <= 0)
+      return result;
+    ToolOutput output = success.output();
+    String bounded = OutputBudget.apply(
+        output.text(), spec.maxOutputCharacters(), spec.truncationStrategy());
+    if (bounded.equals(output.text())) return result;
+    return new ToolResult.Success(new ToolOutput(bounded, output.change()));
   }
 
   public static ToolFamily family(ToolKind kind) {

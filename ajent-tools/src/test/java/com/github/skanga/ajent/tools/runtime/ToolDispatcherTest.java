@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -62,6 +63,39 @@ class ToolDispatcherTest {
     assertSuccess(dispatcher.execute("web_fetch", JSON.createObjectNode().put("url", "https://example.test")));
     assertThat(((ToolResult.Failure) dispatcher.execute("nope", JSON.createObjectNode())).error().kind())
         .isEqualTo(ToolErrorKind.UNKNOWN);
+  }
+
+  @Test
+  void enforcesCatalogBudgetsAtTheRealDispatchBoundary(@TempDir Path root) throws Exception {
+    String content = "HEAD_SENTINEL" + "x".repeat(85_000) + "TAIL_SENTINEL";
+    Files.writeString(root.resolve("oversized.txt"), content);
+
+    ToolResult.Success result = (ToolResult.Success) dispatcher(root).execute(
+        "read", JSON.createObjectNode().put("path", "oversized.txt"));
+
+    assertThat(result.output().text()).startsWith("HEAD_SENTINEL")
+        .contains("output exceeded tool's budget")
+        .doesNotContain("TAIL_SENTINEL");
+    assertThat(result.output().text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
+        .isLessThan(81_000);
+  }
+
+  @Test
+  void budgetingPreservesStructuredChangesAndNeverTruncatesTypedErrors() {
+    var change = new FileChange("sample.java", 1, 1, "before", "after");
+    var success = new ToolResult.Success(
+        new ToolOutput("z".repeat(50_000), Optional.of(change)));
+
+    ToolResult.Success bounded = (ToolResult.Success) ToolDispatcher.applyBudget(
+        ToolCatalog.byName("write").orElseThrow(), success);
+
+    assertThat(bounded.output().text()).contains("output exceeded tool's budget");
+    assertThat(bounded.output().change().orElseThrow()).isSameAs(change);
+
+    var failure = new ToolResult.Failure(
+        new ToolError(ToolErrorKind.UNKNOWN, "e".repeat(50_000)));
+    assertThat(ToolDispatcher.applyBudget(
+        ToolCatalog.byName("write").orElseThrow(), failure)).isSameAs(failure);
   }
 
   private static ToolDispatcher dispatcher(Path root) {
