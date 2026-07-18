@@ -582,9 +582,15 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^stream_async_freeze_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/StreamAsyncFreezeTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/StreamingMarkdownAsyncFreezeTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/StreamingMarkdown.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "all native async-freeze conditions translated: 16 KiB UTF-8 threshold, divergent worker path, old-tree visibility until render adoption, prefix-append fast path, and repeated synchronous live updates with no parsing window"
+      ]
     },
     {
       "id": "stream_cpu_probe",

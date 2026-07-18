@@ -18,13 +18,19 @@ import com.vladsch.flexmark.util.data.MutableDataSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /** Incremental Markdown block parser mirroring AgenTTY's streaming block vocabulary. */
 public final class StreamingMarkdown {
+  private static final int ASYNC_PARSE_THRESHOLD_BYTES = 16 * 1024;
   private static final Parser PARSER = parser();
+  private static final Executor ASYNC_PARSER = task ->
+      Thread.ofVirtual().name("ajent-markdown-parser").start(task);
 
   private String source = "";
   private List<Block> blocks = List.of();
+  private CompletableFuture<Parsed> pendingParse;
   private final TextReveal reveal = new TextReveal(90, 0.3, 0.2);
   private TextReveal.Frame revealFrame;
   private boolean live;
@@ -57,9 +63,31 @@ public final class StreamingMarkdown {
 
   public void setContent(String content) {
     Objects.requireNonNull(content, "content");
-    if (!content.startsWith(source)) resetVisualState();
-    source = content;
-    blocks = parse(source);
+    cancelPendingParse();
+    if (content.equals(source)) return;
+    applyParsed(new Parsed(content, parse(content)));
+  }
+
+  /**
+   * Defers a large divergent parse until a later render poll, matching Maya's settled-content
+   * worker path. Prefix-preserving stream growth deliberately stays synchronous.
+   */
+  public void setContentAsync(String content) {
+    Objects.requireNonNull(content, "content");
+    if (content.equals(source)) return;
+    cancelPendingParse();
+    boolean divergent = !content.startsWith(source);
+    if (!divergent || utf8Length(content) < ASYNC_PARSE_THRESHOLD_BYTES) {
+      applyParsed(new Parsed(content, parse(content)));
+      return;
+    }
+    pendingParse = CompletableFuture.supplyAsync(
+        () -> new Parsed(content, parse(content)), ASYNC_PARSER);
+  }
+
+  /** True while an asynchronous parse awaits adoption by {@link #render(int, long)}. */
+  public boolean isParsing() {
+    return pendingParse != null;
   }
 
   public void append(String delta) {
@@ -80,6 +108,7 @@ public final class StreamingMarkdown {
   }
 
   public void finish() {
+    applyAsyncIfReady();
     live = false;
     blocks = parse(source);
   }
@@ -95,6 +124,7 @@ public final class StreamingMarkdown {
   /** Builds a production frame while preserving the largest live height at this width. */
   public List<MarkdownTerminalRenderer.Line> render(int width, long nowNanos) {
     if (width <= 0) throw new IllegalArgumentException("Markdown width must be positive");
+    applyAsyncIfReady();
     revealFrame = revealFrame == null
         ? reveal.begin(source, live && revealEffects, nowNanos)
         : reveal.update(source, live && revealEffects, nowNanos);
@@ -131,6 +161,29 @@ public final class StreamingMarkdown {
     revealFrame = null;
     rowFloor = 0;
     floorWidth = -1;
+  }
+
+  private void applyAsyncIfReady() {
+    CompletableFuture<Parsed> pending = pendingParse;
+    if (pending == null || !pending.isDone()) return;
+    pendingParse = null;
+    applyParsed(pending.join());
+  }
+
+  private void applyParsed(Parsed parsed) {
+    if (!parsed.source().startsWith(source)) resetVisualState();
+    source = parsed.source();
+    blocks = parsed.blocks();
+  }
+
+  private void cancelPendingParse() {
+    if (pendingParse == null) return;
+    pendingParse.cancel(true);
+    pendingParse = null;
+  }
+
+  private static int utf8Length(String value) {
+    return value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
   }
 
   private static Parser parser() {
@@ -182,5 +235,12 @@ public final class StreamingMarkdown {
     if (row.endsWith("|")) row = row.substring(0, row.length() - 1);
     return java.util.regex.Pattern.compile("(?<!\\\\)\\|").splitAsStream(row)
         .map(String::strip).toList();
+  }
+
+  private record Parsed(String source, List<Block> blocks) {
+    private Parsed {
+      Objects.requireNonNull(source, "source");
+      blocks = List.copyOf(Objects.requireNonNull(blocks, "blocks"));
+    }
   }
 }
