@@ -1,0 +1,760 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Read a file from the filesystem. Returns up to 2000 lines starting at an optional offset. For files over 32 KiB, reading without an explicit line range returns a SYMBOL OUTLINE (function / class / heading names with line numbers) â€” or, if the file has no code structure, its first 1 KiB â€” instead of the full content; use start_line + end_line (or offset + limit) on a follow-up read to fetch the specific section you want. Include a brief `display_description` so the user sees why you're reading.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "end_line": {
+          "description": "Inclusive last line (Zed-style)",
+          "type": "integer"
+        },
+        "limit": {
+          "description": "Max lines",
+          "type": "integer"
+        },
+        "offset": {
+          "description": "Start line (1-based)",
+          "type": "integer"
+        },
+        "path": {
+          "description": "Absolute or relative path",
+          "type": "string"
+        },
+        "start_line": {
+          "description": "Alias for offset (Zed-style)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "read"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Modify an EXISTING file by applying one or more targeted text substitutions. PREFER this tool over `write` whenever you are changing only part of a file â€” it streams less data and produces a reviewable diff. Pass `edits: [{old_text, new_text}, ...]`; every edit is applied in order. `old_text` is matched FUZZILY using line-level edit-distance â€” minor whitespace, indentation, smart-quote / dash, and single-character typo drift between the snippet you saw and the file on disk are tolerated automatically. Match the snippet as faithfully as you can; if `old_text` could plausibly refer to more than one region of the file, add surrounding context to disambiguate, OR pass `line: N` (1-based) to anchor the match near a known line. To replace multiple occurrences pass either `replace_all: true` (replace every hit) or `expected_replacements: N` (replace exactly N hits, fail if the count differs â€” safer for refactors). No-op edits (old_text == new_text) are silently skipped, not errors. Include a brief `display_description` (e.g. 'Fix null-deref in auth.cpp') â€” it shows in the card while edits stream.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the card while edits stream â€” e.g. 'Fix null-deref in auth.cpp'. Stream second.",
+          "type": "string"
+        },
+        "edits": {
+          "description": "One or more edits, applied in order.",
+          "items": {
+            "properties": {
+              "expected_replacements": {
+                "description": "If set, edit must match exactly this many times or it fails. Safer than replace_all for known-count refactors â€” surfaces mismatches as errors instead of silent over-replace.",
+                "type": "integer"
+              },
+              "line": {
+                "description": "1-based line number anchor for ambiguous matches. If old_text could match multiple regions, the one closest to this line (within ~200 lines) wins. Optional.",
+                "type": "integer"
+              },
+              "new_text": {
+                "description": "Replacement text. Indentation is auto-adjusted to match the surrounding file convention when old_text was at a different indent level.",
+                "type": "string"
+              },
+              "old_text": {
+                "description": "Snippet to find. Matched fuzzily by line edit-distance â€” minor whitespace/indent drift and single-char typos are tolerated. Should be unique in the file OR accompanied by `line` to disambiguate.",
+                "type": "string"
+              },
+              "replace_all": {
+                "default": false,
+                "description": "Replace every occurrence instead of exactly one.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "old_text",
+              "new_text"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "path": {
+          "description": "Absolute or relative path of the existing file. Stream this FIRST.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "edits"
+      ],
+      "type": "object"
+    },
+    "name": "edit"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Writes a file to the local filesystem.\n\nUsage:\n- This tool will overwrite the existing file if there is one at the provided path.\n- If this is an existing file, you MUST use the Read tool first to read the file's contents.\n- Prefer the Edit tool for modifying existing files â€” it only sends the diff. Only use this tool to create new files or for complete rewrites.",
+    "inputSchema": {
+      "properties": {
+        "content": {
+          "description": "The content to write to the file.",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "The absolute path to the file to write (must be absolute, not relative).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "write"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Run a shell command via Windows cmd.exe and return its output. Output is truncated at 30k chars. Use for builds, tests, git, etc. This runs under cmd.exe on Windows â€” use native equivalents like `dir`, `where`, `systeminfo`, `type`, `findstr`, or `powershell -c`. Do NOT use POSIX-only commands (`uname`, `cat /etc/os-release`, `sw_vers`, `ls`, `grep`, `sed`, `awk`, heredocs) â€” they will fail. Do NOT use for file IO â€” use the write/edit/read tools instead.",
+    "inputSchema": {
+      "properties": {
+        "cd": {
+          "description": "Working directory for the command. If set, runs as `cd <dir> && <command>`.",
+          "type": "string"
+        },
+        "command": {
+          "description": "The shell command to execute",
+          "type": "string"
+        },
+        "display_description": {
+          "description": "One-line summary shown in the UI â€” e.g. 'Run the test suite'. Optional but strongly recommended.",
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Timeout in seconds (default 60, max 300)",
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "description": "Alternative timeout in milliseconds (rounded up to seconds).",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "name": "bash"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Search for a regex pattern across files. Returns matches grouped by file with 2 lines of context, each block headed by the enclosing function/class when detectable (e.g. `### fn foo â€º L12-14`). Paginated 20 results per page. Case-insensitive by default; pass case_sensitive=true for exact case. Use offset for subsequent pages.",
+    "inputSchema": {
+      "properties": {
+        "case_sensitive": {
+          "description": "Case-sensitive match (default: false)",
+          "type": "boolean"
+        },
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "glob": {
+          "description": "File extension filter (e.g. *.cpp)",
+          "type": "string"
+        },
+        "offset": {
+          "description": "Skip this many matches (for pagination)",
+          "type": "integer"
+        },
+        "path": {
+          "description": "Directory to search (default: cwd)",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "Regex pattern to search for",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "name": "grep"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Find files by glob pattern. Supports `*` (any run), `?` (one char), `[abc]` classes, and bare substrings. Matches against filename (not full path). Case-insensitive on Windows.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Root directory (default: cwd)",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "Glob pattern, e.g. *.cpp",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "name": "glob"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "List the contents of a directory. Shows file type, size, and name. Use this to explore project structure before reading files.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "max_depth": {
+          "description": "Max depth for recursive listing (default: 3)",
+          "type": "integer"
+        },
+        "path": {
+          "description": "Directory to list (default: cwd)",
+          "type": "string"
+        },
+        "recursive": {
+          "description": "List recursively (default: false)",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "list_dir"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Token-budgeted ranked map of the codebase: every source file scored by PageRank over the definition/reference graph, top files rendered with their definition signatures (name + line). THE tool to call FIRST in a large or unfamiliar repository — one call replaces a dozen exploratory read/grep rounds. Pass `focus` (task keywords or symbol names) to re-center the ranking on your task.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "focus": {
+          "type": "string",
+          "description": "Keywords / symbol names to personalize the ranking around (like aider's chat-file boost). Optional."
+        },
+        "path": {
+          "type": "string",
+          "description": "Root directory (default: workspace root)"
+        },
+        "budget": {
+          "type": "integer",
+          "description": "Output byte budget, 1000-60000 (default 8000 ≈ 2k tokens)"
+        },
+        "display_description": {
+          "type": "string",
+          "description": "One-line summary shown in the UI. Optional."
+        }
+      }
+    },
+    "name": "repo_map"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Maintain the session todo list. Overwrites with the provided list.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "todos": {
+          "items": {
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "in_progress",
+                  "completed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "content",
+              "status"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "todos"
+      ],
+      "type": "object"
+    },
+    "name": "todo"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Fetch a URL (HTTPS, follows redirects). For HTML pages, returns extracted plain text with links preserved as [text](url) â€” not raw HTML. Up to 64KB of cleaned content. Use for docs, articles, APIs. Supports #fragment to clip the output to that section. JS/SPA pages are auto-rendered via r.jina.ai when the primary fetch returns a near-empty shell (disable per-request by sending a `x-no-jina: 1` header, or globally by setting AGENTTY_NO_JINA=1).",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "headers": {
+          "description": "Additional headers as key-value pairs",
+          "type": "object"
+        },
+        "method": {
+          "description": "HTTP method (default: GET)",
+          "type": "string"
+        },
+        "url": {
+          "description": "The URL to fetch (https only)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "name": "web_fetch"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Search the web. Tries Brave â†’ DuckDuckGo â†’ Startpage until one returns results. Output is `[via ENGINE]` followed by numbered title / URL / snippet for each hit. Use web_fetch on a result URL to read the page. Standard search operators work in the query: `site:docs.python.org`, `\"exact phrase\"`, `-exclude`. Duplicate URLs (AMP / mobile / archive mirrors) are auto-deduped.",
+    "inputSchema": {
+      "properties": {
+        "count": {
+          "description": "Max results (default: 10)",
+          "type": "integer"
+        },
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "query": {
+          "description": "Search query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "name": "web_search"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Find the definition of a symbol (function, class, struct, enum, type) across the codebase. Searches for common definition patterns in C/C++, Python, JavaScript/TypeScript, Go, and Rust.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory to search (default: cwd)",
+          "type": "string"
+        },
+        "symbol": {
+          "description": "The symbol name to find",
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "name": "find_definition"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Run the project's build or lint command and return errors/warnings. Auto-detects build system (CMake, cargo, go, npm, make).",
+    "inputSchema": {
+      "properties": {
+        "command": {
+          "description": "Custom build command. If omitted, auto-detects.",
+          "type": "string"
+        },
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "diagnostics"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Show the current git status: branch, staged/unstaged changes, untracked files, ahead/behind counts.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Repository path (default: cwd)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "git_status"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Show git diff. By default shows unstaged changes. Use staged=true for staged changes, or specify a ref/range.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "path": {
+          "description": "File or directory to diff",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Git ref or range (e.g. HEAD~3, main..HEAD)",
+          "type": "string"
+        },
+        "staged": {
+          "description": "Show staged changes (default: false)",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "git_diff"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Show git commit history. Returns commit hash, author, date, and message.",
+    "inputSchema": {
+      "properties": {
+        "count": {
+          "description": "Number of commits (default: 20)",
+          "type": "integer"
+        },
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "oneline": {
+          "description": "One-line format (default: false)",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Filter by file path",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Branch or ref (default: HEAD)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "git_log"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Stage files and create a git commit. Specify files to stage, or use stage_all to stage everything.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "files": {
+          "description": "Files to stage before committing",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "message": {
+          "description": "Commit message",
+          "type": "string"
+        },
+        "path": {
+          "description": "Repository path (default: derived from files, else workspace root)",
+          "type": "string"
+        },
+        "stage_all": {
+          "description": "Stage all changes (default: false)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "name": "git_commit"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Persist a fact for future turns. Use when the user asks you to remember something. The fact is reloaded into context on later turns.",
+    "inputSchema": {
+      "properties": {
+        "pin": {
+          "description": "Mark cap-exempt; pinned facts survive cap rollover.",
+          "type": "boolean"
+        },
+        "scope": {
+          "description": "Scope: project | user (default: project).",
+          "type": "string"
+        },
+        "supersedes": {
+          "description": "Record id to atomically replace.",
+          "type": "string"
+        },
+        "tags": {
+          "description": "Optional grouping labels.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "text": {
+          "description": "The fact to remember; one short self-contained sentence.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "name": "remember"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Remove a previously-remembered fact. Provide `id` for an exact record, or `substring` to remove every fact containing that text. Pass `dry_run:true` with `substring` to preview matches first.",
+    "inputSchema": {
+      "properties": {
+        "dry_run": {
+          "description": "Preview substring matches without removing.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Exact record id.",
+          "type": "string"
+        },
+        "substring": {
+          "description": "Remove every record whose text contains this.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "forget"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Wipe every remembered fact in a scope. Call once WITHOUT confirm to preview the count; re-call with confirm:true to actually wipe.",
+    "inputSchema": {
+      "properties": {
+        "confirm": {
+          "description": "Required true to actually wipe.",
+          "type": "boolean"
+        },
+        "scope": {
+          "description": "Scope: project | user (default: project).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
+    "name": "wipe_memory"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Spawn an autonomous subagent to complete a self-contained task in isolation (own context window). It returns ONE condensed report; give a complete, unambiguous prompt with all the context it needs.",
+    "inputSchema": {
+      "properties": {
+        "agent_type": {
+          "description": "Subagent specialisation (default general).",
+          "enum": [
+            "explorer",
+            "reviewer",
+            "tester",
+            "coder",
+            "general"
+          ],
+          "type": "string"
+        },
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Complete, self-contained task description.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "name": "task"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Load the full instructions for a named skill. Call BEFORE attempting a task a skill covers â€” the catalog only lists names + summaries.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Exact skill name from the catalog.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "skill"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Search the user's knowledge base / documentation corpus (NOT source code â€” use grep/read for code) and return the most relevant passages.",
+    "inputSchema": {
+      "properties": {
+        "display_description": {
+          "description": "One-line summary shown in the UI. Optional.",
+          "type": "string"
+        },
+        "k": {
+          "description": "Number of passages to return (default 6, max 20).",
+          "type": "integer"
+        },
+        "query": {
+          "description": "Natural-language or keyword query.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "name": "search_docs"
+  }
+]
