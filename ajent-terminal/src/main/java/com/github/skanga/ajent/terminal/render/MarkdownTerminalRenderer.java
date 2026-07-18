@@ -78,8 +78,14 @@ public final class MarkdownTerminalRenderer {
   /** Renders a rate-paced frame without exposing Markdown punctuation or changing row shape. */
   public static List<Line> render(TextReveal.Frame frame, int width) {
     Objects.requireNonNull(frame, "frame");
-    List<Line> rendered = render(frame.source(), width);
+    return reveal(frame, render(frame.source(), width));
+  }
+
+  static List<Line> reveal(TextReveal.Frame frame, List<Line> rendered) {
+    Objects.requireNonNull(frame, "frame");
+    rendered = List.copyOf(Objects.requireNonNull(rendered, "rendered"));
     if (!frame.live() && !frame.animating()) return rendered;
+    if (frame.revealedCodePoints() == frame.totalCodePoints()) return rendered;
     int content = rendered.stream().mapToInt(MarkdownTerminalRenderer::maskableCount).sum();
     double fraction = frame.totalCodePoints() == 0 ? 1.0
         : (double) frame.revealedCodePoints() / frame.totalCodePoints();

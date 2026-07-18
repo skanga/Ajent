@@ -204,9 +204,16 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^md_cache_probe$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/MdCacheProbe.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/StreamingMarkdownCacheProbeTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/StreamingMarkdown.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/MarkdownTerminalRenderer.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "all six native shapes translated with 24-byte chunks, 16 ms frames, 2,000 cps reveal, quartile means, and the exact q4 > 1,000 us plus growth > 3x escaped-memo failure rule"
+      ]
     },
     {
       "id": "md_shape_sweep",

@@ -38,6 +38,9 @@ public final class StreamingMarkdown {
   private int rowFloor;
   private int floorWidth = -1;
   private int committedSourceEnd;
+  private int cachedRenderWidth = -1;
+  private String cachedRenderSource = "";
+  private List<MarkdownTerminalRenderer.Line> cachedRender = List.of();
 
   /** Native top-level block kinds exposed by Maya's StreamingMarkdown. */
   public enum BlockKind {
@@ -140,8 +143,8 @@ public final class StreamingMarkdown {
         ? reveal.begin(source, live && revealEffects, nowNanos)
         : reveal.update(source, live && revealEffects, nowNanos);
     commitRevealedBlocks();
-    List<MarkdownTerminalRenderer.Line> rendered =
-        MarkdownTerminalRenderer.render(revealFrame, width);
+    List<MarkdownTerminalRenderer.Line> rendered = MarkdownTerminalRenderer.reveal(
+        revealFrame, renderedSource(width));
     if (width != floorWidth) {
       floorWidth = width;
       rowFloor = 0;
@@ -189,6 +192,7 @@ public final class StreamingMarkdown {
     }
     source = parsed.source();
     blocks = parsed.blocks();
+    refreshRenderCache();
   }
 
   private void commitRevealedBlocks() {
@@ -207,6 +211,21 @@ public final class StreamingMarkdown {
     if (pendingParse == null) return;
     pendingParse.cancel(true);
     pendingParse = null;
+  }
+
+  private List<MarkdownTerminalRenderer.Line> renderedSource(int width) {
+    if (cachedRenderWidth != width || !cachedRenderSource.equals(source)) {
+      cachedRenderWidth = width;
+      cachedRenderSource = source;
+      cachedRender = MarkdownTerminalRenderer.render(source, width);
+    }
+    return cachedRender;
+  }
+
+  private void refreshRenderCache() {
+    if (cachedRenderWidth <= 0) return;
+    cachedRenderSource = source;
+    cachedRender = MarkdownTerminalRenderer.render(source, cachedRenderWidth);
   }
 
   private static int utf8Length(String value) {
