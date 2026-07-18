@@ -1220,6 +1220,32 @@ final class InteractiveCommandTest {
     assertThat(animation.requested).isOne();
   }
 
+  @Test void deepRunLiveEdgeStaysArmedAcrossAQuietToolRoundTrip() {
+    var messages = new ArrayList<Message>();
+    messages.add(new Message(Role.USER, "do a long series of edits", List.of(), List.of()));
+    for (int index = 0; index < 40; index++) {
+      messages.add(new Message(Role.ASSISTANT, "settled sub-turn " + index,
+          List.of(), List.of()));
+    }
+    messages.add(new Message(Role.ASSISTANT, "Now I will summarize the edits I performed",
+        List.of(), List.of()));
+    AgentState streaming = withPhase(AgentState.initial(thread(messages)),
+        new SessionPhase.ExecutingTool(ActiveTurn.start(new CancellationSignal(), 1)));
+    var terminal = new FakeTerminal();
+    var animation = new ManualAnimation();
+    var ui = new InteractiveCommand.Ui(terminal, new AtomicReference<>(streaming),
+        new InteractiveCommand.PermissionGate(), animation);
+
+    ui.render();
+    animation.now = 1_000_000_000;
+    animation.runFrame();
+    animation.now = 6_000_000_000L;
+    animation.runFrame();
+
+    assertThat(animation.frame).isNotNull();
+    assertThat(animation.requested).isGreaterThanOrEqualTo(3);
+  }
+
   @Test void liveToolViewerOwnsListBodyNavigationAndOsc52Copy() {
     ToolUse first = new ToolUse(new ToolCallId("one"), new ToolName("read_file"), Map.of(),
         new ToolStatus.Done(0, 100_000_000, "first"));

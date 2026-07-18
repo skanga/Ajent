@@ -28,6 +28,7 @@ public final class StreamingMarkdown {
   private final TextReveal reveal = new TextReveal(90, 0.3, 0.2);
   private TextReveal.Frame revealFrame;
   private boolean live;
+  private boolean revealEffects = true;
   private int rowFloor;
   private int floorWidth = -1;
 
@@ -73,6 +74,11 @@ public final class StreamingMarkdown {
     return live;
   }
 
+  public void setRevealEffects(boolean enabled) {
+    if (revealEffects != enabled) resetVisualState();
+    revealEffects = enabled;
+  }
+
   public void finish() {
     live = false;
     blocks = parse(source);
@@ -90,8 +96,8 @@ public final class StreamingMarkdown {
   public List<MarkdownTerminalRenderer.Line> render(int width, long nowNanos) {
     if (width <= 0) throw new IllegalArgumentException("Markdown width must be positive");
     revealFrame = revealFrame == null
-        ? reveal.begin(source, live, nowNanos)
-        : reveal.update(source, live, nowNanos);
+        ? reveal.begin(source, live && revealEffects, nowNanos)
+        : reveal.update(source, live && revealEffects, nowNanos);
     List<MarkdownTerminalRenderer.Line> rendered =
         MarkdownTerminalRenderer.render(revealFrame, width);
     if (width != floorWidth) {
@@ -114,7 +120,11 @@ public final class StreamingMarkdown {
   }
 
   public boolean requiresAnimation() {
-    return revealFrame != null && revealFrame.requiresAnimation();
+    return live || revealFrame != null && revealFrame.requiresAnimation();
+  }
+
+  public boolean settled() {
+    return !live && (revealFrame == null || !revealFrame.requiresAnimation());
   }
 
   private void resetVisualState() {
