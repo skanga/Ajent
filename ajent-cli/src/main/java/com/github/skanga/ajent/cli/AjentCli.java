@@ -90,6 +90,9 @@ public final class AjentCli {
                                    PrintStream out, PrintStream err) {
             return AcpCommand.systemDefault().run(arguments, input, out, err);
           }
+          @Override public int airgap(CliArguments arguments, PrintStream out, PrintStream err) {
+            return AirgapCommand.systemDefault().run(arguments.airgapArguments(), out, err);
+          }
         });
   }
 
@@ -122,6 +125,8 @@ public final class AjentCli {
       return commands.mcpServe(parsed, input, stdout, stderr);
     if (parsed.subcommand() == CliArguments.Subcommand.ACP)
       return commands.acp(parsed, input, stdout, stderr);
+    if (parsed.subcommand() == CliArguments.Subcommand.AIRGAP)
+      return commands.airgap(parsed, stdout, stderr);
     String command = parsed.subcommand() == CliArguments.Subcommand.NONE
         ? "interactive mode" : parsed.subcommand().commandName();
     stderr.print("ajent: " + command + " is not implemented yet\n");
@@ -137,5 +142,6 @@ public final class AjentCli {
                  PrintStream output, PrintStream error);
     int acp(CliArguments arguments, BufferedReader input,
             PrintStream output, PrintStream error);
+    int airgap(CliArguments arguments, PrintStream output, PrintStream error);
   }
 }
