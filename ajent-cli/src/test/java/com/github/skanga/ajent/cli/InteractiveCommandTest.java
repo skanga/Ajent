@@ -1388,6 +1388,142 @@ final class InteractiveCommandTest {
     assertThat(ui.frozenThrough()).isEqualTo(messages.size());
   }
 
+  @Test void activeAssistantRunStaysWholeAndSettlesAsOneHeaderBearingBlock() {
+    var messages = new ArrayList<Message>();
+    messages.add(new Message(Role.USER, "please do many edits", List.of(), List.of()));
+    for (int index = 0; index < 20; index++) {
+      String path = "src/s" + index + ".java";
+      ToolUse edit = new ToolUse(new ToolCallId("edit-" + index), new ToolName("edit"),
+          Map.of("path", path), new ToolStatus.Done(
+              "```diff\n--- a/" + path + "\n+++ b/" + path
+                  + "\n@@ -1 +1 @@\n-old\n+new\n```"));
+      messages.add(new Message(Role.ASSISTANT, "completed subturn " + index,
+          List.of(), List.of(edit)));
+    }
+    Message tail = new Message(Role.ASSISTANT, "continuing to work", List.of(), List.of());
+    messages.add(tail);
+    AgentState active = withPhase(AgentState.initial(thread(messages)),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1)));
+    var state = new AtomicReference<>(active);
+    var animation = new ManualAnimation();
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), animation);
+
+    ui.render();
+    assertThat(ui.frozenThrough()).isOne();
+    assertThat(terminal.bytes.toString()).contains("completed subturn 0",
+        "completed subturn 19", "src/s0.java", "src/s19.java")
+        .doesNotContain("earlier action");
+
+    state.set(AgentState.initial(thread(messages)));
+    for (int index = 0; index < 50 && animation.frame != null; index++) {
+      animation.now += 16_000_000;
+      animation.runFrame();
+    }
+
+    assertThat(ui.frozenThrough()).isEqualTo(messages.size());
+    assertThat(ui.frozenText()).contains("completed subturn 0", "completed subturn 19",
+        "src/s0.java", "src/s19.java")
+        .doesNotContain("earlier action");
+    assertThat(count(ui.frozenText(), "assistant")).isOne();
+  }
+
+  @Test void coldRehydrateCutsInsideAGiantRunButStartsOnARealHeader() {
+    var messages = new ArrayList<Message>();
+    for (int turn = 0; turn < 4; turn++) {
+      messages.add(new Message(Role.USER, "request " + turn, List.of(), List.of()));
+      messages.add(new Message(Role.ASSISTANT, "reply " + turn, List.of(), List.of()));
+    }
+    messages.add(new Message(Role.USER, "do a huge refactor", List.of(), List.of()));
+    for (int index = 0; index < 60; index++) {
+      messages.add(new Message(Role.ASSISTANT,
+          "giant-" + index + "\nline two\nline three\nline four\nline five",
+          List.of(), List.of()));
+    }
+    messages.add(new Message(Role.ASSISTANT, "all done", List.of(), List.of()));
+    var state = new AtomicReference<>(AgentState.initial(thread(messages)));
+    var animation = new ManualAnimation();
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 12);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), animation);
+
+    ui.render();
+    for (int index = 0; index < 50 && animation.frame != null; index++) {
+      animation.now += 16_000_000;
+      animation.runFrame();
+    }
+
+    assertThat(ui.frozenThrough()).isEqualTo(messages.size());
+    assertThat(firstNonblank(ui.frozenText())).isEqualTo("assistant");
+    assertThat(ui.frozenText()).contains("giant-59", "all done")
+        .doesNotContain("giant-0");
+  }
+
+  @Test void trimNeverStrandsASeparatorOrHeaderlessAssistantBody() {
+    var messages = new ArrayList<Message>();
+    for (int turn = 0; turn < 80; turn++) {
+      messages.add(new Message(Role.USER, "q" + turn, List.of(), List.of()));
+      messages.add(new Message(Role.ASSISTANT, "answer-" + turn, List.of(), List.of()));
+    }
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(),
+        new AtomicReference<>(AgentState.initial(thread(messages))),
+        new InteractiveCommand.PermissionGate());
+
+    ui.render();
+    ui.render();
+    ui.render();
+
+    assertThat(firstNonblank(ui.frozenText())).isIn("you", "assistant");
+  }
+
+  @Test void hugeSettledBashOutputUsesItsElidedPaintHeightInTheFrozenLedger() {
+    StringBuilder output = new StringBuilder();
+    for (int index = 0; index < 200; index++) {
+      output.append("src/file").append(index).append(".cpp:").append(index)
+          .append(": some matching line of text\n");
+    }
+    ToolUse bash = new ToolUse(new ToolCallId("bash-noisy"), new ToolName("bash"),
+        Map.of("command", "grep -rn pattern src"), new ToolStatus.Done(output.toString()));
+    List<Message> messages = List.of(
+        new Message(Role.USER, "run a noisy command", List.of(), List.of()),
+        new Message(Role.ASSISTANT, "results", List.of(), List.of(bash)));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(),
+        new AtomicReference<>(AgentState.initial(thread(messages))),
+        new InteractiveCommand.PermissionGate());
+
+    ui.render();
+    ui.render();
+
+    assertThat(ui.frozenText()).contains("file199.cpp").doesNotContain("file0.cpp");
+    assertThat(ui.frozenRows()).isLessThan(32);
+  }
+
+  @Test void nonterminalToolPreventsIdleRunFromFreezingUntilItSettles() {
+    Message user = new Message(Role.USER, "write a file", List.of(), List.of());
+    ToolUse running = new ToolUse(new ToolCallId("edit"), new ToolName("edit"), Map.of(),
+        new ToolStatus.Running("working"));
+    Message assistant = new Message(Role.ASSISTANT, "editing", List.of(), List.of(running));
+    var messages = new ArrayList<>(List.of(user, assistant));
+    var state = new AtomicReference<>(AgentState.initial(thread(messages)));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+
+    ui.render();
+    ui.render();
+    assertThat(ui.frozenThrough()).isOne();
+
+    ToolUse done = new ToolUse(running.id(), running.name(), running.arguments(),
+        new ToolStatus.Done("edited"));
+    messages.set(1, assistant.withToolCalls(List.of(done)));
+    state.set(AgentState.initial(thread(messages)));
+    ui.render();
+    ui.render();
+
+    assertThat(ui.frozenThrough()).isEqualTo(2);
+  }
+
   private InteractiveCommand command(Map<String, String> environment) {
     return new InteractiveCommand(directory, directory, environment,
         new CredentialStore(directory.resolve("credentials.json"), "seed"),
@@ -1412,6 +1548,19 @@ final class InteractiveCommandTest {
   private static ToolUse tool(String output) {
     return new ToolUse(new ToolCallId("call"), new ToolName("bash"), Map.of(),
         new ToolStatus.Failed(0, 100_000_000, output));
+  }
+
+  private static int count(String source, String needle) {
+    int matches = 0;
+    for (int offset = source.indexOf(needle); offset >= 0;
+        offset = source.indexOf(needle, offset + needle.length())) {
+      matches++;
+    }
+    return matches;
+  }
+
+  private static String firstNonblank(String source) {
+    return source.lines().filter(line -> !line.isBlank()).findFirst().orElse("");
   }
 
   private static TerminalKey character(int value) { return character(value, false); }

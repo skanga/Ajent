@@ -120,4 +120,18 @@ final class ScrollbackLedgerTest {
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("already consumed");
   }
+
+  @Test void fullyPaintedOverBudgetTrimCommitsExactlyTheRowsDroppedFromTheTop() {
+    var ledger = new ScrollbackLedger<String>();
+    for (int index = 0; index < 12; index++) {
+      ledger.seal("block-" + index, 10, index % 2 == 1);
+      ledger.recordPaint(index, 10);
+    }
+
+    FrozenScrollbackTrimPolicy.TrimResult trim = FrozenScrollbackTrimPolicy.trim(ledger, 10);
+
+    assertThat(trim.droppedBlocks()).isPositive();
+    assertThat(trim.droppedRows()).isPositive().isEqualTo(trim.committedRows());
+    assertThat(ledger.separatorAt(0)).isFalse();
+  }
 }

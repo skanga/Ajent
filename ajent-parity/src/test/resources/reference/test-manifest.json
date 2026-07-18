@@ -260,9 +260,18 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^midrun_freeze_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/MidrunFreezeTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-cli/src/test/java/com/github/skanga/ajent/cli/InteractiveCommandTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/ScrollbackLedger.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/FrozenScrollbackTrimPolicy.java",
+        "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/ScrollbackLedgerTest.java",
+        "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/ui/ToolBodyPreviewTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "all nine native scenarios translated: active assistant runs remain wholly live, settle once with one header and complete bodies, split content is preserved, nonterminal tools gate freezing, cold rehydrate cuts giant runs on a header-bearing subturn, trim cannot strand a separator, fully painted top deletion commits exact typed row debt, and 200-line bash output uses its four-row elided height"
+      ]
     },
     {
       "id": "midrun_seam_test",

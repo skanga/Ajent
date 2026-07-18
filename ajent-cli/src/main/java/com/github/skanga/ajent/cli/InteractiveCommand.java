@@ -2142,6 +2142,16 @@ final class InteractiveCommand {
       synchronized (lock) { return reveal == null ? "" : reveal.content(); }
     }
 
+    String frozenText() {
+      synchronized (lock) {
+        var text = new StringBuilder();
+        for (List<StyledLine> block : frozen.elements()) {
+          for (StyledLine line : block) text.append(line.text()).append('\n');
+        }
+        return text.toString();
+      }
+    }
+
     private static InlineFrameRenderer.Frame render(InlineFrameRenderer.Frame frame,
         TerminalCanvas canvas, CanvasSerializer.ContentRows rows, int terminalRows,
         TerminalStylePool styles, InlineFrameRenderer.FrameWriter writer) {
@@ -2177,7 +2187,7 @@ final class InteractiveCommand {
       var output = new ArrayList<StyledLine>();
       boolean animating = false;
       List<Message> messages = state.thread().messages();
-      reconcileFrozenSurface(state, messages, width);
+      reconcileFrozenSurface(state, messages, width, terminalRows, nowNanos);
       if (messages.isEmpty()) {
         output.add(new StyledLine("Ajent", Style.ACCENT));
         output.add(new StyledLine("AI coding agent \u00b7 Ctrl-D to quit", Style.MUTED));
@@ -2186,14 +2196,22 @@ final class InteractiveCommand {
       int freezeLimit = freezeLimit(state, messages);
       while (frozenThrough < freezeLimit) {
         int messageIndex = frozenThrough;
+        int runEnd = messageIndex + 1;
+        if (messages.get(messageIndex).role() == Role.ASSISTANT) {
+          while (runEnd < freezeLimit && messages.get(runEnd).role() == Role.ASSISTANT) runEnd++;
+        }
         if (!frozen.isEmpty()) {
           frozen.seal(List.of(new StyledLine("", Style.NORMAL)), 1, true);
         }
-        MessageRender rendered = renderMessage(state, messages.get(messageIndex), messageIndex,
-            messages.size(), width, terminalRows, nowNanos, false);
-        frozen.seal(rendered.lines(), Math.max(1, rendered.lines().size()), false);
-        frozenIds.add(messages.get(messageIndex).id());
-        frozenThrough++;
+        var sealed = new ArrayList<StyledLine>();
+        for (int index = messageIndex; index < runEnd; index++) {
+          MessageRender rendered = renderMessage(state, messages.get(index), index,
+              messages.size(), width, terminalRows, nowNanos, false, index == messageIndex);
+          sealed.addAll(rendered.lines());
+          frozenIds.add(messages.get(index).id());
+        }
+        frozen.seal(List.copyOf(sealed), Math.max(1, sealed.size()), false);
+        frozenThrough = runEnd;
       }
 
       FrozenScrollbackTrimPolicy.TrimResult trim =
@@ -2202,9 +2220,16 @@ final class InteractiveCommand {
       for (int messageIndex = frozenThrough; messageIndex < messages.size(); messageIndex++) {
         if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
         MessageRender rendered = renderMessage(state, messages.get(messageIndex), messageIndex,
-            messages.size(), width, terminalRows, nowNanos, true);
+            messages.size(), width, terminalRows, nowNanos, true,
+            messageIndex == frozenThrough
+                || messages.get(messageIndex - 1).role() != Role.ASSISTANT);
         output.addAll(rendered.lines());
         animating |= rendered.animating();
+      }
+      if (frozenThrough < messages.size() && trailingAssistantRunFreezable(state, messages)) {
+        // The reveal can become settled while painting this frame. Request one final frame so
+        // freezeLimit observes that transition and seals the whole assistant run exactly once.
+        animating = true;
       }
       if (permission != null) {
         output.add(new StyledLine("", Style.NORMAL));
@@ -2221,38 +2246,105 @@ final class InteractiveCommand {
       return new RenderedLines(List.copyOf(output), animating, trim.debt());
     }
 
-    private void reconcileFrozenSurface(AgentState state, List<Message> messages, int width) {
+    private void reconcileFrozenSurface(AgentState state, List<Message> messages, int width,
+        int terminalRows, long nowNanos) {
+      boolean uninitialized = frozenThread == null;
       boolean differentThread = frozenThread != null && !frozenThread.equals(state.thread().id());
       boolean invalidPrefix = frozenThrough > messages.size()
           || frozenThrough > 0 && (frozenIds.size() < frozenThrough
               || !frozenIds.get(frozenThrough - 1).equals(messages.get(frozenThrough - 1).id()));
       boolean resized = frozenWidth > 0 && frozenWidth != width;
-      if (differentThread || invalidPrefix || resized) {
+      if (uninitialized || differentThread || invalidPrefix || resized) {
         frozen.clear();
         frozenIds.clear();
-        frozenThrough = 0;
-        frame = new InlineFrameRenderer.HardReset();
+        frozenThrough = state.phase() instanceof SessionPhase.Idle
+            ? rehydrateStart(state, messages, width, terminalRows, nowNanos) : 0;
+        for (int index = 0; index < frozenThrough; index++) {
+          frozenIds.add(messages.get(index).id());
+        }
+        if (!uninitialized) frame = new InlineFrameRenderer.HardReset();
       }
       frozenThread = state.thread().id();
       frozenWidth = width;
     }
 
+    private int rehydrateStart(AgentState state, List<Message> messages, int width,
+        int terminalRows, long nowNanos) {
+      long rowLimit = Math.max(48L, terminalRows * 3L);
+      int cursor = messages.size();
+      int start = cursor;
+      long keptRows = 0;
+      int units = 0;
+      while (cursor > 0) {
+        int runStart = cursor - 1;
+        if (messages.get(runStart).role() == Role.ASSISTANT) {
+          while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT) {
+            runStart--;
+          }
+        }
+        long runRows = renderedRunRows(state, messages, runStart, cursor, width,
+            terminalRows, nowNanos);
+        if (units == 0 && runRows > rowLimit && cursor - runStart > 1) {
+          long trailingRows = 1; // The retained continuation receives a fresh assistant header.
+          int cut = cursor;
+          for (int index = cursor - 1; index >= runStart; index--) {
+            trailingRows += renderMessage(state, messages.get(index), index, messages.size(),
+                width, terminalRows, nowNanos, false, false).lines().size();
+            cut = index;
+            if (trailingRows >= rowLimit) break;
+          }
+          return cut;
+        }
+        units++;
+        start = runStart;
+        keptRows += runRows;
+        if (keptRows >= rowLimit) break;
+        cursor = runStart;
+      }
+      return start;
+    }
+
+    private long renderedRunRows(AgentState state, List<Message> messages, int from, int to,
+        int width, int terminalRows, long nowNanos) {
+      long rows = 0;
+      for (int index = from; index < to; index++) {
+        rows += renderMessage(state, messages.get(index), index, messages.size(), width,
+            terminalRows, nowNanos, false, index == from).lines().size();
+      }
+      return Math.max(1, rows);
+    }
+
     private int freezeLimit(AgentState state, List<Message> messages) {
       if (messages.isEmpty()) return 0;
-      int limit = messages.size() - 1;
       Message last = messages.getLast();
-      if (state.phase() instanceof SessionPhase.Idle
-          && (last.role() == Role.USER || last.id().equals(revealMessage)
-              && reveal != null && reveal.settled())) {
-        limit = messages.size();
+      if (last.role() != Role.ASSISTANT) return messages.size();
+      int runStart = messages.size() - 1;
+      while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT) runStart--;
+      boolean freezable = trailingAssistantRunFreezable(state, messages);
+      return Math.max(frozenThrough, freezable ? messages.size() : runStart);
+    }
+
+    private boolean trailingAssistantRunFreezable(AgentState state, List<Message> messages) {
+      if (messages.isEmpty() || !(state.phase() instanceof SessionPhase.Idle)) return false;
+      Message last = messages.getLast();
+      if (last.role() != Role.ASSISTANT || !last.id().equals(revealMessage)
+          || reveal == null || !reveal.settled()) return false;
+      int runStart = messages.size() - 1;
+      while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT) runStart--;
+      for (int index = runStart; index < messages.size(); index++) {
+        if (messages.get(index).toolCalls().stream()
+            .anyMatch(call -> !call.status().isTerminal())) return false;
       }
-      return Math.max(frozenThrough, limit);
+      return true;
     }
 
     private MessageRender renderMessage(AgentState state, Message message, int messageIndex,
-        int messageCount, int width, int terminalRows, long nowNanos, boolean allowReveal) {
+        int messageCount, int width, int terminalRows, long nowNanos, boolean allowReveal,
+        boolean showHeader) {
       var output = new ArrayList<StyledLine>();
-      output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
+      if (showHeader) {
+        output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
+      }
       String text = AttachmentText.display(message.text(), message.attachments());
       List<MarkdownTerminalRenderer.Line> revealFrame = null;
       boolean animating = false;
