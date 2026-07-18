@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 34 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 36 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -63,6 +63,15 @@ rehydration walks backward by whole speaker runs and cuts an oversized newest as
 a recent subturn while restoring its header. Separator-safe trim cannot expose a blank top row;
 a fully painted top deletion commits exactly its dropped row debt; and noisy bash output counts
 only its rendered four-row tail. These cases cover all nine checks in the pinned native program.
+
+The complementary `midrun_seam_test.cpp` oracle is translated in `MidrunSeamTest` across all
+11 native scenarios. It compares the committed rows throughout deep incremental tool runs,
+running-to-done card expansion, chunked Markdown streaming, reveal drain, and the final one-shot
+freeze. Assistant subturns remain one visual run with no synthetic gaps, while compaction records
+form hard run boundaries and render exactly one `Conversation compacted` divider in both the live
+and frozen projections. Tall edit/write/read bodies, a three-write cadence, prefix hoisting, and a
+new user turn after a formerly running tool retain every prior card exactly once without rewriting
+anything above the mutable terminal-height tail.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The

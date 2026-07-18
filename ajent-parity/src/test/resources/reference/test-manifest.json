@@ -281,9 +281,17 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^midrun_seam_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/MidrunSeamTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-cli/src/test/java/com/github/skanga/ajent/cli/MidrunSeamTest.java",
+      "supportingCounterparts": [
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/InlineFrameRenderer.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/ui/ToolBodyPreview.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "all 11 native scenarios translated: deep incremental prefix hoisting, edit/read/write Running-to-Done-to-freeze seams, byte-complete chunked Markdown, tall cards, live/frozen compaction dividers, post-compaction submit, three-write cadence, and follow-up turns preserve the committed prefix without duplicate or missing cards"
+      ]
     },
     {
       "id": "midrun_wire_test",

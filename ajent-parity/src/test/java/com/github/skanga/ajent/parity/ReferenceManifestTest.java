@@ -60,7 +60,7 @@ final class ReferenceManifestTest {
     assertThat(registered).isEqualTo(manifest.path("summary").path("ctestRegistered").asInt());
     assertThat(buildOnly).isEqualTo(manifest.path("summary").path("buildOnlyTargets").asInt());
     assertThat(sourceOnly).isEqualTo(manifest.path("summary").path("sourceOnly").asInt());
-    assertThat(green).isEqualTo(35);
+    assertThat(green).isEqualTo(36);
   }
 
   private static List<String> counterparts(JsonNode entry) {

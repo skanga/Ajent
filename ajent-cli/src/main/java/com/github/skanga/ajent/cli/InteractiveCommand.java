@@ -904,6 +904,7 @@ final class InteractiveCommand {
     private int frozenWidth = -1;
     private ThreadId frozenThread;
     private final List<com.github.skanga.ajent.domain.MessageId> frozenIds = new ArrayList<>();
+    private String renderedText = "";
 
     Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission) {
       this(terminal, agent, permission, new AnimationPort() {
@@ -2152,6 +2153,10 @@ final class InteractiveCommand {
       }
     }
 
+    String renderedText() {
+      synchronized (lock) { return renderedText; }
+    }
+
     private static InlineFrameRenderer.Frame render(InlineFrameRenderer.Frame frame,
         TerminalCanvas canvas, CanvasSerializer.ContentRows rows, int terminalRows,
         TerminalStylePool styles, InlineFrameRenderer.FrameWriter writer) {
@@ -2198,7 +2203,13 @@ final class InteractiveCommand {
         int messageIndex = frozenThrough;
         int runEnd = messageIndex + 1;
         if (messages.get(messageIndex).role() == Role.ASSISTANT) {
-          while (runEnd < freezeLimit && messages.get(runEnd).role() == Role.ASSISTANT) runEnd++;
+          while (runEnd < freezeLimit && messages.get(runEnd).role() == Role.ASSISTANT
+              && !hasCompactionBoundary(state, runEnd, messages.size())) runEnd++;
+          if (!assistantRunTerminal(messages, messageIndex, runEnd)) break;
+        }
+        if (!frozen.isEmpty() && hasCompactionBoundary(state, messageIndex, messages.size())) {
+          frozen.seal(List.of(new StyledLine("\u2261 Conversation compacted", Style.MUTED)),
+              1, true);
         }
         if (!frozen.isEmpty()) {
           frozen.seal(List.of(new StyledLine("", Style.NORMAL)), 1, true);
@@ -2218,11 +2229,16 @@ final class InteractiveCommand {
           FrozenScrollbackTrimPolicy.trim(frozen, terminalRows);
       for (List<StyledLine> block : frozen.elements()) output.addAll(block);
       for (int messageIndex = frozenThrough; messageIndex < messages.size(); messageIndex++) {
-        if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
+        boolean startsTurn = messageIndex == frozenThrough
+            || messages.get(messageIndex - 1).role() != Role.ASSISTANT
+            || hasCompactionBoundary(state, messageIndex, messages.size());
+        if (!output.isEmpty() && startsTurn
+            && hasCompactionBoundary(state, messageIndex, messages.size())) {
+          output.add(new StyledLine("\u2261 Conversation compacted", Style.MUTED));
+        }
+        if (!output.isEmpty() && startsTurn) output.add(new StyledLine("", Style.NORMAL));
         MessageRender rendered = renderMessage(state, messages.get(messageIndex), messageIndex,
-            messages.size(), width, terminalRows, nowNanos, true,
-            messageIndex == frozenThrough
-                || messages.get(messageIndex - 1).role() != Role.ASSISTANT);
+            messages.size(), width, terminalRows, nowNanos, true, startsTurn);
         output.addAll(rendered.lines());
         animating |= rendered.animating();
       }
@@ -2243,7 +2259,17 @@ final class InteractiveCommand {
       output.add(new StyledLine("", Style.NORMAL));
       wrap(output, "> " + AttachmentText.display(composer, composerAttachments), width,
           Style.NORMAL);
+      var text = new StringBuilder();
+      for (StyledLine line : output) text.append(line.text()).append('\n');
+      renderedText = text.toString();
       return new RenderedLines(List.copyOf(output), animating, trim.debt());
+    }
+
+    private static boolean hasCompactionBoundary(AgentState state, int messageIndex,
+        int messageCount) {
+      return messageIndex > 0 && messageIndex <= messageCount
+          && state.thread().compactions().stream()
+              .anyMatch(record -> record.upToIndex() == messageIndex);
     }
 
     private void reconcileFrozenSurface(AgentState state, List<Message> messages, int width,
@@ -2278,7 +2304,8 @@ final class InteractiveCommand {
       while (cursor > 0) {
         int runStart = cursor - 1;
         if (messages.get(runStart).role() == Role.ASSISTANT) {
-          while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT) {
+          while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT
+              && !hasCompactionBoundary(state, runStart, messages.size())) {
             runStart--;
           }
         }
@@ -2319,7 +2346,8 @@ final class InteractiveCommand {
       Message last = messages.getLast();
       if (last.role() != Role.ASSISTANT) return messages.size();
       int runStart = messages.size() - 1;
-      while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT) runStart--;
+      while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT
+          && !hasCompactionBoundary(state, runStart, messages.size())) runStart--;
       boolean freezable = trailingAssistantRunFreezable(state, messages);
       return Math.max(frozenThrough, freezable ? messages.size() : runStart);
     }
@@ -2330,8 +2358,16 @@ final class InteractiveCommand {
       if (last.role() != Role.ASSISTANT || !last.id().equals(revealMessage)
           || reveal == null || !reveal.settled()) return false;
       int runStart = messages.size() - 1;
-      while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT) runStart--;
+      while (runStart > 0 && messages.get(runStart - 1).role() == Role.ASSISTANT
+          && !hasCompactionBoundary(state, runStart, messages.size())) runStart--;
       for (int index = runStart; index < messages.size(); index++) {
+        if (!assistantRunTerminal(messages, index, index + 1)) return false;
+      }
+      return true;
+    }
+
+    private static boolean assistantRunTerminal(List<Message> messages, int from, int to) {
+      for (int index = from; index < to; index++) {
         if (messages.get(index).toolCalls().stream()
             .anyMatch(call -> !call.status().isTerminal())) return false;
       }
