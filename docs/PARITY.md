@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 36 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 37 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -72,6 +72,16 @@ form hard run boundaries and render exactly one `Conversation compacted` divider
 and frozen projections. Tall edit/write/read bodies, a three-write cadence, prefix hoisting, and a
 new user turn after a formerly running tool retain every prior card exactly once without rewriting
 anything above the mutable terminal-height tail.
+
+`midrun_wire_test.cpp` is translated separately in `MidrunWireTest`; unlike the logical seam
+suite, it feeds the production UI's emitted ANSI bytes into a viewport plus native-scrollback
+emulator while carrying the same typed inline-frame shadow between updates. All 11 source shapes
+remain `Synced`: growing read runs and late grep highlights, Running/Done/freeze write lifecycles,
+idle and long-text finalization, pure-bottom shrink, output-elided and full-body top trim, and four
+model-picker open/close cycles. Previously committed physical rows are append-only and distinctive
+card boundaries remain exactly once. The model picker is consequently painted as a bottom overlay
+that preserves the base frame's height instead of appending rows; provider-switch status remains
+inside that overlay.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The

@@ -301,9 +301,17 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^midrun_wire_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/MidrunWireTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-cli/src/test/java/com/github/skanga/ajent/cli/MidrunWireTest.java",
+      "supportingCounterparts": [
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/InlineFrameRenderer.java",
+        "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/ScrollbackWirePropertyTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "all 11 native wire scenarios translated through the production UI and an ANSI viewport/scrollback emulator: growing live cards, late grep highlights, write Running/Done/freeze lifecycles, idle and text finalization, pure-bottom shrink, output-elided and full-body trim, and four fixed-height model-picker cycles remain Synced, append-only, and duplicate-free"
+      ]
     },
     {
       "id": "model_caps_test",

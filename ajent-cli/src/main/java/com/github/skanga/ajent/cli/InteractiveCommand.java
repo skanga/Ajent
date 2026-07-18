@@ -1244,7 +1244,7 @@ final class InteractiveCommand {
       return true;
     }
 
-    private void openModelPicker(AgentControl loop) {
+    void openModelPicker(AgentControl loop) {
       modelsLoading = true;
       effort = loop.effort();
       if (models.isEmpty()) {
@@ -1902,9 +1902,8 @@ final class InteractiveCommand {
           }
         }
         if (modelPicker instanceof PickerState.OpenAt open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Models  " + open.query()
+          var overlay = new ArrayList<StyledLine>();
+          overlay.add(new StyledLine("Models  " + open.query()
               + (modelsLoading ? "  loading…" : ""), Style.ACCENT));
           List<Integer> visible = ModelPicker.filteredIndices(models, open.query());
           for (int index = 0; index < visible.size(); index++) {
@@ -1915,15 +1914,17 @@ final class InteractiveCommand {
             boolean supportsEffort = ModelCapabilities.fromId(model.id()).supportsEffort();
             String trailing = selected && supportsEffort && effort != Effort.NONE
                 ? "  \u25c7 " + effort.label() : "";
-            lines.add(new StyledLine(marker + favorite + model.displayName() + trailing,
+            overlay.add(new StyledLine(marker + favorite + model.displayName() + trailing,
                 index == open.index() ? Style.ACCENT : Style.NORMAL));
           }
           Optional<ModelPicker.Model> selected = ModelPicker.select(modelPicker, models).model();
           if (selected.isPresent() && ModelCapabilities
               .fromId(selected.orElseThrow().id()).supportsEffort()) {
-            lines.add(new StyledLine("reasoning effort: " + effort.label()
+            overlay.add(new StyledLine("reasoning effort: " + effort.label()
                 + "  \u2190/\u2192 change", Style.MUTED));
           }
+          if (!uiStatus.isBlank()) overlay.add(new StyledLine(uiStatus, Style.MUTED));
+          lines = overlayBottom(lines, overlay);
         }
         if (providerPicker instanceof PickerState.OpenAt open) {
           lines = new ArrayList<>(lines);
@@ -2155,6 +2156,10 @@ final class InteractiveCommand {
 
     String renderedText() {
       synchronized (lock) { return renderedText; }
+    }
+
+    boolean frameSynced() {
+      synchronized (lock) { return frame instanceof InlineFrameRenderer.Synced; }
     }
 
     private static InlineFrameRenderer.Frame render(InlineFrameRenderer.Frame frame,
@@ -2427,6 +2432,18 @@ final class InteractiveCommand {
       for (String line : ColumnTextWrapper.wrap(text, width)) {
         lines.add(new StyledLine(line, style));
       }
+    }
+
+    private static List<StyledLine> overlayBottom(
+        List<StyledLine> base, List<StyledLine> overlay) {
+      int height = Math.max(base.size(), overlay.size());
+      var result = new ArrayList<StyledLine>(height);
+      for (int row = 0; row < height; row++) {
+        result.add(row < base.size() ? base.get(row) : new StyledLine("", Style.NORMAL));
+      }
+      int start = height - overlay.size();
+      for (int row = 0; row < overlay.size(); row++) result.set(start + row, overlay.get(row));
+      return result;
     }
 
     private static void appendMarkdown(List<StyledLine> lines, String source, int width) {
