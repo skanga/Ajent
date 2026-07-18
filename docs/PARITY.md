@@ -69,5 +69,13 @@ unbounded lag, a slow stream never runs past the wire, a 30,000-codepoint
 finalize backlog meets its deadline, and a 500-codepoint burst slides over
 multiple frames instead of teleporting.
 
+The production transcript consumes that cursor at AgenTTY's 90 cps floor,
+150 ms lag, 250 ms frame-gap cap, and 160 ms finalization ramp. A coalesced
+daemon scheduler requests 16 ms frames only while text is behind the wire.
+`TextRevealTest` and `InteractiveCommandTest` prove Unicode-safe clipping,
+bounded catch-up after a long pause, final drain after the provider becomes
+idle, and termination of the wake-up chain at the live edge. The remaining
+reveal work is the styled scramble/gradient trail and caret overlay.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.

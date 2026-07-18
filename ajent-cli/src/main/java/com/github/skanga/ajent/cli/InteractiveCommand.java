@@ -28,6 +28,7 @@ import com.github.skanga.ajent.terminal.render.TerminalCanvas;
 import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
+import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
@@ -45,6 +46,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Base64;
 
@@ -90,42 +95,44 @@ final class InteractiveCommand {
   private int runSession(Configuration configured, JLineTerminalSession terminal) throws IOException {
     var state = new AtomicReference<AgentState>();
     var permission = new PermissionGate();
-    var ui = new Ui(new TerminalPort() {
-      @Override public JLineTerminalSession.Size size() { return terminal.size(); }
-      @Override public void write(String value) { terminal.write(value); }
-    }, state, permission);
-    permission.onChange(ui::render);
-    var threadStore = new ThreadStore(configured.dataDirectory());
-    var conversation = new com.github.skanga.ajent.domain.Thread(
-        threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
-    AgentLoop loop = configured.sessions().create(conversation, configured.profile(),
-        configured.model(), permission, (message, next) -> {
-          state.set(next);
-          ui.render();
-        });
-    state.set(loop.state());
-    try (loop) {
-      terminal.onResize(ignored -> ui.render());
-      ui.render();
-      boolean running = true;
-      while (running) {
-        List<TerminalEvent> events = terminal.read();
-        if (events.isEmpty()) events = terminal.flushEscape();
-        for (TerminalEvent event : events) {
-          if (event instanceof TerminalEvent.Key key) {
-            running = ui.key(key.value(), new AgentControl() {
-              @Override public AgentState state() { return loop.state(); }
-              @Override public void dispatch(RuntimeMessage message) { loop.dispatch(message); }
-            });
-          } else if (event instanceof TerminalEvent.Paste paste) {
-            ui.insert(paste.text());
+    try (var animations = new FrameScheduler()) {
+      var ui = new Ui(new TerminalPort() {
+        @Override public JLineTerminalSession.Size size() { return terminal.size(); }
+        @Override public void write(String value) { terminal.write(value); }
+      }, state, permission, animations);
+      permission.onChange(ui::render);
+      var threadStore = new ThreadStore(configured.dataDirectory());
+      var conversation = new com.github.skanga.ajent.domain.Thread(
+          threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
+      AgentLoop loop = configured.sessions().create(conversation, configured.profile(),
+          configured.model(), permission, (message, next) -> {
+            state.set(next);
+            ui.render();
+          });
+      state.set(loop.state());
+      try (loop) {
+        terminal.onResize(ignored -> ui.render());
+        ui.render();
+        boolean running = true;
+        while (running) {
+          List<TerminalEvent> events = terminal.read();
+          if (events.isEmpty()) events = terminal.flushEscape();
+          for (TerminalEvent event : events) {
+            if (event instanceof TerminalEvent.Key key) {
+              running = ui.key(key.value(), new AgentControl() {
+                @Override public AgentState state() { return loop.state(); }
+                @Override public void dispatch(RuntimeMessage message) { loop.dispatch(message); }
+              });
+            } else if (event instanceof TerminalEvent.Paste paste) {
+              ui.insert(paste.text());
+            }
+            if (!running) break;
           }
-          if (!running) break;
         }
+        return 0;
+      } finally {
+        permission.cancel();
       }
-      return 0;
-    } finally {
-      permission.cancel();
     }
   }
 
@@ -232,6 +239,29 @@ final class InteractiveCommand {
     void dispatch(RuntimeMessage message);
   }
 
+  interface AnimationPort {
+    long nowNanos();
+    void request(Runnable frame);
+  }
+
+  static final class FrameScheduler implements AnimationPort, AutoCloseable {
+    private final AtomicBoolean pending = new AtomicBoolean();
+    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(
+        runnable -> Thread.ofPlatform().daemon().name("ajent-frame").unstarted(runnable));
+
+    @Override public long nowNanos() { return System.nanoTime(); }
+
+    @Override public void request(Runnable frame) {
+      if (!pending.compareAndSet(false, true)) return;
+      executor.schedule(() -> {
+        pending.set(false);
+        frame.run();
+      }, 16, TimeUnit.MILLISECONDS);
+    }
+
+    @Override public void close() { executor.shutdownNow(); }
+  }
+
   static final class PermissionGate implements PermissionPort {
     private final AtomicReference<Pending> pending = new AtomicReference<>();
     private volatile Runnable changed = () -> {};
@@ -262,6 +292,7 @@ final class InteractiveCommand {
     private final TerminalPort terminal;
     private final AtomicReference<AgentState> agent;
     private final PermissionGate permission;
+    private final AnimationPort animations;
     private final TerminalStylePool styles = new TerminalStylePool();
     private InlineFrameRenderer.Frame frame = new InlineFrameRenderer.Empty();
     private CommandPalette.State palette = new CommandPalette.Closed();
@@ -269,11 +300,22 @@ final class InteractiveCommand {
     private String uiStatus = "";
     private String composer = "";
     private int cursor;
+    private com.github.skanga.ajent.domain.MessageId revealMessage;
+    private TextReveal reveal;
 
     Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission) {
+      this(terminal, agent, permission, new AnimationPort() {
+        @Override public long nowNanos() { return System.nanoTime(); }
+        @Override public void request(Runnable frame) { }
+      });
+    }
+
+    Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
+        AnimationPort animations) {
       this.terminal = terminal;
       this.agent = agent;
       this.permission = permission;
+      this.animations = animations;
     }
 
     boolean key(TerminalKey key, AgentControl loop) {
@@ -433,7 +475,9 @@ final class InteractiveCommand {
         if (state == null) return;
         JLineTerminalSession.Size size = terminal.size();
         int width = Math.max(1, size.columns());
-        List<StyledLine> lines = lines(state, permission.current(), width, composer);
+        RenderedLines rendered = lines(state, permission.current(), width, composer,
+            animations.nowNanos());
+        List<StyledLine> lines = rendered.lines();
         if (palette instanceof CommandPalette.Open open) {
           lines = new ArrayList<>(lines);
           lines.add(new StyledLine("", Style.NORMAL));
@@ -478,6 +522,7 @@ final class InteractiveCommand {
         var rows = CanvasSerializer.contentRows(canvas);
         frame = render(frame, canvas, rows, Math.max(1, size.rows()), styles,
             value -> terminal.write(value));
+        if (rendered.animating()) animations.request(this::render);
       }
     }
 
@@ -505,17 +550,37 @@ final class InteractiveCommand {
       };
     }
 
-    private List<StyledLine> lines(
-        AgentState state, ToolUse permission, int width, String composer) {
+    private RenderedLines lines(
+        AgentState state, ToolUse permission, int width, String composer, long nowNanos) {
       var output = new ArrayList<StyledLine>();
+      boolean animating = false;
       if (state.thread().messages().isEmpty()) {
         output.add(new StyledLine("Ajent", Style.ACCENT));
         output.add(new StyledLine("AI coding agent · Ctrl-D to quit", Style.MUTED));
       }
-      for (Message message : state.thread().messages()) {
+      List<Message> messages = state.thread().messages();
+      for (int messageIndex = 0; messageIndex < messages.size(); messageIndex++) {
+        Message message = messages.get(messageIndex);
         if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
         output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
-        wrap(output, message.text(), width, Style.NORMAL);
+        String text = message.text();
+        boolean revealable = message.role() == Role.ASSISTANT
+            && messageIndex == messages.size() - 1;
+        if (revealable) {
+          boolean streaming = !(state.phase() instanceof SessionPhase.Idle)
+              && !message.textBlockClosed();
+          TextReveal.Frame revealFrame;
+          if (!message.id().equals(revealMessage)) {
+            revealMessage = message.id();
+            reveal = new TextReveal();
+            revealFrame = reveal.begin(text, streaming, nowNanos);
+          } else {
+            revealFrame = reveal.update(text, streaming, nowNanos);
+          }
+          text = revealFrame.text();
+          animating |= revealFrame.animating();
+        }
+        wrap(output, text, width, Style.NORMAL);
         for (ToolUse call : message.toolCalls()) {
           output.add(new StyledLine("  " + call.name().value() + " · "
               + call.status().getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT),
@@ -534,7 +599,7 @@ final class InteractiveCommand {
           uiStatus.startsWith("error:") ? Style.DANGER : Style.MUTED);
       output.add(new StyledLine("", Style.NORMAL));
       wrap(output, "> " + composer, width, Style.NORMAL);
-      return List.copyOf(output);
+      return new RenderedLines(List.copyOf(output), animating);
     }
 
     private static void wrap(List<StyledLine> lines, String text, int width, Style style) {
@@ -553,6 +618,7 @@ final class InteractiveCommand {
 
     private enum Style { NORMAL, ACCENT, MUTED, DANGER }
     private record StyledLine(String text, Style style) {}
+    private record RenderedLines(List<StyledLine> lines, boolean animating) {}
 
     private static String displayTool(String name) {
       if (name.isEmpty()) return name;

@@ -234,6 +234,33 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("read").contains("ready");
   }
 
+  @Test void streamingTranscriptRequestsFramesAndFinalizationSettles() {
+    Message assistant = new Message(Role.ASSISTANT, "abcdef", List.of(), List.of());
+    AgentState streaming = withPhase(AgentState.initial(thread(List.of(assistant))),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1)));
+    var state = new AtomicReference<>(streaming);
+    var terminal = new FakeTerminal();
+    var animation = new ManualAnimation();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), animation);
+
+    ui.render();
+    assertThat(animation.requested).isEqualTo(1);
+    assertThat(terminal.bytes.toString()).doesNotContain("abcdef");
+    animation.now = 20_000_000;
+    animation.runFrame();
+    assertThat(animation.requested).isEqualTo(2);
+
+    state.set(withPhase(state.get(), new SessionPhase.Idle()));
+    for (int index = 0; index < 20 && animation.frame != null; index++) {
+      animation.now += 16_000_000;
+      animation.runFrame();
+    }
+    // The inline renderer emits only changed cells, so the final suffix proves catch-up.
+    assertThat(terminal.bytes.toString()).contains("ef");
+    assertThat(animation.frame).isNull();
+  }
+
   @Test void liveToolViewerOwnsListBodyNavigationAndOsc52Copy() {
     ToolUse first = new ToolUse(new ToolCallId("one"), new ToolName("read_file"), Map.of(),
         new ToolStatus.Done(0, 100_000_000, "first"));
@@ -327,6 +354,19 @@ final class InteractiveCommandTest {
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
     @Override public AgentState state() { return state.get(); }
     @Override public void dispatch(RuntimeMessage message) { messages.add(message); }
+  }
+
+  private static final class ManualAnimation implements InteractiveCommand.AnimationPort {
+    private long now;
+    private int requested;
+    private Runnable frame;
+    @Override public long nowNanos() { return now; }
+    @Override public void request(Runnable next) { requested++; frame = next; }
+    private void runFrame() {
+      Runnable next = frame;
+      frame = null;
+      if (next != null) next.run();
+    }
   }
 
   private record DecisionKey(TerminalKey key, PermissionPort.Decision decision) {}
