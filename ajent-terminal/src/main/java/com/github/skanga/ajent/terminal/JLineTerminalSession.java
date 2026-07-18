@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
@@ -105,6 +106,23 @@ public final class JLineTerminalSession implements AutoCloseable {
 
   public void writeSynchronized(String frame) {
     write(SYNC_START + Objects.requireNonNull(frame, "frame") + SYNC_END);
+  }
+
+  /** Temporarily restores the host terminal for a user-requested local interactive action. */
+  public <T> T suspend(Supplier<T> action) {
+    requireOpen();
+    Objects.requireNonNull(action, "action");
+    boolean restoreMouse = mouse;
+    if (mouse) disableMouse();
+    write(LEAVE_INLINE);
+    terminal.setAttributes(cooked);
+    try {
+      return action.get();
+    } finally {
+      terminal.enterRawMode();
+      write(ENTER_INLINE);
+      if (restoreMouse) enableMouse();
+    }
   }
 
   @Override public void close() throws IOException {

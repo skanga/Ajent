@@ -64,6 +64,22 @@ final class JLineTerminalSessionTest {
         .isThrownBy(() -> new JLineTerminalSession.Size(-1, 2));
   }
 
+  @Test void suspendLeavesInlineModeRunsActionAndRestoresRawModesAndMouse() throws Exception {
+    var output = new ByteArrayOutputStream();
+    var session = JLineTerminalSession.forTerminal(virtual(new byte[0], output));
+    session.enableMouse();
+    assertThat(session.suspend(() -> {
+      session.write("cooked action\n");
+      return 42;
+    })).isEqualTo(42);
+    assertThat(output.toString(StandardCharsets.UTF_8)).isEqualTo(
+        JLineTerminalSession.ENTER_INLINE + JLineTerminalSession.ENABLE_MOUSE
+            + JLineTerminalSession.DISABLE_MOUSE + JLineTerminalSession.LEAVE_INLINE
+            + "cooked action\n" + JLineTerminalSession.ENTER_INLINE
+            + JLineTerminalSession.ENABLE_MOUSE);
+    session.close();
+  }
+
   private static Terminal virtual(byte[] input, ByteArrayOutputStream output) throws Exception {
     return new DumbTerminal("test", "xterm-256color", new ByteArrayInputStream(input), output,
         StandardCharsets.UTF_8);

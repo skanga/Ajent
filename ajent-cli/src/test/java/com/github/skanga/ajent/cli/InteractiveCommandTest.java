@@ -390,6 +390,90 @@ final class InteractiveCommandTest {
             com.github.skanga.ajent.terminal.ui.PlanModal.Status.PENDING);
   }
 
+  @Test void liveCodeBlockPickerCopiesEditsRunsAndAttachesExplicitly() {
+    Message reply = new Message(Role.ASSISTANT,
+        "```sh\n$ echo one\n```\n```python\nprint(2)\n```", List.of(), List.of());
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(reply))));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 20);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(character('g', true), agent);
+    assertThat(terminal.bytes.toString()).contains(
+        "Run Code Block", "1  echo one", "python Â· 1 line");
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("isn't runnable here");
+    ui.key(character('y'), agent);
+    assertThat(terminal.bytes.toString()).contains("cHJpbnQoMik=");
+
+    ui.key(character('g', true), agent);
+    ui.key(character('e'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text()).isEqualTo("echo one");
+
+    ui.key(character('g', true), agent);
+    ui.key(character('1'), agent);
+    assertThat(agent.ranBlocks).extracting(
+        com.github.skanga.ajent.terminal.ui.CodeBlockPicker.Block::body)
+        .containsExactly("echo one");
+    assertThat(terminal.bytes.toString()).contains("Run Result", "exit 0", "captured");
+    ui.key(special(TerminalKey.SpecialKey.PAGE_DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(character('a'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
+        .contains("I ran:", "echo one", "output:", "captured");
+
+    ui.key(character('g', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(character('y'), agent);
+    assertThat(terminal.bytes.toString()).contains("Y2FwdHVyZWQ=");
+  }
+
+  @Test void codeBlockEntryReportsEmptyAndBusyAndSafeResultDismissals() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.key(character('g', true), agent);
+    assertThat(terminal.bytes.toString()).contains("no code blocks in the last reply");
+
+    state.set(withPhase(AgentState.initial(thread(List.of(new Message(Role.ASSISTANT,
+        "```sh\necho ok\n```", List.of(), List.of())))), new SessionPhase.Streaming(
+            ActiveTurn.start(new CancellationSignal(), 1))));
+    selectCommand(ui, agent, "run code block");
+    assertThat(terminal.bytes.toString()).contains("wait for the reply to finish");
+    state.set(AgentState.initial(thread(List.of(new Message(Role.ASSISTANT,
+        "```sh\necho ok\n```", List.of(), List.of())))));
+    ui.key(character('g', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
+    ui.key(character('q'), agent);
+    agent.runOutput = "";
+    agent.runExit = 1;
+    agent.runTimedOut = true;
+    ui.key(character('g', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("timed out", "(no output captured)");
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
+    ui.key(character('x'), agent);
+    ui.key(character('q'), agent);
+    agent.runOutput = "captured";
+    agent.runExit = 0;
+    agent.runTimedOut = false;
+    ui.key(character('g', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(character('g', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(character('d'), agent);
+  }
+
   @Test void savedThreadPickerLoadsAtCurrentNavigatesAndSwapsWholeView() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
@@ -795,6 +879,11 @@ final class InteractiveCommandTest {
     private List<com.github.skanga.ajent.terminal.ui.ThreadPicker.Entry> threads = List.of();
     private final List<ThreadId> loadedThreads = new ArrayList<>();
     private String threadFailure = "";
+    private final List<com.github.skanga.ajent.terminal.ui.CodeBlockPicker.Block> ranBlocks =
+        new ArrayList<>();
+    private String runOutput = "captured";
+    private int runExit;
+    private boolean runTimedOut;
     private java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>>
         pendingModels;
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
@@ -812,6 +901,14 @@ final class InteractiveCommandTest {
         state.set(AgentState.initial(new com.github.skanga.ajent.domain.Thread(id, "", List.of())));
       }
       completed.accept(threadFailure);
+    }
+    @Override public boolean windows() { return true; }
+    @Override public void runCodeBlock(
+        com.github.skanga.ajent.terminal.ui.CodeBlockPicker.Block block,
+        java.util.function.Consumer<com.github.skanga.ajent.terminal.ui.CodeBlockPicker.Result> completed) {
+      ranBlocks.add(block);
+      completed.accept(new com.github.skanga.ajent.terminal.ui.CodeBlockPicker.Result(
+          block.body(), runOutput, runExit, runTimedOut));
     }
     @Override public Profile cycleProfile() {
       profile = switch (profile) {

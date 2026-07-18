@@ -39,6 +39,7 @@ import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
+import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
 import com.github.skanga.ajent.terminal.ui.DiffReview;
 import com.github.skanga.ajent.terminal.ui.ModelPicker;
 import com.github.skanga.ajent.terminal.ui.LoginModal;
@@ -48,6 +49,7 @@ import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.terminal.ui.ThreadPicker;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
+import com.github.skanga.ajent.tools.process.ProcessRunner;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.runtime.FileChange;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
@@ -61,10 +63,12 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -195,6 +199,24 @@ final class InteractiveCommand {
             pendingChanges.set(List.of());
             completed.accept("");
           });
+        }
+        @Override public boolean windows() {
+          return System.getProperty("os.name", "").startsWith("Windows");
+        }
+        @Override public void runCodeBlock(
+            CodeBlockPicker.Block block, Consumer<CodeBlockPicker.Result> completed) {
+          CodeBlockPicker.Shell shell = CodeBlockPicker.shell(block.language(), windows());
+          String command = CodeBlockPicker.commandFor(shell, block.body());
+          ProcessRunner.Result result = terminal.suspend(() -> {
+            terminal.write("\r\nâ•­â”€ running â”€â”€â”€â”€â”€\r\n$ " + block.body() + "\r\n");
+            return configured.codeRunner().shell(
+                command, configured.workspace(), 30_000, Duration.ofSeconds(120));
+          });
+          String output = result.started() ? result.output()
+              : "[failed to start: " + result.startError() + "]";
+          if (result.truncated()) output += "\n[output truncated]";
+          completed.accept(new CodeBlockPicker.Result(block.body(), output,
+              result.started() ? result.exitCode() : -1, result.timedOut()));
         }
         @Override public Profile cycleProfile() {
           Profile next = switch (activeProfile.get()) {
@@ -401,7 +423,7 @@ final class InteractiveCommand {
         tools.systemPrompt(), 0, environment);
     return new Configuration(new AgentSessionFactory(tools, providers, client, dataDirectory),
         dataDirectory, profile, model, settingsStore, providers,
-        new ProviderModelCatalog(client), todos);
+        new ProviderModelCatalog(client), todos, workspace, sandbox.runner());
   }
 
   static void recordChange(
@@ -470,7 +492,7 @@ final class InteractiveCommand {
   record Configuration(
       AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
       SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
-      ProviderModelCatalog models, TodoLedger todos) {}
+      ProviderModelCatalog models, TodoLedger todos, Path workspace, ProcessRunner codeRunner) {}
 
   static final class TodoLedger implements HostServices.TodoSink {
     private final AtomicReference<List<PlanModal.Item>> items =
@@ -502,6 +524,8 @@ final class InteractiveCommand {
     ThreadId threadId();
     void loadThreads(Consumer<List<ThreadPicker.Entry>> receiver);
     void loadThread(ThreadId id, Consumer<String> completed);
+    boolean windows();
+    void runCodeBlock(CodeBlockPicker.Block block, Consumer<CodeBlockPicker.Result> completed);
     Profile cycleProfile();
     String model();
     void loadModels(Consumer<List<ModelPicker.Model>> receiver);
@@ -582,6 +606,7 @@ final class InteractiveCommand {
     private PickerState.OneAxis providerPicker = new PickerState.Closed();
     private PickerState.OneAxis threadPicker = new PickerState.Closed();
     private PickerState.Modal plan = new PickerState.ModalClosed();
+    private CodeBlockPicker.State codeBlocks = new CodeBlockPicker.Closed();
     private List<PlanModal.Item> planItems = List.of();
     private List<ThreadPicker.Entry> threadRows = List.of();
     private boolean threadsLoading;
@@ -632,6 +657,8 @@ final class InteractiveCommand {
         render();
         return true;
       }
+      if (codeBlocks instanceof CodeBlockPicker.Open) return codeBlockKey(key, loop);
+      if (codeBlocks instanceof CodeBlockPicker.Result) return codeResultKey(key);
       if (LoginModal.isOpen(login)) return loginKey(key, loop);
       if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key);
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
@@ -645,6 +672,7 @@ final class InteractiveCommand {
         if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
         if (codePoint == 'j') { openThreadPicker(loop); render(); return true; }
         if (codePoint == 't') { plan = PlanModal.open(); render(); return true; }
+        if (codePoint == 'g') { openCodeBlocks(loop); render(); return true; }
         if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
         if (codePoint == 'd' && composer.isEmpty()) return false;
         if (codePoint == 'u') { composer = composer.substring(cursor); cursor = 0; render(); return true; }
@@ -763,6 +791,8 @@ final class InteractiveCommand {
                 openThreadPicker(loop);
               } else if (command == CommandPalette.Command.OPEN_PLAN) {
                 plan = PlanModal.open();
+              } else if (command == CommandPalette.Command.RUN_CODE_BLOCK) {
+                openCodeBlocks(loop);
               } else if (command == CommandPalette.Command.CYCLE_PROFILE) {
                 Profile profile = loop.cycleProfile();
                 uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
@@ -820,6 +850,98 @@ final class InteractiveCommand {
         }
         render();
       });
+    }
+
+    private void openCodeBlocks(AgentControl loop) {
+      if (!(loop.state().phase() instanceof SessionPhase.Idle)) {
+        uiStatus = "wait for the reply to finish before grabbing blocks";
+        return;
+      }
+      Optional<List<CodeBlockPicker.Block>> blocks = CodeBlockPicker.latestAssistantBlocks(
+          loop.state().thread().messages());
+      if (blocks.isEmpty()) {
+        uiStatus = "no code blocks in the last reply";
+        return;
+      }
+      codeBlocks = CodeBlockPicker.open(blocks.orElseThrow());
+    }
+
+    private boolean codeBlockKey(TerminalKey key, AgentControl loop) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> codeBlocks = CodeBlockPicker.close(codeBlocks);
+          case UP -> codeBlocks = CodeBlockPicker.move(codeBlocks, -1);
+          case DOWN -> codeBlocks = CodeBlockPicker.move(codeBlocks, 1);
+          case ENTER -> runSelectedBlock(loop, -1);
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character) {
+        int value = Character.toLowerCase(character.codePoint());
+        if (value >= '1' && value <= '9') runSelectedBlock(loop, value - '1');
+        else if (value == 'e') CodeBlockPicker.selected(codeBlocks, -1).ifPresent(block -> {
+          codeBlocks = CodeBlockPicker.close(codeBlocks);
+          insert(block.body());
+        });
+        else if (value == 'y') CodeBlockPicker.selected(codeBlocks, -1).ifPresent(block -> {
+          codeBlocks = CodeBlockPicker.close(codeBlocks);
+          writeClipboard(block.body());
+          uiStatus = "copied clean block to clipboard";
+        });
+        else if (value == 'q') codeBlocks = CodeBlockPicker.close(codeBlocks);
+      }
+      render();
+      return true;
+    }
+
+    private void runSelectedBlock(AgentControl loop, int index) {
+      CodeBlockPicker.selected(codeBlocks, index).ifPresent(block -> {
+        CodeBlockPicker.Shell shell = CodeBlockPicker.shell(block.language(), loop.windows());
+        if (shell == CodeBlockPicker.Shell.NONE) {
+          String tag = block.language().isEmpty() ? "this" : "'" + block.language() + "'";
+          uiStatus = tag + " block isn't runnable here â€” press e to edit or y to copy";
+          return;
+        }
+        codeBlocks = CodeBlockPicker.close(codeBlocks);
+        loop.runCodeBlock(block, result -> {
+          synchronized (lock) { codeBlocks = result; frame = new InlineFrameRenderer.Empty(); }
+          render();
+        });
+      });
+    }
+
+    private boolean codeResultKey(TerminalKey key) {
+      if (!(codeBlocks instanceof CodeBlockPicker.Result result)) return true;
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE, ENTER -> codeBlocks = CodeBlockPicker.close(codeBlocks);
+          case UP -> codeBlocks = CodeBlockPicker.move(codeBlocks, -1);
+          case DOWN -> codeBlocks = CodeBlockPicker.move(codeBlocks, 1);
+          case PAGE_UP -> codeBlocks = CodeBlockPicker.move(codeBlocks, -10);
+          case PAGE_DOWN -> codeBlocks = CodeBlockPicker.move(codeBlocks, 10);
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character) {
+        switch (Character.toLowerCase(character.codePoint())) {
+          case 'a' -> {
+            String attached = "I ran:\n```sh\n" + result.command()
+                + "\n```\noutput:\n```\n" + result.output()
+                + (result.output().isEmpty() || result.output().endsWith("\n") ? "" : "\n")
+                + "```";
+            codeBlocks = CodeBlockPicker.close(codeBlocks);
+            insert(attached);
+            uiStatus = "output attached to composer";
+          }
+          case 'y' -> {
+            writeClipboard(result.output());
+            codeBlocks = CodeBlockPicker.close(codeBlocks);
+            uiStatus = "output copied to clipboard";
+          }
+          case 'q', 'd' -> codeBlocks = CodeBlockPicker.close(codeBlocks);
+          default -> { }
+        }
+      }
+      render();
+      return true;
     }
 
     private void openThreadPicker(AgentControl loop) {
@@ -1106,6 +1228,7 @@ final class InteractiveCommand {
         providerPicker = new PickerState.Closed();
         threadPicker = new PickerState.Closed();
         plan = new PickerState.ModalClosed();
+        codeBlocks = new CodeBlockPicker.Closed();
         login = new LoginModal.Closed();
         diffReview = new PickerState.CellClosed();
         diffFiles = List.of();
@@ -1249,6 +1372,41 @@ final class InteractiveCommand {
                     ? Style.ACCENT : Style.MUTED));
           }
           lines.add(new StyledLine("Esc close", Style.MUTED));
+        }
+        if (codeBlocks instanceof CodeBlockPicker.Open open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Run Code Block", Style.ACCENT));
+          for (int index = 0; index < open.blocks().size(); index++) {
+            CodeBlockPicker.Block block = open.blocks().get(index);
+            String language = block.language().isEmpty() ? "sh" : block.language();
+            lines.add(new StyledLine((index == open.index() ? "â€º " : "  ")
+                + (index + 1) + "  " + block.preview() + "  " + language + " Â· "
+                + block.lineCount() + (block.lineCount() == 1 ? " line" : " lines"),
+                index == open.index() ? Style.ACCENT : Style.NORMAL));
+          }
+          lines.add(new StyledLine(
+              "â†‘â†“ move  Enter/1-9 run  e edit  y copy  Esc close", Style.MUTED));
+        }
+        if (codeBlocks instanceof CodeBlockPicker.Result result) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Run Result", result.exitCode() == 0 && !result.timedOut()
+              ? Style.ACCENT : Style.DANGER));
+          String command = result.command().lines().findFirst().orElse("");
+          if (result.command().contains("\n")) command += " â€¦";
+          lines.add(new StyledLine("$ " + command, Style.NORMAL));
+          int outputLines = result.output().isEmpty() ? 0
+              : 1 + (int) result.output().chars().filter(value -> value == '\n').count();
+          lines.add(new StyledLine((result.timedOut() ? "timed out" : "exit " + result.exitCode())
+              + " Â· " + outputLines + " lines Â· " + result.output().getBytes(
+                  java.nio.charset.StandardCharsets.UTF_8).length + " B", Style.MUTED));
+          List<String> output = result.output().lines().toList();
+          if (output.isEmpty()) lines.add(new StyledLine("  (no output captured)", Style.MUTED));
+          else for (String line : output.stream().skip(result.scroll()).limit(14).toList()) {
+            wrap(lines, "  " + line, width, Style.MUTED);
+          }
+          lines.add(new StyledLine("a attach to composer  y copy  Esc discard", Style.MUTED));
         }
         if (LoginModal.isOpen(login)) {
           lines = new ArrayList<>(lines);
