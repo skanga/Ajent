@@ -57,6 +57,7 @@ public final class McpClientSession implements AutoCloseable {
   private volatile List<Prompt> prompts = List.of();
   private volatile String protocolVersion = "";
   private volatile String serverName = "";
+  private volatile Runnable listChanged = () -> {};
 
   public McpClientSession(
       String configuredName, Transport transport, Duration timeout, String version) {
@@ -88,6 +89,9 @@ public final class McpClientSession implements AutoCloseable {
   public List<ResourceTemplate> resourceTemplates() { return templates; }
   public List<Prompt> prompts() { return prompts; }
   public boolean alive() { return transport.alive(); }
+  public void onListChanged(Runnable handler) {
+    listChanged = Objects.requireNonNull(handler, "handler");
+  }
 
   public synchronized CallResult call(String name, ObjectNode arguments) {
     ObjectNode parameters = JSON.createObjectNode();
@@ -150,6 +154,7 @@ public final class McpClientSession implements AutoCloseable {
         default -> { return; }
       }
       generation.incrementAndGet();
+      listChanged.run();
     } catch (RuntimeException ignoredFailure) {
       // Keep the previous known-good snapshot.
     }
