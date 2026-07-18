@@ -41,6 +41,8 @@ final class AnsiTerminalEmulator {
     return result;
   }
 
+  List<String> scrollbackLines() { return List.copyOf(scrollback); }
+
   long countContaining(String marker) {
     return transcript().stream().filter(line -> line.contains(marker)).count();
   }
