@@ -40,10 +40,11 @@ public sealed interface TerminalEvent {
       Objects.requireNonNull(button, "button");
       Objects.requireNonNull(kind, "kind");
       Objects.requireNonNull(modifiers, "modifiers");
-      if (x < 1 || y < 1) throw new IllegalArgumentException("mouse coordinates are one-based");
     }
   }
 
-  enum Button { LEFT, MIDDLE, RIGHT, NONE, SCROLL_UP, SCROLL_DOWN }
+  enum Button {
+    LEFT, MIDDLE, RIGHT, NONE, SCROLL_UP, SCROLL_DOWN, SCROLL_LEFT, SCROLL_RIGHT
+  }
   enum Kind { PRESS, RELEASE, MOVE }
 }

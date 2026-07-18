@@ -58,6 +58,10 @@ The terminal input boundary tests additionally pin AgenTTY's 256-byte CSI and
 16 MiB OSC/bracketed-paste limits. They prove that invalid UTF-8 continuations
 and paste-overflow bytes are reprocessed in the ground state, while the byte
 that overflows CSI or OSC is discarded with the partial sequence.
+Differential edge assertions also cover the 50 ms bare-Escape timeout,
+unknown-SS3 suppression, horizontal-wheel reports, zero and extra mouse
+fields, saturating/private CSI parameters, and AgenTTY's padding-terminated
+base64 decoder.
 
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.

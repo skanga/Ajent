@@ -4,18 +4,22 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.LongSupplier;
 
 /** Incremental port of Maya's terminal input FSM. */
 public final class TerminalInputDecoder {
   private static final byte[] PASTE_END = {0x1b, '[', '2', '0', '1', '~'};
   private static final int DEFAULT_MAX_CSI_BYTES = 256;
   private static final int DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
+  private static final long ESCAPE_TIMEOUT_NANOS = 50_000_000L;
   private enum State { GROUND, ESCAPE, CSI, SS3, OSC, UTF8, BRACKETED_PASTE }
 
   private State state = State.GROUND;
   private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
   private final int maxCsiBytes;
   private final int maxPayloadBytes;
+  private final LongSupplier nanoTime;
+  private long escapeStartedNanos;
   private int utf8CodePoint;
   private int utf8Remaining;
   private boolean kittyClipboardActive;
@@ -23,15 +27,20 @@ public final class TerminalInputDecoder {
   private byte[] kittyData = new byte[0];
 
   public TerminalInputDecoder() {
-    this(DEFAULT_MAX_CSI_BYTES, DEFAULT_MAX_PAYLOAD_BYTES);
+    this(DEFAULT_MAX_CSI_BYTES, DEFAULT_MAX_PAYLOAD_BYTES, System::nanoTime);
   }
 
   TerminalInputDecoder(int maxCsiBytes, int maxPayloadBytes) {
+    this(maxCsiBytes, maxPayloadBytes, System::nanoTime);
+  }
+
+  TerminalInputDecoder(int maxCsiBytes, int maxPayloadBytes, LongSupplier nanoTime) {
     if (maxCsiBytes < 1 || maxPayloadBytes < 1) {
       throw new IllegalArgumentException("input buffer limits must be positive");
     }
     this.maxCsiBytes = maxCsiBytes;
     this.maxPayloadBytes = maxPayloadBytes;
+    this.nanoTime = java.util.Objects.requireNonNull(nanoTime, "nanoTime");
   }
 
   public List<TerminalEvent> feed(byte[] input) {
@@ -49,6 +58,7 @@ public final class TerminalInputDecoder {
 
   public List<TerminalEvent> flushEscape() {
     if (state != State.ESCAPE) return List.of();
+    if (nanoTime.getAsLong() - escapeStartedNanos < ESCAPE_TIMEOUT_NANOS) return List.of();
     state = State.GROUND;
     buffer.reset();
     return List.of(key(TerminalKey.SpecialKey.ESCAPE, TerminalKey.Modifiers.NONE));
@@ -83,6 +93,7 @@ public final class TerminalInputDecoder {
       state = State.ESCAPE;
       buffer.reset();
       buffer.write(value);
+      escapeStartedNanos = nanoTime.getAsLong();
     } else if (value == '\r' || value == '\n') {
       events.add(key(TerminalKey.SpecialKey.ENTER, TerminalKey.Modifiers.NONE));
     } else if (value == '\t') {
@@ -156,7 +167,6 @@ public final class TerminalInputDecoder {
       default -> null;
     };
     if (key != null) events.add(key(key, TerminalKey.Modifiers.NONE));
-    else events.add(character('?', TerminalKey.Modifiers.NONE));
   }
 
   private void parseCsi(List<TerminalEvent> events) {
@@ -240,17 +250,18 @@ public final class TerminalInputDecoder {
 
   private static void mouse(String parameters, char finalByte, List<TerminalEvent> events) {
     int[] values = parameters(parameters);
-    if (values.length != 3 || values[1] < 1 || values[2] < 1) return;
+    if (values.length < 3) return;
     int code = values[0];
     TerminalKey.Modifiers mods = new TerminalKey.Modifiers(
         (code & 16) != 0, (code & 8) != 0, (code & 4) != 0);
-    TerminalEvent.Button button;
-    if ((code & 64) != 0) button = (code & 1) == 0
-        ? TerminalEvent.Button.SCROLL_UP : TerminalEvent.Button.SCROLL_DOWN;
-    else button = switch (code & 3) {
+    TerminalEvent.Button button = switch (code & 0x43) {
       case 0 -> TerminalEvent.Button.LEFT;
       case 1 -> TerminalEvent.Button.MIDDLE;
       case 2 -> TerminalEvent.Button.RIGHT;
+      case 64 -> TerminalEvent.Button.SCROLL_UP;
+      case 65 -> TerminalEvent.Button.SCROLL_DOWN;
+      case 66 -> TerminalEvent.Button.SCROLL_LEFT;
+      case 67 -> TerminalEvent.Button.SCROLL_RIGHT;
       default -> TerminalEvent.Button.NONE;
     };
     TerminalEvent.Kind kind = finalByte == 'm' ? TerminalEvent.Kind.RELEASE
@@ -407,33 +418,49 @@ public final class TerminalInputDecoder {
   }
 
   private static byte[] decodeBase64(String value) {
-    String normalized = value.replaceAll("[ \\t\\r\\n]", "");
-    for (int index = 0; index < normalized.length(); index++) {
-      char character = normalized.charAt(index);
-      if (!(character >= 'A' && character <= 'Z'
-          || character >= 'a' && character <= 'z'
-          || character >= '0' && character <= '9'
-          || character == '+' || character == '/' || character == '=')) return null;
+    var decoded = new ByteArrayOutputStream(value.length() / 4 * 3 + 3);
+    int accumulator = 0;
+    int bits = 0;
+    for (int index = 0; index < value.length(); index++) {
+      char character = value.charAt(index);
+      if (character == '=') break;
+      if (character == ' ' || character == '\t'
+          || character == '\r' || character == '\n') continue;
+      int digit;
+      if (character >= 'A' && character <= 'Z') digit = character - 'A';
+      else if (character >= 'a' && character <= 'z') digit = character - 'a' + 26;
+      else if (character >= '0' && character <= '9') digit = character - '0' + 52;
+      else if (character == '+') digit = 62;
+      else if (character == '/') digit = 63;
+      else return null;
+      accumulator = (accumulator << 6) | digit;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        decoded.write((accumulator >> bits) & 0xff);
+      }
     }
-    try {
-      return java.util.Base64.getDecoder().decode(normalized);
-    } catch (IllegalArgumentException exception) {
-      return null;
-    }
+    return decoded.toByteArray();
   }
 
   private static int[] parameters(String value) {
     if (value.isEmpty()) return new int[0];
-    String[] parts = value.split(";", -1);
-    int[] result = new int[parts.length];
-    try {
-      for (int index = 0; index < parts.length; index++) {
-        result[index] = parts[index].isEmpty() ? 0 : Integer.parseInt(parts[index]);
+    var result = new java.util.ArrayList<Integer>();
+    int current = 0;
+    boolean hasDigit = false;
+    for (int index = 0; index < value.length(); index++) {
+      char character = value.charAt(index);
+      if (character >= '0' && character <= '9') {
+        if (current < 100_000_000) current = current * 10 + character - '0';
+        hasDigit = true;
+      } else if (character == ';') {
+        result.add(hasDigit ? current : 0);
+        current = 0;
+        hasDigit = false;
       }
-      return result;
-    } catch (NumberFormatException exception) {
-      return new int[0];
     }
+    result.add(hasDigit ? current : 0);
+    return result.stream().mapToInt(Integer::intValue).toArray();
   }
 
   private static TerminalKey.Modifiers modifiers(int parameter) {
@@ -443,10 +470,10 @@ public final class TerminalInputDecoder {
 
   private static TerminalKey.SpecialKey tilde(int code) {
     return switch (code) {
-      case 1, 7 -> TerminalKey.SpecialKey.HOME;
+      case 1 -> TerminalKey.SpecialKey.HOME;
       case 2 -> TerminalKey.SpecialKey.INSERT;
       case 3 -> TerminalKey.SpecialKey.DELETE;
-      case 4, 8 -> TerminalKey.SpecialKey.END;
+      case 4 -> TerminalKey.SpecialKey.END;
       case 5 -> TerminalKey.SpecialKey.PAGE_UP;
       case 6 -> TerminalKey.SpecialKey.PAGE_DOWN;
       case 11 -> TerminalKey.SpecialKey.F1;

@@ -3,6 +3,7 @@ package com.github.skanga.ajent.terminal.input;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 final class TerminalInputDecoderTest {
@@ -53,12 +54,15 @@ final class TerminalInputDecoderTest {
   }
 
   @Test void decodesAltKeysAndFlushesAStandaloneEscape() {
-    var decoder = new TerminalInputDecoder();
+    var clock = new AtomicLong();
+    var decoder = new TerminalInputDecoder(256, 1024, clock::get);
     assertThat(decoder.feed(ascii("\u001bv\u001b\r"))).containsExactly(
         character('v', new TerminalKey.Modifiers(false, true, false)),
         special(TerminalKey.SpecialKey.ENTER,
             new TerminalKey.Modifiers(false, true, false)));
     assertThat(decoder.feed(new byte[] {0x1b})).isEmpty();
+    assertThat(decoder.flushEscape()).isEmpty();
+    clock.addAndGet(50_000_000L);
     assertThat(decoder.flushEscape()).containsExactly(special(TerminalKey.SpecialKey.ESCAPE));
     assertThat(decoder.flushEscape()).isEmpty();
   }
@@ -117,8 +121,7 @@ final class TerminalInputDecoderTest {
         .containsExactly(TerminalKey.SpecialKey.UP, TerminalKey.SpecialKey.DOWN,
             TerminalKey.SpecialKey.RIGHT, TerminalKey.SpecialKey.LEFT,
             TerminalKey.SpecialKey.HOME, TerminalKey.SpecialKey.END,
-            TerminalKey.SpecialKey.F3, TerminalKey.SpecialKey.F4,
-            new TerminalKey.CharacterKey('?'));
+            TerminalKey.SpecialKey.F3, TerminalKey.SpecialKey.F4);
 
     int[] codes = {1, 2, 4, 6, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23, 24};
     var sequences = new StringBuilder();
@@ -151,8 +154,20 @@ final class TerminalInputDecoderTest {
                 5, 6, TerminalKey.Modifiers.NONE),
             new TerminalEvent.Mouse(TerminalEvent.Button.NONE, TerminalEvent.Kind.PRESS,
                 7, 8, TerminalKey.Modifiers.NONE));
-    assertThat(decoder.feed(ascii("\u001b[<0;0;1M\u001b[<0;1M"))).isEmpty();
+    assertThat(decoder.feed(ascii("\u001b[<0;0;1M\u001b[<0;1M"))).containsExactly(
+        new TerminalEvent.Mouse(TerminalEvent.Button.LEFT, TerminalEvent.Kind.PRESS,
+            0, 1, TerminalKey.Modifiers.NONE));
     assertThat(decoder.feed(ascii("\u001b[<x"))).containsExactly(character('?'));
+  }
+
+  @Test void decodesHorizontalWheelZeroCoordinatesAndIgnoresExtraMouseFields() {
+    var decoder = new TerminalInputDecoder();
+    assertThat(decoder.feed(ascii("\u001b[<66;0;0;99M\u001b[<67;2;3M")))
+        .containsExactly(
+            new TerminalEvent.Mouse(TerminalEvent.Button.SCROLL_LEFT, TerminalEvent.Kind.PRESS,
+                0, 0, TerminalKey.Modifiers.NONE),
+            new TerminalEvent.Mouse(TerminalEvent.Button.SCROLL_RIGHT, TerminalEvent.Kind.PRESS,
+                2, 3, TerminalKey.Modifiers.NONE));
   }
 
   @Test void acceptsEmptyCsiParametersAndSplitSequenceBytes() {
@@ -200,6 +215,20 @@ final class TerminalInputDecoderTest {
     assertThat(decoder.feed(ascii("\u001b]52;c;\u001b\\\u001b]52;c;?\u001b\\"))).isEmpty();
     assertThat(decoder.feed(ascii("\u001b]52;c;%%%\u001b\\\u001b]52-no-semi\u0007"))).isEmpty();
     assertThat(decoder.feed(ascii("\u001b]0;title\u0007\u001b]11;rgb:0/0/0\u001b\\"))).isEmpty();
+  }
+
+  @Test void matchesNativeLenientBase64PaddingAndWhitespaceRules() {
+    var decoder = new TerminalInputDecoder();
+    assertThat(decoder.feed(ascii("\u001b]52;c;a Gk=ignored%%%\u001b\\")))
+        .containsExactly(new TerminalEvent.Paste("hi"));
+    assertThat(decoder.feed(ascii("\u001b]52;c;aGk%%%\u001b\\"))).isEmpty();
+  }
+
+  @Test void saturatesHugeCsiNumbersAndSkipsPrivateMarkerCharacters() {
+    var decoder = new TerminalInputDecoder();
+    assertThat(decoder.feed(ascii("\u001b[999999999999999999999u"))).isEmpty();
+    assertThat(decoder.feed(ascii("\u001b[?65u"))).containsExactly(character('A'));
+    assertThat(decoder.feed(ascii("\u001b[7~\u001b[8~"))).isEmpty();
   }
 
   @Test void reassemblesKittyImageChunksAndPrefersImagesOverText() {
