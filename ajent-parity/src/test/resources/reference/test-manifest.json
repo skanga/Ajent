@@ -778,9 +778,16 @@
       "classification": "terminal-oracle",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^visual_hash_coverage_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/VisualHashCoverageTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-cli/src/test/java/com/github/skanga/ajent/cli/VisualHashCoverageTest.java",
+      "supportingCounterparts": [
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveVisualHash.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q test",
+        "all 43 native visual axes plus the two invariant axes and idle stability are translated; the production UI gate is exercised directly"
+      ]
     }
   ]
 }

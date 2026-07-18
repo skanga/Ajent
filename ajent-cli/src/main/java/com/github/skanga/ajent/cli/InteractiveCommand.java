@@ -87,6 +87,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -154,7 +155,7 @@ final class InteractiveCommand {
       var ui = new Ui(new TerminalPort() {
         @Override public JLineTerminalSession.Size size() { return terminal.size(); }
         @Override public void write(String value) { terminal.write(value); }
-      }, state, permission, animations, environment);
+      }, state, permission, animations, environment, configured.profile(), configured.model());
       activeUi.set(ui);
       configured.todos().onChange(ui::updatePlan);
       permission.onChange(ui::render);
@@ -897,6 +898,11 @@ final class InteractiveCommand {
     private String composer = "";
     private List<Attachment> composerAttachments = List.of();
     private int cursor;
+    private Profile profile;
+    private String modelId;
+    private boolean visualHashInitialized;
+    private long lastVisualHash;
+    private long renderPasses;
     private com.github.skanga.ajent.domain.MessageId revealMessage;
     private StreamingMarkdown reveal;
     private final ScrollbackLedger<List<StyledLine>> frozen = new ScrollbackLedger<>();
@@ -925,13 +931,29 @@ final class InteractiveCommand {
     }
 
     Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
+        AnimationPort animations, Map<String, String> environment,
+        Profile profile, String modelId) {
+      this(terminal, agent, permission, animations, environment,
+          new SystemClipboardReader(environment), profile, modelId);
+    }
+
+    Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
         AnimationPort animations, Map<String, String> environment, ClipboardReader clipboard) {
+      this(terminal, agent, permission, animations, environment, clipboard,
+          Profile.ASK, "claude-opus-4-5");
+    }
+
+    private Ui(TerminalPort terminal, AtomicReference<AgentState> agent,
+        PermissionGate permission, AnimationPort animations, Map<String, String> environment,
+        ClipboardReader clipboard, Profile profile, String modelId) {
       this.terminal = terminal;
       this.agent = agent;
       this.permission = permission;
       this.animations = animations;
       this.environment = Map.copyOf(environment);
       this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
+      this.profile = Objects.requireNonNull(profile, "profile");
+      this.modelId = Objects.requireNonNull(modelId, "modelId");
     }
 
     boolean key(TerminalKey key, AgentControl loop) {
@@ -1201,7 +1223,7 @@ final class InteractiveCommand {
               } else if (command == CommandPalette.Command.REWIND_CHECKPOINT) {
                 openCheckpoints(loop);
               } else if (command == CommandPalette.Command.CYCLE_PROFILE) {
-                Profile profile = loop.cycleProfile();
+                profile = loop.cycleProfile();
                 uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
               } else if (command == CommandPalette.Command.INSPECT_TOOL_OUTPUTS) {
                 openToolViewer(loop.state());
@@ -1247,6 +1269,7 @@ final class InteractiveCommand {
     void openModelPicker(AgentControl loop) {
       modelsLoading = true;
       effort = loop.effort();
+      modelId = loop.model();
       if (models.isEmpty()) {
         models = List.of(new ModelPicker.Model(loop.model(), loop.model(), false));
       }
@@ -1542,6 +1565,7 @@ final class InteractiveCommand {
             modelPicker = selected.state();
             selected.model().ifPresent(model -> {
               loop.selectModel(model.id());
+              modelId = model.id();
               effort = effort.clamp(ModelCapabilities.fromId(model.id()));
               uiStatus = "model: " + model.displayName();
             });
@@ -1818,8 +1842,15 @@ final class InteractiveCommand {
         if (state == null) return;
         JLineTerminalSession.Size size = terminal.size();
         int width = Math.max(1, size.columns());
-        RenderedLines rendered = lines(state, permission.current(), width, Math.max(1, size.rows()), composer,
-            animations.nowNanos());
+        int terminalRows = Math.max(1, size.rows());
+        ToolUse pendingPermission = permission.current();
+        long nowNanos = animations.nowNanos();
+        long candidateHash = visualHash(
+            state, pendingPermission, width, terminalRows, nowNanos);
+        if (visualHashInitialized && candidateHash == lastVisualHash) return;
+        renderPasses++;
+        RenderedLines rendered = lines(
+            state, pendingPermission, width, terminalRows, composer, nowNanos);
         List<StyledLine> lines = rendered.lines();
         if (palette instanceof CommandPalette.Open open) {
           lines = new ArrayList<>(lines);
@@ -2114,8 +2145,13 @@ final class InteractiveCommand {
           frame = InlineFrameRenderer.commitScrollback(
               frame, rendered.scrollbackDebt().orElseThrow());
         }
-        frame = render(frame, canvas, rows, Math.max(1, size.rows()), styles,
+        frame = render(frame, canvas, rows, terminalRows, styles,
             value -> terminal.write(value));
+        lastVisualHash = visualHash(state, pendingPermission, width, terminalRows, nowNanos);
+        // A scheduled frame is also an internal reveal/freeze transition. Keep that one-shot
+        // chain ungated; once it drains, the settled fingerprint resumes suppressing no-op ticks.
+        boolean trimPending = frozen.rowTotal() > Math.max(48L, terminalRows * 3L);
+        visualHashInitialized = !rendered.animating() && !trimPending;
         if (rendered.animating()) animations.request(this::render);
       }
     }
@@ -2160,6 +2196,183 @@ final class InteractiveCommand {
 
     boolean frameSynced() {
       synchronized (lock) { return frame instanceof InlineFrameRenderer.Synced; }
+    }
+
+    long visualHash() {
+      synchronized (lock) {
+        AgentState state = agent.get();
+        if (state == null) return 0;
+        JLineTerminalSession.Size size = terminal.size();
+        return visualHash(state, permission.current(), Math.max(1, size.columns()),
+            Math.max(1, size.rows()), animations.nowNanos());
+      }
+    }
+
+    long renderPasses() {
+      synchronized (lock) { return renderPasses; }
+    }
+
+    private long visualHash(AgentState state, ToolUse pendingPermission,
+        int width, int terminalRows, long nowNanos) {
+      List<Message> messages = state.thread().messages();
+      int liveStart = Math.clamp(frozenThrough, 0, messages.size());
+      List<Long> renderKeys = messages.subList(liveStart, messages.size()).stream()
+          .map(InteractiveVisualHash::messageKey).toList();
+      boolean active = !(state.phase() instanceof SessionPhase.Idle);
+      boolean revealAnimating = reveal != null && reveal.requiresAnimation();
+      long animationBucket = revealAnimating ? 1 + nowNanos / 16_000_000L
+          : active ? 1 + nowNanos / 100_000_000L : 0;
+
+      var surfaces = new EnumMap<InteractiveVisualHash.Surface,
+          InteractiveVisualHash.SurfaceState>(InteractiveVisualHash.Surface.class);
+      surfaces.put(InteractiveVisualHash.Surface.MODEL_PICKER,
+          oneAxis(modelPicker, contentKey(modelsLoading, models)));
+      surfaces.put(InteractiveVisualHash.Surface.PROVIDER_PICKER,
+          oneAxis(providerPicker, contentKey(providerRows)));
+      surfaces.put(InteractiveVisualHash.Surface.THREAD_LIST,
+          oneAxis(threadPicker, contentKey(threadsLoading, threadLoading, threadRows)));
+      surfaces.put(InteractiveVisualHash.Surface.DIFF_REVIEW, diffSurface());
+      surfaces.put(InteractiveVisualHash.Surface.COMMAND_PALETTE, commandSurface());
+      surfaces.put(InteractiveVisualHash.Surface.MENTION_PALETTE, mentionSurface());
+      surfaces.put(InteractiveVisualHash.Surface.SYMBOL_PALETTE, symbolSurface());
+      InteractiveVisualHash.SurfaceState planSurface = modalSurface(
+          plan, contentKey(planItems));
+      surfaces.put(InteractiveVisualHash.Surface.TODO, planSurface);
+      surfaces.put(InteractiveVisualHash.Surface.PLAN, planSurface);
+      surfaces.put(InteractiveVisualHash.Surface.TOOL_VIEWER, toolViewerSurface());
+      surfaces.put(InteractiveVisualHash.Surface.CODE_BLOCKS, codeBlockSurface());
+      surfaces.put(InteractiveVisualHash.Surface.LOGIN, loginSurface());
+      surfaces.put(InteractiveVisualHash.Surface.CHECKPOINTS, checkpointSurface());
+      surfaces.put(InteractiveVisualHash.Surface.VIEWPORT,
+          new InteractiveVisualHash.SurfaceState(1, width, terminalRows, "", false, 0,
+              contentKey(state.thread().id())));
+
+      String visibleStatus = state.status() + '\0' + uiStatus;
+      return InteractiveVisualHash.hash(new InteractiveVisualHash.State(
+          messages.size(), frozen.size(), frozenThrough, renderKeys,
+          profile, modelId, pendingPermission != null, state.phase().kind().ordinal(),
+          visibleStatus, 0, active, active ? (int) (nowNanos / 100_000_000L) : 0,
+          new InteractiveVisualHash.ComposerState(
+              composer, cursor, composerAttachments.size(), state.queued().size(), false),
+          surfaces, animationBucket, state.lastTickNanos(), state.tokensIn(), state.tokensOut()));
+    }
+
+    private static InteractiveVisualHash.SurfaceState oneAxis(
+        PickerState.OneAxis state, long contentKey) {
+      return state instanceof PickerState.OpenAt open
+          ? new InteractiveVisualHash.SurfaceState(
+              1, open.index(), 0, open.query(), false, 0, contentKey)
+          : InteractiveVisualHash.SurfaceState.closed();
+    }
+
+    private static InteractiveVisualHash.SurfaceState modalSurface(
+        PickerState.Modal state, long contentKey) {
+      return state instanceof PickerState.OpenModal
+          ? new InteractiveVisualHash.SurfaceState(1, 0, 0, "", false, 0, contentKey)
+          : InteractiveVisualHash.SurfaceState.closed();
+    }
+
+    private InteractiveVisualHash.SurfaceState commandSurface() {
+      return palette instanceof CommandPalette.Open open
+          ? new InteractiveVisualHash.SurfaceState(
+              1, open.index(), 0, open.query(), false, 0, 0)
+          : InteractiveVisualHash.SurfaceState.closed();
+    }
+
+    private InteractiveVisualHash.SurfaceState mentionSurface() {
+      return mentions instanceof MentionPicker.Open open
+          ? new InteractiveVisualHash.SurfaceState(1, open.index(), 0, open.query(), false, 0,
+              contentKey(open.files()))
+          : InteractiveVisualHash.SurfaceState.closed();
+    }
+
+    private InteractiveVisualHash.SurfaceState symbolSurface() {
+      return symbols instanceof SymbolPicker.Open open
+          ? new InteractiveVisualHash.SurfaceState(1, open.index(), 0, open.query(), false, 0,
+              contentKey(open.symbols()))
+          : InteractiveVisualHash.SurfaceState.closed();
+    }
+
+    private InteractiveVisualHash.SurfaceState diffSurface() {
+      if (!(diffReview instanceof PickerState.OpenAtCell cell)) {
+        return InteractiveVisualHash.SurfaceState.closed();
+      }
+      long key = contentKey(diffFiles.size());
+      if (cell.fileIndex() >= 0 && cell.fileIndex() < diffFiles.size()) {
+        DiffReview.File file = diffFiles.get(cell.fileIndex());
+        key = contentKey(file.path(), file.added(), file.removed(), file.hunks().size());
+        if (cell.hunkIndex() >= 0 && cell.hunkIndex() < file.hunks().size()) {
+          DiffReview.Hunk hunk = file.hunks().get(cell.hunkIndex());
+          key = contentKey(key, hunk.header(), hunk.patch().length(), hunk.status());
+        }
+      }
+      return new InteractiveVisualHash.SurfaceState(
+          1, cell.fileIndex(), cell.hunkIndex(), "", false, 0, key);
+    }
+
+    private InteractiveVisualHash.SurfaceState toolViewerSurface() {
+      if (!(toolViewer instanceof ToolOutputViewer.Open open)) {
+        return InteractiveVisualHash.SurfaceState.closed();
+      }
+      long key = contentKey(open.entries().size());
+      if (open.index() >= 0 && open.index() < open.entries().size()) {
+        ToolOutputViewer.Entry entry = open.entries().get(open.index());
+        key = contentKey(entry.name(), entry.title(), entry.trailing(), entry.output().length(),
+            entry.failed());
+      }
+      return new InteractiveVisualHash.SurfaceState(
+          1, open.index(), 0, "", open.viewing(), open.scrollY(), key);
+    }
+
+    private InteractiveVisualHash.SurfaceState codeBlockSurface() {
+      return switch (codeBlocks) {
+        case CodeBlockPicker.Closed ignored -> InteractiveVisualHash.SurfaceState.closed();
+        case CodeBlockPicker.Open open -> {
+          long key = contentKey(open.blocks().size());
+          if (open.index() >= 0 && open.index() < open.blocks().size()) {
+            CodeBlockPicker.Block block = open.blocks().get(open.index());
+            key = contentKey(block.language(), block.preview(), block.lineCount());
+          }
+          yield new InteractiveVisualHash.SurfaceState(
+              1, open.index(), 0, "", false, 0, key);
+        }
+        case CodeBlockPicker.Result result -> new InteractiveVisualHash.SurfaceState(
+            2, 0, 0, "", true, result.scroll(),
+            contentKey(result.command(), result.output().length(), result.exitCode(),
+                result.timedOut()));
+      };
+    }
+
+    private InteractiveVisualHash.SurfaceState loginSurface() {
+      if (login instanceof LoginModal.Closed) return InteractiveVisualHash.SurfaceState.closed();
+      return new InteractiveVisualHash.SurfaceState(
+          loginVariant(login), 0, 0, "", false, 0, contentKey(login));
+    }
+
+    private static int loginVariant(LoginModal.State state) {
+      return switch (state) {
+        case LoginModal.Closed ignored -> 0;
+        case LoginModal.Picking ignored -> 1;
+        case LoginModal.OAuthCode ignored -> 2;
+        case LoginModal.OAuthExchanging ignored -> 3;
+        case LoginModal.ApiKeyInput ignored -> 4;
+        case LoginModal.CustomHostInput ignored -> 5;
+        case LoginModal.Failed ignored -> 6;
+      };
+    }
+
+    private InteractiveVisualHash.SurfaceState checkpointSurface() {
+      if (!(checkpoints instanceof CheckpointPicker.Open open)) {
+        return InteractiveVisualHash.SurfaceState.closed();
+      }
+      long key = contentKey(open.entries().stream().map(entry -> List.of(
+          entry.diffState(), entry.filesChanged(), entry.insertions(), entry.deletions())).toList());
+      return new InteractiveVisualHash.SurfaceState(
+          1, open.index(), 0, "", checkpointRestoring, 0, key);
+    }
+
+    private static long contentKey(Object... values) {
+      return Integer.toUnsignedLong(Objects.hash(values));
     }
 
     private static InlineFrameRenderer.Frame render(InlineFrameRenderer.Frame frame,
