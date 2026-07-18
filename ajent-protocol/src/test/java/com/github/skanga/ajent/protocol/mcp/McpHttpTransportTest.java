@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -70,6 +71,76 @@ final class McpHttpTransportTest {
       assertThat(request.authorization()).isEqualTo("Bearer secret");
       assertThat(request.accept()).contains("application/json", "text/event-stream");
     });
+  }
+
+  @Test void portsTheLiveHttpCapabilityBridgeEndToEnd() throws Exception {
+    var sentListChange = new AtomicBoolean();
+    try (var server = server(exchange -> {
+      JsonNode request = read(exchange);
+      String method = request.path("method").asText();
+      switch (method) {
+        case "initialize" -> respond(exchange, 200, "application/json", "bridge-session",
+            response(request, """
+                {"protocolVersion":"2025-11-25","capabilities":{
+                  "tools":{},"resources":{"listChanged":true},"prompts":{}},
+                 "serverInfo":{"name":"http-demo"}}
+                """));
+        case "notifications/initialized" -> respond(exchange, 202, null, null, "");
+        case "tools/list" -> respond(exchange, 200, "application/json", null,
+            response(request, """
+                {"tools":[{"name":"echo","description":"Echo text",
+                  "inputSchema":{"type":"object"}}]}
+                """));
+        case "resources/list" -> respond(exchange, 200, "application/json", null,
+            response(request, """
+                {"resources":[{"uri":"mem://note","name":"note","title":"Note"}]}
+                """));
+        case "resources/templates/list" -> respond(exchange, 200, "application/json", null,
+            response(request, "{\"resourceTemplates\":[]}"));
+        case "prompts/list" -> respond(exchange, 200, "application/json", null,
+            response(request, """
+                {"prompts":[{"name":"greet","description":"Greeting"}]}
+                """));
+        case "tools/call" -> respond(exchange, 200, "application/json", null,
+            response(request, """
+                {"content":[{"type":"text","text":"echo: ping"}]}
+                """));
+        case "resources/read" -> {
+          String notification = "{\"jsonrpc\":\"2.0\",\"method\":"
+              + "\"notifications/resources/list_changed\",\"params\":{}}";
+          String reply = response(request,
+              "{\"contents\":[{\"uri\":\"mem://note\",\"text\":\"remote note body\"}]}");
+          respond(exchange, 200, "text/event-stream", null,
+              "data: " + notification + "\n\ndata: " + reply + "\n\n");
+        }
+        case "prompts/get" -> respond(exchange, 200, "application/json", null,
+            response(request, """
+                {"messages":[{"role":"user","content":{"type":"text",
+                  "text":"Hello Ada"}}]}
+                """));
+        default -> respond(exchange, 500, "text/plain", null, method);
+      }
+    })) {
+      var configuration = new McpConfigLoader.Server.Http("demo", endpoint(server), Map.of());
+      try (var session = new McpClientSession("demo", new McpHttpTransport(configuration),
+          Duration.ofSeconds(5), "test")) {
+        session.onListChanged(() -> sentListChange.set(true));
+        session.connect();
+        assertThat(session.serverName()).isEqualTo("http-demo");
+        assertThat(session.tools()).extracting(McpClientSession.RemoteTool::name)
+            .containsExactly("echo");
+        assertThat(session.call("echo", JSON.createObjectNode().put("text", "ping")).text())
+            .contains("echo: ping");
+        assertThat(session.resources()).extracting(McpClientSession.Resource::uri)
+            .containsExactly("mem://note");
+        assertThat(session.readResource("mem://note")).contains("remote note body");
+        assertThat(sentListChange).isTrue();
+        assertThat(session.prompts()).extracting(McpClientSession.Prompt::name)
+            .containsExactly("greet");
+        assertThat(session.getPrompt("greet", Map.of("name", "Ada")))
+            .contains("Hello Ada");
+      }
+    }
   }
 
   @Test void mapsProtocolHttpTimeoutAndCloseFailuresAndClearsExpiredSession() throws Exception {

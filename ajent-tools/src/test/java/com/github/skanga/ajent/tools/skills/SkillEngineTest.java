@@ -63,6 +63,8 @@ final class SkillEngineTest {
         .isEqualTo("Use when: things have colons");
     assertThat(engine.find("othername")).isPresent();
     assertThat(engine.find("dirname-x")).isEmpty();
+    assertThat(engine.lint(engine.find("othername").orElseThrow()))
+        .anyMatch(message -> message.contains("does not match parent directory"));
     assertThat(engine.find("bare").orElseThrow().description())
         .isEqualTo("Just a bare instruction doc.");
     Skill full = engine.find("full-meta").orElseThrow();
