@@ -51,7 +51,8 @@ public final class ComposerKeyRouter {
         case END -> command(Action.CURSOR_END);
         case UP -> up(state, event.modifiers());
         case DOWN -> down(state, event.modifiers());
-        case ESCAPE, TAB, BACK_TAB -> Optional.empty();
+        case ESCAPE, TAB, BACK_TAB, INSERT, DELETE, PAGE_UP, PAGE_DOWN,
+             F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12 -> Optional.empty();
       };
     }
     var character = (TerminalKey.CharacterKey) event.key();

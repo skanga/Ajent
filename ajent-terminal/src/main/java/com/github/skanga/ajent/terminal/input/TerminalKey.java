@@ -22,7 +22,8 @@ public record TerminalKey(Key key, Modifiers modifiers) {
   }
 
   public enum SpecialKey implements Key {
-    ENTER, BACKSPACE, LEFT, RIGHT, HOME, END, UP, DOWN, ESCAPE, TAB, BACK_TAB
+    ENTER, BACKSPACE, LEFT, RIGHT, HOME, END, UP, DOWN, ESCAPE, TAB, BACK_TAB,
+    INSERT, DELETE, PAGE_UP, PAGE_DOWN, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12
   }
 
   public record Modifiers(boolean ctrl, boolean alt, boolean shift) {
