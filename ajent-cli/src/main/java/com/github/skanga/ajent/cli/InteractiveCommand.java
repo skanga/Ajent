@@ -62,6 +62,9 @@ import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.process.ProcessRunner;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.runtime.FileChange;
+import com.github.skanga.ajent.tools.attachment.ClipboardReader;
+import com.github.skanga.ajent.tools.attachment.ImagePaste;
+import com.github.skanga.ajent.tools.attachment.SystemClipboardReader;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
 import com.github.skanga.ajent.tools.host.HostServices;
 import com.github.skanga.ajent.tools.workspace.GitCheckpointStore;
@@ -142,7 +145,7 @@ final class InteractiveCommand {
       var ui = new Ui(new TerminalPort() {
         @Override public JLineTerminalSession.Size size() { return terminal.size(); }
         @Override public void write(String value) { terminal.write(value); }
-      }, state, permission, animations);
+      }, state, permission, animations, environment);
       activeUi.set(ui);
       configured.todos().onChange(ui::updatePlan);
       permission.onChange(ui::render);
@@ -444,7 +447,7 @@ final class InteractiveCommand {
             if (event instanceof TerminalEvent.Key key) {
               running = ui.key(key.value(), control);
             } else if (event instanceof TerminalEvent.Paste paste) {
-              ui.paste(paste.text());
+              ui.paste(paste.content());
             }
             if (!running) break;
           }
@@ -702,6 +705,8 @@ final class InteractiveCommand {
     private final AtomicReference<AgentState> agent;
     private final PermissionGate permission;
     private final AnimationPort animations;
+    private final Map<String, String> environment;
+    private final ClipboardReader clipboard;
     private final TerminalStylePool styles = new TerminalStylePool();
     private InlineFrameRenderer.Frame frame = new InlineFrameRenderer.Empty();
     private CommandPalette.State palette = new CommandPalette.Closed();
@@ -737,15 +742,28 @@ final class InteractiveCommand {
       this(terminal, agent, permission, new AnimationPort() {
         @Override public long nowNanos() { return System.nanoTime(); }
         @Override public void request(Runnable frame) { }
-      });
+      }, System.getenv());
     }
 
     Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
         AnimationPort animations) {
+      this(terminal, agent, permission, animations, System.getenv());
+    }
+
+    Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
+        AnimationPort animations, Map<String, String> environment) {
+      this(terminal, agent, permission, animations, environment,
+          new SystemClipboardReader(environment));
+    }
+
+    Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
+        AnimationPort animations, Map<String, String> environment, ClipboardReader clipboard) {
       this.terminal = terminal;
       this.agent = agent;
       this.permission = permission;
       this.animations = animations;
+      this.environment = Map.copyOf(environment);
+      this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
     }
 
     boolean key(TerminalKey key, AgentControl loop) {
@@ -779,6 +797,11 @@ final class InteractiveCommand {
       if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
       if (threadPicker instanceof PickerState.OpenAt) return threadPickerKey(key, loop);
       if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
+      if (key.key() instanceof TerminalKey.CharacterKey character
+          && isSmartPasteKey(character.codePoint(), key.modifiers())) {
+        smartPaste();
+        return true;
+      }
       if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
         int codePoint = Character.toLowerCase(character.codePoint());
         if (codePoint == 'c') return false;
@@ -859,6 +882,24 @@ final class InteractiveCommand {
       if (cursor == 0) return true;
       char previous = composer.charAt(cursor - 1);
       return previous == ' ' || previous == '\t' || previous == '\n';
+    }
+
+    private static boolean isSmartPasteKey(
+        int codePoint, TerminalKey.Modifiers modifiers) {
+      int normalized = codePoint >= 1 && codePoint <= 26 ? 'a' + codePoint - 1
+          : Character.toLowerCase(codePoint);
+      return normalized == 'v' && (modifiers.ctrl() && !modifiers.alt()
+          || modifiers.alt() && !modifiers.ctrl());
+    }
+
+    private void smartPaste() {
+      Optional<Attachment> image = clipboard.image();
+      if (image.isPresent()) {
+        insertAttachment(image.orElseThrow());
+        return;
+      }
+      Optional<String> text = clipboard.text();
+      if (text.isPresent() && !text.orElseThrow().isEmpty()) paste(text.orElseThrow());
     }
 
     private boolean mentionKey(TerminalKey key) {
@@ -1534,12 +1575,51 @@ final class InteractiveCommand {
     }
 
     void paste(String value) {
+      paste(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    void paste(byte[] value) {
       if (LoginModal.isInputState(login)) {
-        login = LoginModal.paste(login, value);
+        login = LoginModal.paste(login,
+            new String(value, java.nio.charset.StandardCharsets.UTF_8));
         render();
-      } else {
-        insert(value);
+        return;
       }
+      if (value.length == 0) {
+        smartPaste();
+        return;
+      }
+      Optional<Attachment> rawImage = ImagePaste.raw(value, "<paste>");
+      if (rawImage.isPresent()) {
+        insertAttachment(rawImage.orElseThrow());
+        return;
+      }
+      String pasted = new String(value, java.nio.charset.StandardCharsets.UTF_8);
+      Optional<Attachment> pathImage = ImagePaste.path(pasted, environment);
+      if (pathImage.isPresent()) {
+        insertAttachment(pathImage.orElseThrow());
+        return;
+      }
+      String normalized = normalizePaste(pasted);
+      byte[] body = normalized.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+      long newlines = normalized.chars().filter(codePoint -> codePoint == '\n').count();
+      int lines = Math.toIntExact(newlines + (normalized.endsWith("\n") ? 0 : 1));
+      insertAttachment(new Attachment(
+          Attachment.Kind.PASTE, body, "", "", "", 0, lines, body.length));
+    }
+
+    private static String normalizePaste(String value) {
+      var normalized = new StringBuilder(value.length());
+      for (int index = 0; index < value.length(); index++) {
+        char current = value.charAt(index);
+        if (current != '\r') {
+          normalized.append(current);
+          continue;
+        }
+        normalized.append('\n');
+        if (index + 1 < value.length() && value.charAt(index + 1) == '\n') index++;
+      }
+      return normalized.toString();
     }
 
     private void clearComposer() {

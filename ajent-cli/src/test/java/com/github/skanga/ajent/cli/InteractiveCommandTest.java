@@ -190,6 +190,128 @@ final class InteractiveCommandTest {
     assertThat(ui.key(character('c', true), agent)).isFalse();
   }
 
+  @Test void bracketedTextPasteAlwaysBecomesOneNormalizedAttachment() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(character('a'), agent);
+    ui.key(character('b'), agent);
+    ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+    ui.paste("one\r\ntwo\rthree\n");
+    assertThat(terminal.bytes.toString())
+        .contains("[Pasted text \u00b7 3 lines \u00b7 14 B]");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    RuntimeMessage.Submit submit = (RuntimeMessage.Submit) agent.messages.getLast();
+    assertThat(submit.text()).isEqualTo("a\u0001ATT:0\u0001b");
+    assertThat(submit.attachments()).singleElement().satisfies(attachment -> {
+      assertThat(attachment.kind()).isEqualTo(
+          com.github.skanga.ajent.domain.Attachment.Kind.PASTE);
+      assertThat(attachment.body()).asString(java.nio.charset.StandardCharsets.UTF_8)
+          .isEqualTo("one\ntwo\nthree\n");
+      assertThat(attachment.lineCount()).isEqualTo(3);
+      assertThat(attachment.byteCount()).isEqualTo(14);
+    });
+
+    ui.paste("hello");
+    assertThat(terminal.bytes.toString()).contains("[Pasted: hello]");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).attachments())
+        .singleElement().satisfies(attachment ->
+            assertThat(attachment.kind()).isEqualTo(
+                com.github.skanga.ajent.domain.Attachment.Kind.PASTE));
+  }
+
+  @Test void rawAndPathImagePastesBecomeBinaryImageAttachments() throws Exception {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 1};
+
+    ui.paste(png);
+    assertThat(terminal.bytes.toString())
+        .contains("[Image \u00b7 <paste> \u00b7 image/png \u00b7 9 B]");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    RuntimeMessage.Submit raw = (RuntimeMessage.Submit) agent.messages.getLast();
+    assertThat(raw.attachments()).singleElement().satisfies(image -> {
+      assertThat(image.kind()).isEqualTo(
+          com.github.skanga.ajent.domain.Attachment.Kind.IMAGE);
+      assertThat(image.body()).containsExactly(png);
+      assertThat(image.path()).isEqualTo("<paste>");
+      assertThat(image.mediaType()).isEqualTo("image/png");
+    });
+
+    Path file = directory.resolve("screen.png");
+    java.nio.file.Files.write(file, png);
+    ui.paste("\"" + file.toString().replace('\\', '/') + "\"");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    RuntimeMessage.Submit path = (RuntimeMessage.Submit) agent.messages.getLast();
+    assertThat(path.attachments()).singleElement().satisfies(image -> {
+      assertThat(image.kind()).isEqualTo(
+          com.github.skanga.ajent.domain.Attachment.Kind.IMAGE);
+      assertThat(image.body()).containsExactly(png);
+      assertThat(image.path()).endsWith("screen.png");
+    });
+  }
+
+  @Test void smartPasteShortcutsPreferClipboardImageThenFallBackToText() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+    var image = new com.github.skanga.ajent.domain.Attachment(
+        com.github.skanga.ajent.domain.Attachment.Kind.IMAGE, png, "<clipboard>",
+        "image/png", "", 0, 0, png.length);
+    var imageReads = new java.util.concurrent.atomic.AtomicInteger();
+    var textReads = new java.util.concurrent.atomic.AtomicInteger();
+    var imageClipboard = new com.github.skanga.ajent.tools.attachment.ClipboardReader() {
+      @Override public Optional<com.github.skanga.ajent.domain.Attachment> image() {
+        imageReads.incrementAndGet();
+        return Optional.of(image);
+      }
+      @Override public Optional<String> text() { textReads.incrementAndGet(); return Optional.of("ignored"); }
+    };
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of(), imageClipboard);
+    var agent = new FakeAgent(state);
+
+    ui.key(character('v', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(imageReads).hasValue(1);
+    assertThat(textReads).hasValue(0);
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).attachments())
+        .singleElement().isEqualTo(image);
+
+    var textClipboard = new com.github.skanga.ajent.tools.attachment.ClipboardReader() {
+      @Override public Optional<com.github.skanga.ajent.domain.Attachment> image() {
+        return Optional.empty();
+      }
+      @Override public Optional<String> text() { return Optional.of("one\r\ntwo"); }
+    };
+    var textUi = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of(), textClipboard);
+    var textAgent = new FakeAgent(state);
+    TerminalKey altV = new TerminalKey(new TerminalKey.CharacterKey('V'),
+        new TerminalKey.Modifiers(false, true, false));
+    textUi.key(altV, textAgent);
+    textUi.key(special(TerminalKey.SpecialKey.ENTER), textAgent);
+    RuntimeMessage.Submit text = (RuntimeMessage.Submit) textAgent.messages.getLast();
+    assertThat(text.attachments()).singleElement().satisfies(paste ->
+        assertThat(paste.body()).asString(StandardCharsets.UTF_8).isEqualTo("one\ntwo"));
+
+    var emptyUi = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of(), textClipboard);
+    var emptyAgent = new FakeAgent(state);
+    emptyUi.paste(new byte[0]);
+    emptyUi.key(special(TerminalKey.SpecialKey.ENTER), emptyAgent);
+    assertThat(((RuntimeMessage.Submit) emptyAgent.messages.getLast()).attachments())
+        .hasSize(1);
+  }
+
   @Test void composerCoversIdleControlsBoundariesAndIgnoredKeys() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,

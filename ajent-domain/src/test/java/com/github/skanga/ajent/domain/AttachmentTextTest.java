@@ -86,10 +86,10 @@ class AttachmentTextTest {
         .isEqualTo("Output: a very long command that exceeds\u2026 \u00b7 12 lines \u00b7 2 KB");
     assertThat(AttachmentText.chipLabel(new Attachment(Attachment.Kind.IMAGE, new byte[0],
         "<clipboard>", "", "", 0, 0, 12)))
-        .isEqualTo("Image \u00b7 <clipboard> \u00b7 image \u00b7 0 lines \u00b7 12 B");
+        .isEqualTo("Image \u00b7 <clipboard> \u00b7 image \u00b7 12 B");
     assertThat(AttachmentText.chipLabel(new Attachment(Attachment.Kind.IMAGE, new byte[0],
         "images/shot.png", "image/png", "", 0, 0, 2048)))
-        .isEqualTo("Image \u00b7 shot.png \u00b7 image/png \u00b7 0 lines \u00b7 2 KB");
+        .isEqualTo("Image \u00b7 shot.png \u00b7 image/png \u00b7 2 KB");
     assertThat(AttachmentText.chipLabel(new Attachment(Attachment.Kind.PASTE, new byte[0],
         "", "", "", 0, 0, 0))).isEqualTo("Pasted text \u00b7 0 B");
     String longPaste = "012345678901234567890123456789012345678901234567890123";

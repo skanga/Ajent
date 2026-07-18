@@ -70,8 +70,7 @@ public final class AttachmentText {
       case SYMBOL -> "#" + attachment.name() + " \u00b7 " + filename(attachment.path())
           + ":" + attachment.lineNumber();
       case OUTPUT -> sized("Output: " + clippedCommand(attachment.name()), attachment);
-      case IMAGE -> sized("Image \u00b7 " + imageLocation(attachment.path()) + " \u00b7 "
-          + (attachment.mediaType().isEmpty() ? "image" : attachment.mediaType()), attachment);
+      case IMAGE -> imageLabel(attachment);
       case PASTE -> pasteLabel(attachment);
     };
   }
@@ -160,6 +159,14 @@ public final class AttachmentText {
     String bytes = attachment.byteCount() >= 1024
         ? attachment.byteCount() / 1024 + " KB" : attachment.byteCount() + " B";
     return prefix + " \u00b7 " + attachment.lineCount() + " lines \u00b7 " + bytes;
+  }
+
+  private static String imageLabel(Attachment attachment) {
+    String bytes = attachment.byteCount() >= 1024
+        ? attachment.byteCount() / 1024 + " KB" : attachment.byteCount() + " B";
+    return "Image \u00b7 " + imageLocation(attachment.path()) + " \u00b7 "
+        + (attachment.mediaType().isEmpty() ? "image" : attachment.mediaType())
+        + " \u00b7 " + bytes;
   }
 
   private static String clippedCommand(String command) {

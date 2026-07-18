@@ -118,6 +118,8 @@ include:
 - `Left` / `Right` in the model picker: cycle supported reasoning effort
 - `@` at a word boundary: attach a workspace file
 - `#` at a word boundary: attach a workspace symbol excerpt
+- bracketed text paste: insert one compact paste attachment chip
+- `Ctrl-V` / `Alt-V`: smart-paste an image first, then clipboard text
 
 Write, execution, and network tools are governed by the active permission
 profile. The default `ask` profile prompts before consequential operations.
