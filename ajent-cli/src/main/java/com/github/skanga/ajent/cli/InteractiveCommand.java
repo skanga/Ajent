@@ -13,6 +13,8 @@ import com.github.skanga.ajent.provider.auth.Credential;
 import com.github.skanga.ajent.provider.ProviderModelCatalog;
 import com.github.skanga.ajent.provider.auth.CredentialResolver;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
+import com.github.skanga.ajent.provider.auth.AnthropicOAuthLogin;
+import com.github.skanga.ajent.provider.auth.OAuthTokenClient;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
 import com.github.skanga.ajent.provider.openai.ProviderAuthResolver;
 import com.github.skanga.ajent.provider.openai.ProviderRegistry;
@@ -35,6 +37,7 @@ import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.ModelPicker;
+import com.github.skanga.ajent.terminal.ui.LoginModal;
 import com.github.skanga.ajent.terminal.ui.PickerState;
 import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
@@ -43,6 +46,8 @@ import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.awt.Desktop;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -127,6 +132,7 @@ final class InteractiveCommand {
       activeLoop.set(initialLoop);
       state.set(initialLoop.state());
       AgentControl control = new AgentControl() {
+        private final AnthropicOAuthLogin oauth = new AnthropicOAuthLogin();
         @Override public AgentState state() { return activeLoop.get().state(); }
         @Override public void dispatch(RuntimeMessage message) {
           activeLoop.get().dispatch(message);
@@ -215,6 +221,61 @@ final class InteractiveCommand {
           configured.settings().save(saved.withProviderModel(provider, new ModelId(selectedModel)));
           return true;
         }
+        @Override public LoginModal.OAuthAttempt newOAuthAttempt() {
+          AnthropicOAuthLogin.Attempt attempt = oauth.newAttempt();
+          return new LoginModal.OAuthAttempt(
+              attempt.verifier(), attempt.state(), attempt.authorizationUri());
+        }
+        @Override public void openBrowser(URI uri) {
+          if (!Desktop.isDesktopSupported()) return;
+          try { Desktop.getDesktop().browse(uri); }
+          catch (IOException | UnsupportedOperationException ignored) { }
+        }
+        @Override public boolean installAnthropicKey(String key) {
+          if (!credentials.save(new Credential.ApiKey(key))) return false;
+          activeProvider.updateAndGet(current -> current.provider().equals("anthropic")
+              ? new LiveProviderFactory.Configuration(current.provider(), current.model(),
+                  new ProviderAuth.ApiKey(key), current.effort(), current.systemPrompt(),
+                  current.contextWindow(), current.environment()) : current);
+          return true;
+        }
+        @Override public boolean installProviderKey(String provider, String key) {
+          Settings saved = configured.settings().load().withProviderKey(provider, key);
+          if (!configured.settings().save(saved)) return false;
+          return selectProvider(provider);
+        }
+        @Override public boolean switchCustomHost(String specification) {
+          String currentModel = activeProvider.get().model();
+          activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
+              specification, currentModel, new ProviderAuth.Empty(), current.effort(),
+              current.systemPrompt(), current.contextWindow(), current.environment()));
+          return configured.settings().save(configured.settings().load()
+              .withProviderModel(specification, new ModelId(currentModel)));
+        }
+        @Override public void exchangeOAuth(LoginModal.ExchangeOAuth exchange,
+            Consumer<String> completed) {
+          Thread.startVirtualThread(() -> {
+            OAuthTokenClient.Result result = oauth.exchange(
+                exchange.code(), exchange.verifier(), exchange.state());
+            if (result instanceof OAuthTokenClient.Result.Failure failure) {
+              completed.accept(failure.error().detail());
+              return;
+            }
+            OAuthTokenClient.Token token = ((OAuthTokenClient.Result.Success) result).token();
+            long expiresAt = token.expiresInSeconds() == 0 ? 0
+                : System.currentTimeMillis() + token.expiresInSeconds() * 1000;
+            boolean saved = credentials.save(new Credential.OAuth(
+                token.accessToken(), token.refreshToken(), expiresAt));
+            if (saved) {
+              activeProvider.updateAndGet(current -> current.provider().equals("anthropic")
+                  ? new LiveProviderFactory.Configuration(current.provider(), current.model(),
+                      new ProviderAuth.Bearer(token.accessToken()), current.effort(),
+                      current.systemPrompt(), current.contextWindow(), current.environment())
+                  : current);
+            }
+            completed.accept(saved ? "" : "failed to save credentials");
+          });
+        }
       };
       try {
         terminal.onResize(ignored -> ui.render());
@@ -227,7 +288,7 @@ final class InteractiveCommand {
             if (event instanceof TerminalEvent.Key key) {
               running = ui.key(key.value(), control);
             } else if (event instanceof TerminalEvent.Paste paste) {
-              ui.insert(paste.text());
+              ui.paste(paste.text());
             }
             if (!running) break;
           }
@@ -356,6 +417,12 @@ final class InteractiveCommand {
     String provider();
     List<ProviderPicker.Provider> providers();
     boolean selectProvider(String provider);
+    LoginModal.OAuthAttempt newOAuthAttempt();
+    void openBrowser(URI uri);
+    boolean installAnthropicKey(String key);
+    boolean installProviderKey(String provider, String key);
+    boolean switchCustomHost(String specification);
+    void exchangeOAuth(LoginModal.ExchangeOAuth exchange, Consumer<String> completed);
   }
 
   interface AnimationPort {
@@ -419,6 +486,7 @@ final class InteractiveCommand {
     private PickerState.OneAxis modelPicker = new PickerState.Closed();
     private PickerState.OneAxis providerPicker = new PickerState.Closed();
     private List<ProviderPicker.Provider> providerRows = List.of();
+    private LoginModal.State login = new LoginModal.Closed();
     private List<ModelPicker.Model> models = List.of();
     private boolean modelsLoading;
     private String uiStatus = "";
@@ -456,6 +524,7 @@ final class InteractiveCommand {
         }
         return true;
       }
+      if (LoginModal.isOpen(login)) return loginKey(key, loop);
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
       if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
       if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
@@ -582,6 +651,8 @@ final class InteractiveCommand {
               } else if (command == CommandPalette.Command.OPEN_PROVIDERS) {
                 providerRows = loop.providers();
                 providerPicker = ProviderPicker.open(providerRows, loop.provider());
+              } else if (command == CommandPalette.Command.OPEN_LOGIN) {
+                login = LoginModal.open();
               }
             }
           }
@@ -675,10 +746,12 @@ final class InteractiveCommand {
                   models = List.of();
                   openModelPicker(loop);
                 } else {
-                  uiStatus = "login required: " + choice.provider().label();
+                  login = new LoginModal.ApiKeyInput(
+                      new com.github.skanga.ajent.terminal.ui.Utf8Editor(),
+                      choice.provider().id(), choice.provider().label());
                 }
               } else {
-                uiStatus = "custom host requires login entry";
+                login = new LoginModal.CustomHostInput();
               }
             });
           }
@@ -687,6 +760,71 @@ final class InteractiveCommand {
       }
       render();
       return true;
+    }
+
+    private boolean loginKey(TerminalKey key, AgentControl loop) {
+      if (key.key() == TerminalKey.SpecialKey.ESCAPE) {
+        login = LoginModal.close(login);
+      } else if (key.key() == TerminalKey.SpecialKey.ENTER) {
+        applyLogin(LoginModal.submit(login), loop);
+      } else if (key.key() == TerminalKey.SpecialKey.BACKSPACE) {
+        login = LoginModal.backspace(login);
+      } else if (key.key() == TerminalKey.SpecialKey.LEFT) {
+        login = LoginModal.left(login);
+      } else if (key.key() == TerminalKey.SpecialKey.RIGHT) {
+        login = LoginModal.right(login);
+      } else if (key.key() instanceof TerminalKey.CharacterKey character
+          && !key.modifiers().ctrl() && !key.modifiers().alt()) {
+        if (login instanceof LoginModal.Picking || login instanceof LoginModal.Failed) {
+          applyLogin(LoginModal.pick(login, character.codePoint(), loop::newOAuthAttempt), loop);
+        } else {
+          login = LoginModal.input(login, character.codePoint());
+        }
+      }
+      render();
+      return true;
+    }
+
+    private void applyLogin(LoginModal.Transition transition, AgentControl loop) {
+      login = transition.state();
+      transition.action().ifPresent(action -> {
+        switch (action) {
+          case LoginModal.OpenBrowser browser -> loop.openBrowser(browser.uri());
+          case LoginModal.InstallAnthropicKey key -> {
+            if (!loop.installAnthropicKey(key.key())) {
+              login = new LoginModal.Failed("save failed");
+              uiStatus = "error: save failed";
+            }
+            else uiStatus = "logged in: Anthropic API key";
+          }
+          case LoginModal.InstallProviderKey key -> {
+            if (!loop.installProviderKey(key.provider(), key.key())) {
+              login = new LoginModal.Failed("save failed");
+            } else {
+              uiStatus = "provider: " + key.providerLabel();
+              models = List.of();
+              openModelPicker(loop);
+            }
+          }
+          case LoginModal.SwitchCustomHost host -> {
+            if (!loop.switchCustomHost(host.specification())) {
+              login = new LoginModal.Failed("save failed");
+            } else {
+              uiStatus = "provider: " + host.specification();
+              models = List.of();
+              openModelPicker(loop);
+            }
+          }
+          case LoginModal.ExchangeOAuth exchange -> loop.exchangeOAuth(exchange, failure -> {
+            synchronized (lock) {
+              login = failure.isEmpty() ? new LoginModal.Closed()
+                  : new LoginModal.Failed(failure);
+              if (failure.isEmpty()) uiStatus = "logged in: Anthropic OAuth";
+            }
+            render();
+          });
+        }
+      });
     }
 
     private void resetForNewThread() {
@@ -699,6 +837,7 @@ final class InteractiveCommand {
         toolViewer = new ToolOutputViewer.Closed();
         modelPicker = new PickerState.Closed();
         providerPicker = new PickerState.Closed();
+        login = new LoginModal.Closed();
         uiStatus = "";
         frame = new InlineFrameRenderer.Empty();
         terminal.write("\u001b[2J\u001b[3J\u001b[H");
@@ -712,6 +851,15 @@ final class InteractiveCommand {
         cursor += value.length();
       }
       render();
+    }
+
+    void paste(String value) {
+      if (LoginModal.isInputState(login)) {
+        login = LoginModal.paste(login, value);
+        render();
+      } else {
+        insert(value);
+      }
     }
 
     private void clearComposer() {
@@ -782,6 +930,32 @@ final class InteractiveCommand {
             lines.add(new StyledLine((index == open.index() ? "› " : "  ") + label,
                 index == open.index() ? Style.ACCENT : Style.NORMAL));
           }
+        }
+        if (LoginModal.isOpen(login)) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Login", Style.ACCENT));
+        }
+        switch (login) {
+            case LoginModal.Picking ignored -> {
+              lines.add(new StyledLine("1  OAuth via claude.ai", Style.NORMAL));
+              lines.add(new StyledLine("2  Paste API key", Style.NORMAL));
+            }
+            case LoginModal.OAuthCode oauth -> {
+              wrap(lines, oauth.authorizeUri().toString(), width, Style.MUTED);
+              wrap(lines, "Code: " + oauth.code().text(), width, Style.NORMAL);
+            }
+            case LoginModal.OAuthExchanging ignored ->
+                lines.add(new StyledLine("Exchanging OAuth code…", Style.MUTED));
+            case LoginModal.ApiKeyInput key -> lines.add(new StyledLine(
+                (key.providerLabel().isEmpty() ? "Anthropic" : key.providerLabel())
+                    + " API key: " + "•".repeat(key.key().text().codePointCount(
+                        0, key.key().text().length())), Style.NORMAL));
+            case LoginModal.CustomHostInput host ->
+                lines.add(new StyledLine("Host: " + host.host().text(), Style.NORMAL));
+            case LoginModal.Failed failed ->
+                lines.add(new StyledLine("error: " + failed.message(), Style.DANGER));
+            case LoginModal.Closed ignored -> { }
         }
         var canvas = new TerminalCanvas(width, Math.max(1, lines.size()));
         int normal = 0;

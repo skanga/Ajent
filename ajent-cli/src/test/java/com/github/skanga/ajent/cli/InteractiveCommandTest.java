@@ -19,9 +19,11 @@ import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.RuntimeMessage;
 import com.github.skanga.ajent.terminal.JLineTerminalSession;
 import com.github.skanga.ajent.terminal.input.TerminalKey;
+import com.github.skanga.ajent.terminal.ui.LoginModal;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.http.HttpClient;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -40,6 +42,7 @@ final class InteractiveCommandTest {
   @TempDir Path directory;
 
   @Test void configurationRejectsBadWorkspaceProfileAndSandboxThenComposesLocal() throws Exception {
+    assertThat(InteractiveCommand.systemDefault()).isNotNull();
     var command = command(Map.of());
     var error = new ByteArrayOutputStream();
     assertThat(command.configure(CliArguments.parse(new String[] {"--workspace", "missing"}),
@@ -83,6 +86,11 @@ final class InteractiveCommandTest {
     var invalidDocs = command(Map.of("AGENTTY_DOCS_DIR", "\0"));
     assertThat(invalidDocs.configure(CliArguments.parse(new String[] {
         "--sandbox", "off", "--provider", "ollama"}), stream(error))).isNotNull();
+    new CredentialStore(directory.resolve("credentials.json"), "seed").save(
+        new com.github.skanga.ajent.provider.auth.Credential.OAuth(
+            "access", "refresh", System.currentTimeMillis() + 60_000));
+    assertThat(command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off"}), stream(error))).isNotNull();
   }
 
   @Test void composerRoutesEditingSubmissionCancellationAndQuit() {
@@ -96,6 +104,7 @@ final class InteractiveCommandTest {
 
     assertThat(ui.key(character('a'), agent)).isTrue();
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
     ui.key(character('b'), agent);
     ui.key(special(TerminalKey.SpecialKey.END), agent);
     ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent);
@@ -134,16 +143,42 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.PAGE_DOWN), agent);
     ui.key(special(TerminalKey.SpecialKey.TAB), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("custom host requires login entry");
+    agent.failCustomHost = true;
+    ui.paste("https://host.test/v1");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("save failed");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    agent.failCustomHost = false;
+    ui.key(character('k', true), agent);
+    for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.paste("https://host.test/v1");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.provider).isEqualTo("host.test");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
 
     agent.rejectProvider = true;
     ui.key(character('k', true), agent);
     for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     ui.key(character('x'), agent);
-    ui.key(special(TerminalKey.SpecialKey.UP), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("login required: Anthropic");
+    agent.failProviderKey = true;
+    ui.paste("provider-key");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("save failed");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    agent.failProviderKey = false;
+    ui.key(character('k', true), agent);
+    for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.paste("provider-key");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.providerKey).isEqualTo("provider-key");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
     agent.rejectProvider = false;
 
     ui.key(character('k', true), agent);
@@ -159,6 +194,8 @@ final class InteractiveCommandTest {
     var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
         new InteractiveCommand.PermissionGate());
     var agent = new FakeAgent(state);
+    ui.paste("p");
+    ui.key(character('u', true), agent);
     assertThat(ui.key(special(TerminalKey.SpecialKey.ENTER), agent)).isTrue();
     assertThat(agent.messages).isEmpty();
     assertThat(ui.key(special(TerminalKey.SpecialKey.RIGHT), agent)).isTrue();
@@ -251,6 +288,8 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent);
     ui.key(new TerminalKey(new TerminalKey.CharacterKey('x'),
         new TerminalKey.Modifiers(true, false, false)), agent);
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('x'),
+        new TerminalKey.Modifiers(false, true, false)), agent);
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
     ui.key(character('f'), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
@@ -280,6 +319,78 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
 
+  @Test void liveLoginSupportsAnthropicKeyAndOauthBrowserExchange() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "login".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(character('2'), agent);
+    ui.paste("secret");
+    ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+    ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
+    ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent);
+    ui.key(character('t'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.anthropicKey).isEqualTo("secret");
+    assertThat(terminal.bytes.toString()).contains("API key").doesNotContain("secret");
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "login".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(character('1'), agent);
+    assertThat(agent.browser).isNotNull();
+    ui.paste("oauth-code");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.oauthCode).isEqualTo("oauth-code");
+    assertThat(terminal.bytes.toString()).contains("OAuth");
+  }
+
+  @Test void liveLoginRendersFailuresAndOwnsRecoveryKeys() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    openLogin(ui, agent);
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
+    ui.key(character('2'), agent);
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('x'),
+        new TerminalKey.Modifiers(false, true, false)), agent);
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('x'),
+        new TerminalKey.Modifiers(true, false, false)), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("no key entered");
+    ui.key(character('2'), agent);
+    ui.paste("key");
+    agent.failAnthropicKey = true;
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("save failed");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+
+    openLogin(ui, agent);
+    ui.key(character('1'), agent);
+    ui.paste("code");
+    agent.deferOAuth = true;
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("Exchanging OAuth code");
+    agent.completeOAuth("exchange failed");
+    assertThat(terminal.bytes.toString()).contains("exchange failed");
+    ui.key(character('x'), agent); // Failed routes through the picking reducer.
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+  }
+
+  private static void openLogin(InteractiveCommand.Ui ui, FakeAgent agent) {
+    ui.key(character('k', true), agent);
+    for (int codePoint : "login".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+  }
+
   @Test void permissionGateBlocksUntilModalKeysResolveAllDecisions() throws Exception {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var gate = new InteractiveCommand.PermissionGate();
@@ -302,9 +413,12 @@ final class InteractiveCommandTest {
   @Test void permissionModalIgnoresUnknownKeyUntilExplicitlyResolved() throws Exception {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var gate = new InteractiveCommand.PermissionGate();
+    var changes = new AtomicReference<>(0);
+    gate.onChange(() -> changes.updateAndGet(value -> value + 1));
     var ui = new InteractiveCommand.Ui(new FakeTerminal(), state, gate);
     var result = CompletableFuture.supplyAsync(() -> gate.request(tool("output")));
     while (gate.current() == null) java.lang.Thread.onSpinWait();
+    ui.render();
     assertThat(gate.request(tool("second")))
         .isEqualTo(new PermissionPort.Decision(false, false));
     assertThat(ui.key(character('x'), new FakeAgent(state))).isTrue();
@@ -312,6 +426,7 @@ final class InteractiveCommandTest {
     assertThat(gate.resolve(false, false)).isTrue();
     assertThat(result.get(2, TimeUnit.SECONDS)).isEqualTo(new PermissionPort.Decision(false, false));
     assertThat(gate.resolve(true, false)).isFalse();
+    assertThat(changes.get()).isPositive();
   }
 
   @Test void renderingCoversTranscriptToolsErrorsStatusAndNarrowWrapping() {
@@ -358,6 +473,12 @@ final class InteractiveCommandTest {
     new InteractiveCommand.Ui(terminal, new AtomicReference<>(state),
         new InteractiveCommand.PermissionGate()).render();
     assertThat(terminal.bytes.toString()).contains("complete").contains("next");
+
+    AgentState live = withPhase(AgentState.initial(thread(List.of(
+        new Message(Role.ASSISTANT, "live", List.of(), List.of())))),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1)));
+    new InteractiveCommand.Ui(new FakeTerminal(), new AtomicReference<>(live),
+        new InteractiveCommand.PermissionGate()).render();
   }
 
   @Test void streamingTranscriptRequestsFramesAndFinalizationSettles() {
@@ -409,10 +530,12 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.END), agent);
     ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
     ui.key(character('j'), agent);
     ui.key(character('k'), agent);
     ui.key(character('l'), agent);
     ui.key(character('h'), agent);
+    ui.key(character('x'), agent);
     ui.key(character('y'), agent);
     assertThat(terminal.bytes.toString()).contains("\u001b]52;c;c2Vjb25k\u0007");
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
@@ -426,6 +549,22 @@ final class InteractiveCommandTest {
         new InteractiveCommand.PermissionGate());
     ui.key(character('o', true), new FakeAgent(state));
     assertThat(terminal.bytes.toString()).contains("no tool outputs");
+  }
+
+  @Test void emptyToolNameAndClosedStreamingBlockRenderSafely() {
+    ToolUse unnamed = new ToolUse(new ToolCallId("empty"), new ToolName(""), Map.of(),
+        new ToolStatus.Done(0, 1, "output"));
+    Message assistant = new Message(com.github.skanga.ajent.domain.MessageId.random(),
+        Role.ASSISTANT, "closed", List.of(), List.of(), "", "", List.of(unnamed),
+        Instant.now(), Optional.empty(), Optional.empty(), true, false);
+    AgentState streaming = withPhase(AgentState.initial(thread(List.of(assistant))),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1)));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, new AtomicReference<>(streaming),
+        new InteractiveCommand.PermissionGate());
+    ui.render();
+    ui.key(character('o', true), new FakeAgent(new AtomicReference<>(streaming)));
+    assertThat(terminal.bytes.toString()).contains("closed").contains("Tool outputs");
   }
 
   private InteractiveCommand command(Map<String, String> environment) {
@@ -484,6 +623,15 @@ final class InteractiveCommandTest {
     private String provider = "anthropic";
     private boolean rejectProvider;
     private boolean deferModels;
+    private String anthropicKey = "";
+    private String providerKey = "";
+    private URI browser;
+    private String oauthCode = "";
+    private boolean failAnthropicKey;
+    private boolean failProviderKey;
+    private boolean failCustomHost;
+    private boolean deferOAuth;
+    private java.util.function.Consumer<String> pendingOAuth;
     private java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>>
         pendingModels;
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
@@ -528,6 +676,39 @@ final class InteractiveCommandTest {
       if (rejectProvider) return false;
       provider = value;
       return true;
+    }
+    @Override public LoginModal.OAuthAttempt newOAuthAttempt() {
+      return new LoginModal.OAuthAttempt("verifier", "state",
+          URI.create("https://example.test/authorize"));
+    }
+    @Override public void openBrowser(URI value) { browser = value; }
+    @Override public boolean installAnthropicKey(String key) {
+      if (failAnthropicKey) return false;
+      anthropicKey = key;
+      return true;
+    }
+    @Override public boolean installProviderKey(String provider, String key) {
+      if (failProviderKey) return false;
+      providerKey = key;
+      this.provider = provider;
+      return true;
+    }
+    @Override public boolean switchCustomHost(String specification) {
+      if (failCustomHost) return false;
+      provider = specification;
+      return true;
+    }
+    @Override public void exchangeOAuth(LoginModal.ExchangeOAuth exchange,
+        java.util.function.Consumer<String> completed) {
+      oauthCode = exchange.code();
+      if (deferOAuth) pendingOAuth = completed;
+      else completed.accept("");
+    }
+    private void completeOAuth(String failure) {
+      deferOAuth = false;
+      java.util.function.Consumer<String> next = pendingOAuth;
+      pendingOAuth = null;
+      next.accept(failure);
     }
   }
 

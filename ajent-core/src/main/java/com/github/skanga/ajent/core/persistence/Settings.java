@@ -55,4 +55,11 @@ public record Settings(
     return new Settings(value, profile, favoriteModels, providerId, providerKeys,
         models, effort, alwaysAllowTools);
   }
+
+  public Settings withProviderKey(String providerId, String key) {
+    var keys = new LinkedHashMap<>(providerKeys);
+    keys.put(providerId, key);
+    return new Settings(modelId, profile, favoriteModels, provider, keys,
+        providerModels, effort, alwaysAllowTools);
+  }
 }

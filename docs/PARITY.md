@@ -111,8 +111,17 @@ the transcript and in-flight request while later launches observe the new
 backend. Switches resolve freshly saved Anthropic credentials and each
 provider's saved/environment key chain, refuse a hosted backend that would
 immediately 401, recall its last model, persist provider/model together, and
-open a fresh asynchronous model picker. The custom-host row is routed but its
-free-text login-modal handoff remains to be connected.
+open a fresh asynchronous model picker. The custom-host row routes into the
+same typed login workflow described below.
+
+That login handoff is now connected for every typed reducer action. The live
+modal renders provider-targeted masked API-key input, normalized custom-host
+input, OAuth authorization URL/code entry, exchanging state, and recoverable
+failures. It routes paste/cursor/backspace keys without leaking secrets,
+opens the system browser when available, exchanges OAuth on a virtual thread,
+persists encrypted API-key/OAuth credentials (including expiry), installs
+fresh Anthropic auth into future launches, saves provider keys before a
+hosted switch, and refetches models after provider/custom-host completion.
 
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.
