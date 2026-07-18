@@ -338,7 +338,7 @@ public final class HnswIndex {
     return value;
   }
 
-  private static float[] normalize(float[] vector) {
+  static float[] normalize(float[] vector) {
     double normSquared = 0;
     for (float value : vector) normSquared += (double) value * value;
     float[] result = vector.clone();
@@ -348,7 +348,7 @@ public final class HnswIndex {
     return result;
   }
 
-  private static float dot(float[] left, float[] right) {
+  static float dot(float[] left, float[] right) {
     float result = 0;
     for (int index = 0; index < Math.min(left.length, right.length); index++)
       result += left[index] * right[index];

@@ -31,6 +31,8 @@ class RagCoreTest {
         .anyMatch(text -> text.contains("setup script"));
     RagChunk chunk = new RagChunk("x", 1, 1, "body", "doc.md › Section", new float[0], null);
     assertThat(chunk.embedInput()).isEqualTo("doc.md › Section\nbody");
+    assertThat(new RagChunk("x", 1, 1, "body", "", new float[0], null).embedInput())
+        .isEqualTo("body");
   }
 
   @Test
@@ -43,9 +45,10 @@ class RagCoreTest {
     assertThat(RagAlgorithms.searchBm25(index, "pelican", 4).getFirst().document()).isEqualTo(2);
     assertThat(RagAlgorithms.searchBm25(index, "compiler inlining", 4).getFirst().document())
         .isEqualTo(3);
-    assertThat(RagAlgorithms.reciprocalRankFusion(List.of(List.of(5, 2, 1, 9),
-        List.of(7, 2, 3)), 60, 10)).first().extracting(RagAlgorithms.Score::document)
-        .isEqualTo(2);
+    List<RagAlgorithms.Score> fused = RagAlgorithms.reciprocalRankFusion(
+        List.of(List.of(5, 2, 1, 9), List.of(7, 2, 3)), 60, 10);
+    assertThat(fused).first().extracting(RagAlgorithms.Score::document).isEqualTo(2);
+    assertThat(fused).extracting(RagAlgorithms.Score::document).contains(9);
     assertThat(RagAlgorithms.cosine(new float[] {1, 2, 3}, new float[] {1, 2, 3}))
         .isCloseTo(1, within(1e-6));
     assertThat(RagAlgorithms.cosine(new float[] {1, 0}, new float[] {0, 1})).isZero();
@@ -61,6 +64,31 @@ class RagCoreTest {
         .isEqualTo("deploy.md");
     assertThat(corpus.searchFused(List.of("kubernetes", "replicas deployment"), 3).getFirst()
         .chunk().path()).isEqualTo("deploy.md");
+  }
+
+  @Test
+  void portsEverySearchFusedMultiQueryAndEdgeCase() {
+    var corpus = new RagCorpus();
+    corpus.setChunks(List.of(
+        new RagChunk("auth.md", 1, 2, "configure oauth tokens refresh credentials"),
+        new RagChunk("deploy.md", 1, 2, "kubernetes deployment manifests replicas pods"),
+        new RagChunk("logging.md", 1, 2, "structured logging severity json rotation"),
+        new RagChunk("database.md", 1, 2, "database transaction isolation btree index"),
+        new RagChunk("network.md", 1, 2, "tcp network routing firewall ingress")));
+    assertThat(corpus.hasEmbeddings()).isFalse();
+    assertThat(corpus.chunkCount()).isEqualTo(5);
+    assertThat(corpus.searchFused(List.of("kubernetes deployment", "replicas pods"), 3))
+        .first().extracting(hit -> hit.chunk().path()).isEqualTo("deploy.md");
+    assertThat(corpus.searchFused(List.of("kubernetes deployment"), 3))
+        .first().extracting(hit -> hit.chunk().path()).isEqualTo("deploy.md");
+    assertThat(corpus.searchFused(
+        List.of("unrelated phrase", "replicas orchestration", "deployment manifests"), 5))
+        .first().extracting(hit -> hit.chunk().path()).isEqualTo("deploy.md");
+    assertThat(corpus.searchFused(List.of(), 3)).isEmpty();
+    assertThat(corpus.searchFused(List.of("kubernetes"), 0)).isEmpty();
+    assertThat(corpus.searchFused(List.of("structured logging"), 3).getFirst().chunk().path())
+        .isEqualTo(corpus.search("structured logging", 3).getFirst().chunk().path())
+        .isEqualTo("logging.md");
   }
 
   @Test

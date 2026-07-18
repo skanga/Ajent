@@ -132,9 +132,9 @@
       "classification": "unit",
       "surface": "rag",
       "referenceRun": "ctest --test-dir <build> -R \"^knowledge_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/KnowledgeTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/KnowledgePipelineTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all 35 reference checks translated"]
     },
     {
       "id": "long_session_bench",
@@ -345,9 +345,17 @@
       "classification": "unit",
       "surface": "rag",
       "referenceRun": "ctest --test-dir <build> -R \"^rag_advanced_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/RagAdvancedTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/RagCorpusFilesystemTest.java",
+      "supportingCounterparts": [
+        "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/RagStemmerTest.java",
+        "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/RagRerankerTest.java",
+        "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/RagCoreTest.java",
+        "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/HnswIndexTest.java",
+        "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/KnowledgePipelineTest.java",
+        "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/NeuralRerankerTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all deterministic reference checks translated; Java uses its required scalar baseline instead of native SIMD dispatch"]
     },
     {
       "id": "rag_expand_test",
@@ -357,9 +365,9 @@
       "classification": "unit",
       "surface": "rag",
       "referenceRun": "ctest --test-dir <build> -R \"^rag_expand_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/RagExpandTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/RagCoreTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all 17 reference checks translated"]
     },
     {
       "id": "rag_hnsw_test",
@@ -369,9 +377,9 @@
       "classification": "unit",
       "surface": "rag",
       "referenceRun": "ctest --test-dir <build> -R \"^rag_hnsw_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/RagHnswTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/HnswIndexTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all 20 reference checks translated plus malformed native-blob cases"]
     },
     {
       "id": "rag_rerank_test",
@@ -381,9 +389,9 @@
       "classification": "unit",
       "surface": "rag",
       "referenceRun": "ctest --test-dir <build> -R \"^rag_rerank_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/RagRerankTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/RagRerankerTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all 20 reference checks translated plus degenerate MMR/compression cases"]
     },
     {
       "id": "rag_test",
@@ -393,9 +401,9 @@
       "classification": "unit",
       "surface": "rag",
       "referenceRun": "ctest --test-dir <build> -R \"^rag_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/RagTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-tools/src/test/java/com/github/skanga/ajent/tools/rag/RagCoreTest.java",
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all 23 reference checks translated plus boundary cases"]
     },
     {
       "id": "realthread_probe",

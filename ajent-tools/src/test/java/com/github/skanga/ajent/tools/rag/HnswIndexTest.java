@@ -1,6 +1,7 @@
 package com.github.skanga.ajent.tools.rag;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
 
@@ -12,6 +13,14 @@ import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class HnswIndexTest {
+  @Test
+  void scalarVectorPrimitivesMatchThePinnedSimdInvariant() {
+    assertThat(HnswIndex.dot(new float[] {1, 2, 3, 4, 5, 6, 7, 8},
+        new float[] {8, 7, 6, 5, 4, 3, 2, 1})).isCloseTo(120, within(1e-4f));
+    assertThat(HnswIndex.normalize(new float[] {3, 4}))
+        .containsExactly(new float[] {.6f, .8f}, within(1e-4f));
+  }
+
   @Test
   void recallsTheTrueNearestNeighborAtFive() {
     var random = new Random(1_234_567L);

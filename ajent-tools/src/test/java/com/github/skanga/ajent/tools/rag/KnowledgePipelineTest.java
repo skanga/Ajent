@@ -66,7 +66,17 @@ final class KnowledgePipelineTest {
     assertThat(top.hit().chunk().path()).isEqualTo("k8s.md");
     assertThat(top.compressed()).isNotEmpty();
     assertThat(top.text()).isEqualTo(top.compressed());
+    assertThat(top.compressed()).hasSizeLessThanOrEqualTo(top.hit().chunk().text().length());
     assertThat(top.hit().source()).isSameAs(source);
+  }
+
+  @Test void contextChunkFallsBackToTheFullBodyWhenCompressionIsAbsent() {
+    var source = new CorpusKnowledgeSource("docs", corpus());
+    RagContext context = RagContext.fromHits("kubernetes", source.retrieve("kubernetes", 1));
+    assertThat(context.chunks()).isNotEmpty();
+    RagContext.ContextChunk chunk = context.chunks().getFirst();
+    assertThat(chunk.compressed()).isEmpty();
+    assertThat(chunk.text()).isEqualTo(chunk.hit().chunk().text());
   }
 
   @Test void retrieveNormalizeAndMmrStagesComposeInInsertionOrder() {
