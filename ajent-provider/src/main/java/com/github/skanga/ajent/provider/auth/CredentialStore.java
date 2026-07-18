@@ -35,6 +35,8 @@ public final class CredentialStore {
     return new CredentialStore(CredentialPaths.systemCredentialsPath(), MachineSeed.current());
   }
 
+  public Path path() { return path; }
+
   static CredentialStore forEnvironment(
       Map<String, String> environment, Path workingDirectory, String machineSeed) {
     return new CredentialStore(

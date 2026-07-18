@@ -1,6 +1,8 @@
 package com.github.skanga.ajent.cli;
 
 import java.io.PrintStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
 /** Ajent process entry point and top-level command dispatcher. */
@@ -65,6 +67,23 @@ public final class AjentCli {
   }
 
   public static int run(String[] arguments, PrintStream stdout, PrintStream stderr) {
+    return run(arguments, new BufferedReader(
+        new InputStreamReader(System.in, StandardCharsets.UTF_8)), stdout, stderr,
+        new CommandServices() {
+          @Override public int login(BufferedReader input, PrintStream out, PrintStream err) {
+            return AuthCommands.systemDefault().login(input, out, err);
+          }
+          @Override public int logout(PrintStream out, PrintStream err) {
+            return AuthCommands.systemDefault().logout(out, err);
+          }
+          @Override public int status(PrintStream out) {
+            return AuthCommands.systemDefault().status(out);
+          }
+        });
+  }
+
+  static int run(String[] arguments, BufferedReader input, PrintStream stdout,
+                 PrintStream stderr, CommandServices commands) {
     CliArguments parsed = CliArguments.parse(arguments);
     if (parsed.badArgument().isPresent()) {
       stderr.print("unknown arg: " + parsed.badArgument().orElseThrow() + "\n\n");
@@ -79,9 +98,22 @@ public final class AjentCli {
       stdout.print("ajent " + VERSION + "\n");
       return 0;
     }
+    if (parsed.subcommand() == CliArguments.Subcommand.LOGIN) {
+      return commands.login(input, stdout, stderr);
+    }
+    if (parsed.subcommand() == CliArguments.Subcommand.LOGOUT)
+      return commands.logout(stdout, stderr);
+    if (parsed.subcommand() == CliArguments.Subcommand.STATUS)
+      return commands.status(stdout);
     String command = parsed.subcommand() == CliArguments.Subcommand.NONE
         ? "interactive mode" : parsed.subcommand().commandName();
     stderr.print("ajent: " + command + " is not implemented yet\n");
     return SOFTWARE_ERROR;
+  }
+
+  interface CommandServices {
+    int login(BufferedReader input, PrintStream output, PrintStream error);
+    int logout(PrintStream output, PrintStream error);
+    int status(PrintStream output);
   }
 }

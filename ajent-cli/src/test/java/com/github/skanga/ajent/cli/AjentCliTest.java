@@ -3,7 +3,9 @@ package com.github.skanga.ajent.cli;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.PrintStream;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
@@ -79,6 +81,36 @@ class AjentCliTest {
         "version", "help");
   }
 
+  @Test void dispatchesAuthenticationCommandsThroughTheCompositionSeam() {
+    var services = new AjentCli.CommandServices() {
+      @Override public int login(BufferedReader input, PrintStream output, PrintStream error) {
+        output.print("login:" + read(input)); return 11;
+      }
+      @Override public int logout(PrintStream output, PrintStream error) {
+        output.print("logout"); return 12;
+      }
+      @Override public int status(PrintStream output) { output.print("status"); return 13; }
+    };
+    assertThat(run(services, "answer\n", "login")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(11); assertThat(result.stdout()).isEqualTo("login:answer");
+    });
+    assertThat(run(services, "", "logout")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(12); assertThat(result.stdout()).isEqualTo("logout");
+    });
+    assertThat(run(services, "", "status")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(13); assertThat(result.stdout()).isEqualTo("status");
+    });
+  }
+
+  @Test void recognizedButPendingCommandsReturnSoftwareError() {
+    for (String command : new String[] {"acp", "mcp-serve", "skills", "airgap"}) {
+      Execution result = run(command);
+      assertThat(result.exitCode()).as(command).isEqualTo(70);
+      assertThat(result.stderr()).contains(command, "is not implemented yet");
+    }
+    assertThat(run().stderr()).contains("interactive mode is not implemented yet");
+  }
+
   private static Execution run(String... arguments) {
     var stdout = new ByteArrayOutputStream();
     var stderr = new ByteArrayOutputStream();
@@ -87,6 +119,20 @@ class AjentCliTest {
         new PrintStream(stderr, true, StandardCharsets.UTF_8));
     return new Execution(exitCode, stdout.toString(StandardCharsets.UTF_8),
         stderr.toString(StandardCharsets.UTF_8));
+  }
+
+  private static Execution run(AjentCli.CommandServices services, String input,
+                               String... arguments) {
+    var stdout = new ByteArrayOutputStream(); var stderr = new ByteArrayOutputStream();
+    int exitCode = AjentCli.run(arguments, new BufferedReader(new StringReader(input)),
+        new PrintStream(stdout, true, StandardCharsets.UTF_8),
+        new PrintStream(stderr, true, StandardCharsets.UTF_8), services);
+    return new Execution(exitCode, stdout.toString(StandardCharsets.UTF_8),
+        stderr.toString(StandardCharsets.UTF_8));
+  }
+
+  private static String read(BufferedReader input) {
+    try { return input.readLine(); } catch (Exception exception) { throw new AssertionError(exception); }
   }
 
   private static String resource(String path) {
