@@ -28,6 +28,7 @@ import com.github.skanga.ajent.terminal.render.TerminalCanvas;
 import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
+import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
@@ -261,6 +262,7 @@ final class InteractiveCommand {
     private final PermissionGate permission;
     private final TerminalStylePool styles = new TerminalStylePool();
     private InlineFrameRenderer.Frame frame = new InlineFrameRenderer.Empty();
+    private CommandPalette.State palette = new CommandPalette.Closed();
     private String composer = "";
     private int cursor;
 
@@ -284,16 +286,13 @@ final class InteractiveCommand {
         }
         return true;
       }
+      if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
       if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
         int codePoint = Character.toLowerCase(character.codePoint());
-        if (codePoint == 'c') {
-          if (!(loop.state().phase() instanceof SessionPhase.Idle)) loop.dispatch(new RuntimeMessage.Cancel());
-          else clearComposer();
-          return true;
-        }
+        if (codePoint == 'c') return false;
+        if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
         if (codePoint == 'd' && composer.isEmpty()) return false;
         if (codePoint == 'u') { composer = composer.substring(cursor); cursor = 0; render(); return true; }
-        if (codePoint == 'k') { composer = composer.substring(0, cursor); render(); return true; }
       }
       if (key.key() instanceof TerminalKey.SpecialKey special) {
         switch (special) {
@@ -333,6 +332,34 @@ final class InteractiveCommand {
       return true;
     }
 
+    private boolean paletteKey(TerminalKey key, AgentControl loop) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> palette = CommandPalette.close(palette);
+          case UP -> palette = CommandPalette.move(palette, -1);
+          case DOWN -> palette = CommandPalette.move(palette, 1);
+          case BACKSPACE -> palette = CommandPalette.backspace(palette);
+          case ENTER -> {
+            CommandPalette.Transition transition = CommandPalette.select(palette);
+            palette = transition.state();
+            if (transition.selected().isPresent()) {
+              CommandPalette.Command command = transition.selected().orElseThrow();
+              if (command == CommandPalette.Command.QUIT) { render(); return false; }
+              if (command == CommandPalette.Command.COMPACT_CONTEXT) {
+                loop.dispatch(new RuntimeMessage.CompactContext());
+              }
+            }
+          }
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character
+          && !key.modifiers().ctrl() && !key.modifiers().alt()) {
+        palette = CommandPalette.input(palette, character.codePoint());
+      }
+      render();
+      return true;
+    }
+
     void insert(String value) {
       synchronized (lock) {
         composer = composer.substring(0, cursor) + value + composer.substring(cursor);
@@ -353,6 +380,17 @@ final class InteractiveCommand {
         JLineTerminalSession.Size size = terminal.size();
         int width = Math.max(1, size.columns());
         List<StyledLine> lines = lines(state, permission.current(), width, composer);
+        if (palette instanceof CommandPalette.Open open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Commands  " + open.query(), Style.ACCENT));
+          List<CommandPalette.Command> matches = CommandPalette.filtered(open.query());
+          for (int index = 0; index < matches.size(); index++) {
+            CommandPalette.Command command = matches.get(index);
+            lines.add(new StyledLine((index == open.index() ? "› " : "  ") + command.label(),
+                index == open.index() ? Style.ACCENT : Style.NORMAL));
+          }
+        }
         var canvas = new TerminalCanvas(width, Math.max(1, lines.size()));
         int normal = 0;
         int accent = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.cyan()).withBold());

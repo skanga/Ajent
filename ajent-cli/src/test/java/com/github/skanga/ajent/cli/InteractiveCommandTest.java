@@ -111,9 +111,9 @@ final class InteractiveCommandTest {
 
     state.set(withPhase(state.get(), new SessionPhase.Streaming(
         ActiveTurn.start(new CancellationSignal(), 1))));
-    ui.key(character('c', true), agent);
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
-    assertThat(agent.messages).filteredOn(RuntimeMessage.Cancel.class::isInstance).hasSize(2);
+    assertThat(agent.messages.getLast()).isInstanceOf(RuntimeMessage.Cancel.class);
+    assertThat(ui.key(character('c', true), agent)).isFalse();
   }
 
   @Test void composerCoversIdleControlsBoundariesAndIgnoredKeys() {
@@ -130,14 +130,40 @@ final class InteractiveCommandTest {
     assertThat(ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent)).isTrue();
     ui.key(character('x'), agent);
     assertThat(ui.key(character('d', true), agent)).isTrue();
-    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
-    ui.key(character('k', true), agent);
+    ui.key(character('u', true), agent);
     assertThat(ui.key(character('d', true), agent)).isFalse();
     ui.key(character('z'), agent);
-    ui.key(character('c', true), agent);
-    assertThat(ui.key(character('d', true), agent)).isFalse();
-    assertThat(ui.key(new TerminalKey(new TerminalKey.CharacterKey('q'),
+    assertThat(ui.key(character('c', true), agent)).isFalse();
+    var another = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    assertThat(another.key(new TerminalKey(new TerminalKey.CharacterKey('q'),
         new TerminalKey.Modifiers(false, true, false)), agent)).isTrue();
+  }
+
+  @Test void commandPaletteOwnsKeysFiltersDispatchesCompactAndCanQuit() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.key(character('k', true), agent);
+    for (int codePoint : "compact".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.messages).contains(new RuntimeMessage.CompactContext());
+
+    ui.key(character('k', true), agent);
+    ui.key(character('x'), agent);
+    ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent);
+    for (int codePoint : "quit".codePoints().toArray()) ui.key(character(codePoint), agent);
+    assertThat(ui.key(special(TerminalKey.SpecialKey.ENTER), agent)).isFalse();
+    assertThat(terminal.bytes.toString()).contains("Commands");
+
+    ui.key(character('k', true), agent);
+    assertThat(ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent)).isTrue();
+    ui.key(character('k', true), agent);
+    assertThat(ui.key(special(TerminalKey.SpecialKey.ENTER), agent)).isTrue();
   }
 
   @Test void permissionGateBlocksUntilModalKeysResolveAllDecisions() throws Exception {
