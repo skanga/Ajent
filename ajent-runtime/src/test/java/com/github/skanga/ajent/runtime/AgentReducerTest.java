@@ -10,6 +10,7 @@ import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.CompactionRecord;
+import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.RetryState;
 import com.github.skanga.ajent.provider.ErrorClass;
 import com.github.skanga.ajent.provider.stream.StopReason;
@@ -51,6 +52,36 @@ final class AgentReducerTest {
     assertThat(step.effects()).satisfiesExactly(
         effect -> assertThat(effect).isInstanceOf(RuntimeEffect.Persist.class),
         effect -> assertThat(effect).isInstanceOf(RuntimeEffect.StartStream.class));
+  }
+
+  @Test void checkpointedSubmitUsesOneIdentityForTheUserTurnAndSnapshot() {
+    var checkpoint = new CheckpointId("checkpoint");
+    AgentReducer.Step step = reducer(PermissionVerdict.ALLOW).update(AgentState.initial(thread()),
+        new RuntimeMessage.Submit("change files", List.of(), Optional.of(checkpoint)));
+    var user = step.state().thread().messages().getFirst();
+    assertThat(user.id()).isEqualTo(new MessageId("checkpoint"));
+    assertThat(user.checkpointId()).contains(checkpoint);
+    assertThat(step.effects()).anySatisfy(effect -> assertThat(effect)
+        .isEqualTo(new RuntimeEffect.CreateCheckpoint(checkpoint)));
+  }
+
+  @Test void queuedSubmitTakesItsCheckpointOnlyWhenThatTurnActuallyStarts() {
+    var ids = new AtomicInteger();
+    var reducer = new AgentReducer(new AgentReducer.Context(System::nanoTime, Instant::now,
+        MessageId::random, ignored -> PermissionVerdict.ALLOW, () -> 1.0, () -> 200_000,
+        Optional::empty, () -> Optional.of(new CheckpointId("cp" + ids.incrementAndGet()))));
+    AgentState state = reducer.update(AgentState.initial(thread()),
+        new RuntimeMessage.Submit("first", List.of())).state();
+    state = reducer.update(state, new RuntimeMessage.Submit("queued", List.of())).state();
+    assertThat(ids).hasValue(1);
+    AgentReducer.Step drained = reducer.update(state, new RuntimeMessage.ProviderEvent(1,
+        new StreamEvent.Finished(StopReason.END_TURN)));
+    assertThat(ids).hasValue(2);
+    assertThat(drained.state().thread().messages()).filteredOn(message -> message.role() == Role.USER)
+        .extracting(message -> message.checkpointId().orElseThrow().value())
+        .containsExactly("cp1", "cp2");
+    assertThat(drained.effects()).anySatisfy(effect -> assertThat(effect)
+        .isEqualTo(new RuntimeEffect.CreateCheckpoint(new CheckpointId("cp2"))));
   }
 
   @Test void providerEffectsUseCompactedWireViewWithoutMutatingVisibleHistory() {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.skanga.ajent.domain.ActiveTurn;
 import com.github.skanga.ajent.domain.CancellationSignal;
+import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
@@ -474,6 +475,105 @@ final class InteractiveCommandTest {
     ui.key(character('d'), agent);
   }
 
+  @Test void checkpointPickerLoadsDiffsNavigatesAndRefillsPromptAfterRewind() {
+    var first = checkpointMessage("cp1", "first change");
+    var second = checkpointMessage("cp2", "second change\nmore");
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(first,
+        new Message(Role.ASSISTANT, "done", List.of(), List.of()), second))));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 20);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.checkpointsAvailable = true;
+    selectCommand(ui, agent, "rewind");
+    assertThat(terminal.bytes.toString()).contains(
+        "Rewind to Checkpoint", "Turn 1  first change", "Turn 2  second change",
+        "2 files", "+3", "\u22124");
+    ui.key(character('k'), agent);
+    ui.key(character('j'), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.restoredCheckpoint).isEqualTo(new CheckpointId("cp2"));
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
+        .isEqualTo("second change\nmore");
+    assertThat(terminal.bytes.toString()).contains("\u001b[2J\u001b[3J\u001b[H");
+  }
+
+  @Test void checkpointEntryExplainsRepoEmptyBusyFailureAndClosePaths() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    selectCommand(ui, agent, "rewind");
+    assertThat(terminal.bytes.toString()).contains("checkpoints need a git repo");
+    agent.checkpointsAvailable = true;
+    selectCommand(ui, agent, "rewind");
+    assertThat(terminal.bytes.toString()).contains("no checkpoints in this thread yet");
+
+    state.set(withPhase(AgentState.initial(thread(List.of(checkpointMessage("cp", "prompt")))),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1))));
+    selectCommand(ui, agent, "rewind");
+    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is working");
+    state.set(AgentState.initial(thread(List.of(checkpointMessage("cp", "prompt")))));
+    selectCommand(ui, agent, "rewind");
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
+    ui.key(character('x'), agent);
+    ui.key(character('q'), agent);
+    selectCommand(ui, agent, "rewind");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    agent.checkpointFailure = "missing ref";
+    selectCommand(ui, agent, "rewind");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("rewind failed: missing ref");
+  }
+
+  @Test void checkpointRestoreInFlightIsGatedAndCleanDiffIsRendered() {
+    var state = new AtomicReference<>(AgentState.initial(
+        thread(List.of(checkpointMessage("cp", "prompt")))));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.checkpointsAvailable = true;
+    agent.checkpointClean = true;
+    agent.deferCheckpointRestore = true;
+    selectCommand(ui, agent, "rewind");
+    assertThat(terminal.bytes.toString()).contains("no changes");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    selectCommand(ui, agent, "rewind");
+    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is working");
+    agent.completeCheckpointRestore();
+  }
+
+  @Test void multilineBareCodeResultCoversFailureNewlineAndPluralRendering() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(
+        new Message(Role.ASSISTANT, "```\necho a\necho b\n```", List.of(), List.of())))));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 20);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.runOutput = "failed\n";
+    agent.runExit = 1;
+    ui.key(character('g', true), agent);
+    assertThat(terminal.bytes.toString()).contains("sh Â· 2 lines");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("echo a â€¦", "exit 1");
+    ui.key(character('a'), agent);
+  }
+
+  private static Message checkpointMessage(String id, String text) {
+    return new Message(new com.github.skanga.ajent.domain.MessageId(id), Role.USER, text,
+        List.of(), List.of(), "", "", List.of(), Instant.EPOCH,
+        Optional.of(new CheckpointId(id)), Optional.empty(), false);
+  }
+
   @Test void savedThreadPickerLoadsAtCurrentNavigatesAndSwapsWholeView() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
@@ -884,6 +984,13 @@ final class InteractiveCommandTest {
     private String runOutput = "captured";
     private int runExit;
     private boolean runTimedOut;
+    private boolean checkpointsAvailable;
+    private String checkpointFailure = "";
+    private CheckpointId restoredCheckpoint;
+    private boolean checkpointClean;
+    private boolean deferCheckpointRestore;
+    private java.util.function.Consumer<com.github.skanga.ajent.terminal.ui.CheckpointPicker.Restore>
+        pendingCheckpointRestore;
     private java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>>
         pendingModels;
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
@@ -909,6 +1016,32 @@ final class InteractiveCommandTest {
       ranBlocks.add(block);
       completed.accept(new com.github.skanga.ajent.terminal.ui.CodeBlockPicker.Result(
           block.body(), runOutput, runExit, runTimedOut));
+    }
+    @Override public boolean checkpointsAvailable() { return checkpointsAvailable; }
+    @Override public void loadCheckpointDiff(CheckpointId id,
+        java.util.function.Consumer<Optional<int[]>> completed) {
+      completed.accept(id.value().equals("cp1") ? Optional.empty()
+          : Optional.of(checkpointClean ? new int[] {0, 0, 0} : new int[] {2, 3, 4}));
+    }
+    @Override public void restoreCheckpoint(CheckpointId id,
+        java.util.function.Consumer<com.github.skanga.ajent.terminal.ui.CheckpointPicker.Restore> completed) {
+      restoredCheckpoint = id;
+      var result = checkpointFailure.isEmpty()
+          ? new com.github.skanga.ajent.terminal.ui.CheckpointPicker.Restore(
+              true, state.get().thread().messages().stream()
+                  .filter(message -> message.checkpointId().filter(id::equals).isPresent())
+                  .findFirst().orElseThrow().text(), "")
+          : new com.github.skanga.ajent.terminal.ui.CheckpointPicker.Restore(
+              false, "", checkpointFailure);
+      if (deferCheckpointRestore) pendingCheckpointRestore = completed;
+      else completed.accept(result);
+    }
+    private void completeCheckpointRestore() {
+      deferCheckpointRestore = false;
+      var receiver = pendingCheckpointRestore;
+      pendingCheckpointRestore = null;
+      receiver.accept(new com.github.skanga.ajent.terminal.ui.CheckpointPicker.Restore(
+          true, "prompt", ""));
     }
     @Override public Profile cycleProfile() {
       profile = switch (profile) {

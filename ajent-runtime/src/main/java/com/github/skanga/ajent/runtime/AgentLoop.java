@@ -20,6 +20,7 @@ public final class AgentLoop implements AutoCloseable {
   private final PersistencePort persistence;
   private final BiConsumer<RuntimeMessage, AgentState> observer;
   private final OAuthRefreshPort oauthRefresh;
+  private final CheckpointPort checkpoints;
   private final ExecutorService tasks;
   private final ScheduledExecutorService scheduler;
   private AgentState state;
@@ -30,7 +31,7 @@ public final class AgentLoop implements AutoCloseable {
                    Consumer<AgentState> observer) {
     this(initial, reducer, provider, tools, permissions, persistence, states(observer),
         token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"),
-        Executors.newVirtualThreadPerTaskExecutor());
+        CheckpointPort.disabled(), Executors.newVirtualThreadPerTaskExecutor());
   }
 
   public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
@@ -38,14 +39,22 @@ public final class AgentLoop implements AutoCloseable {
                    BiConsumer<RuntimeMessage, AgentState> observer) {
     this(initial, reducer, provider, tools, permissions, persistence, observer,
         token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"),
-        Executors.newVirtualThreadPerTaskExecutor());
+        CheckpointPort.disabled(), Executors.newVirtualThreadPerTaskExecutor());
+  }
+
+  public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
+                   PermissionPort permissions, PersistencePort persistence,
+                   BiConsumer<RuntimeMessage, AgentState> observer, CheckpointPort checkpoints) {
+    this(initial, reducer, provider, tools, permissions, persistence, observer,
+        token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"),
+        checkpoints, Executors.newVirtualThreadPerTaskExecutor());
   }
 
   public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
                    PermissionPort permissions, PersistencePort persistence,
                    Consumer<AgentState> observer, OAuthRefreshPort oauthRefresh) {
     this(initial, reducer, provider, tools, permissions, persistence, states(observer), oauthRefresh,
-        Executors.newVirtualThreadPerTaskExecutor());
+        CheckpointPort.disabled(), Executors.newVirtualThreadPerTaskExecutor());
   }
 
   public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
@@ -53,27 +62,36 @@ public final class AgentLoop implements AutoCloseable {
                    BiConsumer<RuntimeMessage, AgentState> observer,
                    OAuthRefreshPort oauthRefresh) {
     this(initial, reducer, provider, tools, permissions, persistence, observer, oauthRefresh,
-        Executors.newVirtualThreadPerTaskExecutor());
+        CheckpointPort.disabled(), Executors.newVirtualThreadPerTaskExecutor());
+  }
+
+  public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
+                   PermissionPort permissions, PersistencePort persistence,
+                   BiConsumer<RuntimeMessage, AgentState> observer,
+                   OAuthRefreshPort oauthRefresh, CheckpointPort checkpoints) {
+    this(initial, reducer, provider, tools, permissions, persistence, observer, oauthRefresh,
+        checkpoints, Executors.newVirtualThreadPerTaskExecutor());
   }
 
   AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
             PermissionPort permissions, PersistencePort persistence, Consumer<AgentState> observer,
             ExecutorService tasks) {
     this(initial, reducer, provider, tools, permissions, persistence, states(observer),
-        token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"), tasks);
+        token -> new OAuthRefreshPort.Result.Failure("OAuth refresh is not configured"),
+        CheckpointPort.disabled(), tasks);
   }
 
   AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
             PermissionPort permissions, PersistencePort persistence, Consumer<AgentState> observer,
             OAuthRefreshPort oauthRefresh, ExecutorService tasks) {
     this(initial, reducer, provider, tools, permissions, persistence, states(observer),
-        oauthRefresh, tasks);
+        oauthRefresh, CheckpointPort.disabled(), tasks);
   }
 
   private AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
             PermissionPort permissions, PersistencePort persistence,
             BiConsumer<RuntimeMessage, AgentState> observer,
-            OAuthRefreshPort oauthRefresh, ExecutorService tasks) {
+            OAuthRefreshPort oauthRefresh, CheckpointPort checkpoints, ExecutorService tasks) {
     state = Objects.requireNonNull(initial, "initial");
     this.reducer = Objects.requireNonNull(reducer, "reducer");
     this.provider = Objects.requireNonNull(provider, "provider");
@@ -82,6 +100,7 @@ public final class AgentLoop implements AutoCloseable {
     this.persistence = Objects.requireNonNull(persistence, "persistence");
     this.observer = Objects.requireNonNull(observer, "observer");
     this.oauthRefresh = Objects.requireNonNull(oauthRefresh, "oauthRefresh");
+    this.checkpoints = Objects.requireNonNull(checkpoints, "checkpoints");
     this.tasks = Objects.requireNonNull(tasks, "tasks");
     scheduler = Executors.newSingleThreadScheduledExecutor(
         java.lang.Thread.ofVirtual().name("ajent-retry-", 0).factory());
@@ -115,6 +134,8 @@ public final class AgentLoop implements AutoCloseable {
   private void execute(RuntimeEffect effect) {
     switch (effect) {
       case RuntimeEffect.Persist persist -> tasks.submit(() -> persistence.save(persist.thread()));
+      case RuntimeEffect.CreateCheckpoint checkpoint ->
+          tasks.submit(() -> checkpoints.create(checkpoint.id()));
       case RuntimeEffect.StartStream stream -> tasks.submit(() -> {
         try {
           provider.stream(stream.turnId(), stream.messages(), stream.cancellation(), event ->

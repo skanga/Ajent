@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /** Bounded, non-interactive subprocess execution using the JDK process API. */
@@ -19,14 +20,25 @@ public class ProcessRunner {
   }
 
   public Result argv(List<String> argv, Path directory, int maxBytes, Duration timeout) {
-    return run(argv, directory, maxBytes, timeout);
+    return run(argv, directory, maxBytes, timeout, Map.of());
+  }
+
+  public Result argv(List<String> argv, Path directory, int maxBytes, Duration timeout,
+      Map<String, String> environment) {
+    return run(argv, directory, maxBytes, timeout, environment);
   }
 
   private Result run(List<String> argv, Path directory, int maxBytes, Duration timeout) {
+    return run(argv, directory, maxBytes, timeout, Map.of());
+  }
+
+  private Result run(List<String> argv, Path directory, int maxBytes, Duration timeout,
+      Map<String, String> environment) {
     Process process;
     try {
       var builder = new ProcessBuilder(argv).redirectErrorStream(true);
       if (directory != null) builder.directory(directory.toFile());
+      builder.environment().putAll(environment);
       process = builder.start();
       process.getOutputStream().close();
     } catch (IOException exception) {

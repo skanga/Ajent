@@ -1,16 +1,23 @@
 package com.github.skanga.ajent.runtime;
 
+import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.ImageContent;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 public sealed interface RuntimeMessage {
-  record Submit(String text, List<ImageContent> images) implements RuntimeMessage {
+  record Submit(String text, List<ImageContent> images, Optional<CheckpointId> checkpointId)
+      implements RuntimeMessage {
+    public Submit(String text, List<ImageContent> images) {
+      this(text, images, Optional.empty());
+    }
     public Submit {
       text = Objects.requireNonNull(text, "text");
       images = List.copyOf(images);
+      checkpointId = Objects.requireNonNull(checkpointId, "checkpointId");
     }
   }
   record ProviderEvent(long turnId, StreamEvent event) implements RuntimeMessage {

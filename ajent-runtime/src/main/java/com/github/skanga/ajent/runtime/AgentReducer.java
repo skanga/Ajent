@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.domain.ActiveTurn;
 import com.github.skanga.ajent.domain.CancellationSignal;
 import com.github.skanga.ajent.domain.CompactionRecord;
+import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.ImageContent;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.MessageId;
@@ -61,13 +62,14 @@ public final class AgentReducer {
                         Function<ToolUse, PermissionVerdict> permissions,
                         DoubleSupplier retryJitter,
                         IntSupplier contextMax,
-                        Supplier<Optional<String>> oauthRefreshToken) {
+                        Supplier<Optional<String>> oauthRefreshToken,
+                        Supplier<Optional<CheckpointId>> checkpointIds) {
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                    Supplier<MessageId> messageIds,
                    Function<ToolUse, PermissionVerdict> permissions) {
       this(nanoClock, wallClock, messageIds, permissions,
           () -> ThreadLocalRandom.current().nextDouble(0.80, 1.20), () -> 200_000,
-          Optional::empty);
+          Optional::empty, Optional::empty);
     }
 
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
@@ -75,7 +77,7 @@ public final class AgentReducer {
                    Function<ToolUse, PermissionVerdict> permissions,
                    DoubleSupplier retryJitter) {
       this(nanoClock, wallClock, messageIds, permissions, retryJitter, () -> 200_000,
-          Optional::empty);
+          Optional::empty, Optional::empty);
     }
 
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
@@ -83,7 +85,16 @@ public final class AgentReducer {
                    Function<ToolUse, PermissionVerdict> permissions,
                    DoubleSupplier retryJitter, IntSupplier contextMax) {
       this(nanoClock, wallClock, messageIds, permissions, retryJitter, contextMax,
-          Optional::empty);
+          Optional::empty, Optional::empty);
+    }
+
+    public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
+                   Supplier<MessageId> messageIds,
+                   Function<ToolUse, PermissionVerdict> permissions,
+                   DoubleSupplier retryJitter, IntSupplier contextMax,
+                   Supplier<Optional<String>> oauthRefreshToken) {
+      this(nanoClock, wallClock, messageIds, permissions, retryJitter, contextMax,
+          oauthRefreshToken, Optional::empty);
     }
 
     public Context {
@@ -94,6 +105,7 @@ public final class AgentReducer {
       Objects.requireNonNull(retryJitter, "retryJitter");
       Objects.requireNonNull(contextMax, "contextMax");
       Objects.requireNonNull(oauthRefreshToken, "oauthRefreshToken");
+      Objects.requireNonNull(checkpointIds, "checkpointIds");
     }
   }
 
@@ -195,7 +207,9 @@ public final class AgentReducer {
     long turnId = state.turnCounter() + 1;
     Instant now = context.wallClock().get();
     var messages = new ArrayList<>(state.thread().messages());
-    messages.add(message(Role.USER, submit.text(), submit.images(), List.of(), now));
+    Optional<CheckpointId> checkpoint = submit.checkpointId().isPresent()
+        ? submit.checkpointId() : context.checkpointIds().get();
+    messages.add(message(Role.USER, submit.text(), submit.images(), List.of(), now, checkpoint));
     messages.add(message(Role.ASSISTANT, "", List.of(), List.of(), now));
     var thread = withMessages(state.thread(), messages, now);
     var cancellation = new CancellationSignal();
@@ -204,8 +218,11 @@ public final class AgentReducer {
     AgentState revised = clearTruncationSignals(copy(state, thread, phase, turnId, turnId,
         state.tokensIn(), state.tokensOut(), "", Optional.empty(), state.queued(),
         state.sessionGrants()));
-    return new Step(revised, List.of(new RuntimeEffect.Persist(thread),
-        new RuntimeEffect.StartStream(turnId, wireMessages(thread), cancellation)));
+    var effects = new ArrayList<RuntimeEffect>();
+    effects.add(new RuntimeEffect.Persist(thread));
+    checkpoint.ifPresent(id -> effects.add(new RuntimeEffect.CreateCheckpoint(id)));
+    effects.add(new RuntimeEffect.StartStream(turnId, wireMessages(thread), cancellation));
+    return new Step(revised, effects);
   }
 
   private Step compactContext(AgentState state) {
@@ -1092,8 +1109,15 @@ public final class AgentReducer {
 
   private Message message(Role role, String text, List<ImageContent> images, List<ToolUse> calls,
                           Instant now) {
-    return new Message(context.messageIds().get(), role, text, images, List.of(), "", "", calls,
-        now, Optional.empty(), Optional.empty(), false, false);
+    return message(role, text, images, calls, now, Optional.empty());
+  }
+
+  private Message message(Role role, String text, List<ImageContent> images, List<ToolUse> calls,
+                          Instant now, Optional<CheckpointId> checkpoint) {
+    MessageId id = checkpoint.<MessageId>map(value -> new MessageId(value.value()))
+        .orElseGet(context.messageIds());
+    return new Message(id, role, text, images, List.of(), "", "", calls,
+        now, checkpoint, Optional.empty(), false, false);
   }
 
   private static Message withText(Message message, String text) {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.github.skanga.ajent.domain.MessageId;
+import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.SessionPhase;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
@@ -168,6 +169,31 @@ final class AgentLoopTest {
       assertThat(loop.state().thread().messages().getLast().text()).isEqualTo("recovered");
     }
     assertThat(providerCalls).hasValue(2);
+  }
+
+  @Test void createsCheckpointEffectsOnTheStructuredWorkerPool() throws Exception {
+    var created = new CountDownLatch(1);
+    var captured = new java.util.concurrent.atomic.AtomicReference<CheckpointId>();
+    CheckpointPort checkpoints = new CheckpointPort() {
+      @Override public boolean enabled() { return true; }
+      @Override public boolean create(CheckpointId id) {
+        captured.set(id);
+        created.countDown();
+        return true;
+      }
+    };
+    try (var loop = new AgentLoop(AgentState.initial(thread()), reducer(PermissionVerdict.ALLOW),
+        (turn, messages, cancellation, sink) -> {},
+        call -> new ToolCompletion.Success("unused"),
+        call -> new PermissionPort.Decision(true, false), thread -> {},
+        (message, state) -> {}, checkpoints)) {
+      loop.dispatch(new RuntimeMessage.Submit("checkpoint", List.of(),
+          java.util.Optional.of(new CheckpointId("cp"))));
+      assertThat(created.await(5, TimeUnit.SECONDS)).isTrue();
+    }
+    assertThat(captured.get()).isEqualTo(new CheckpointId("cp"));
+    assertThat(CheckpointPort.disabled().enabled()).isFalse();
+    assertThat(CheckpointPort.disabled().create(new CheckpointId("ignored"))).isFalse();
   }
 
   @Test void suppliesPeriodicTicksWhileATurnIsActive() throws Exception {

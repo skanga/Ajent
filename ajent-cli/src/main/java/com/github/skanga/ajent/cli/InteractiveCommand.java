@@ -5,6 +5,7 @@ import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
 import com.github.skanga.ajent.domain.Message;
+import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
@@ -23,6 +24,7 @@ import com.github.skanga.ajent.provider.openai.ProviderRegistry;
 import com.github.skanga.ajent.runtime.AgentLoop;
 import com.github.skanga.ajent.runtime.AgentSessionFactory;
 import com.github.skanga.ajent.runtime.AgentState;
+import com.github.skanga.ajent.runtime.CheckpointPort;
 import com.github.skanga.ajent.runtime.LiveProviderFactory;
 import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.RuntimeMessage;
@@ -40,6 +42,7 @@ import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
+import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
 import com.github.skanga.ajent.terminal.ui.DiffReview;
 import com.github.skanga.ajent.terminal.ui.ModelPicker;
 import com.github.skanga.ajent.terminal.ui.LoginModal;
@@ -54,6 +57,7 @@ import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.runtime.FileChange;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
 import com.github.skanga.ajent.tools.host.HostServices;
+import com.github.skanga.ajent.tools.workspace.GitCheckpointStore;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.awt.Desktop;
@@ -217,6 +221,60 @@ final class InteractiveCommand {
           if (result.truncated()) output += "\n[output truncated]";
           completed.accept(new CodeBlockPicker.Result(block.body(), output,
               result.started() ? result.exitCode() : -1, result.timedOut()));
+        }
+        @Override public boolean checkpointsAvailable() {
+          return configured.checkpoints().inGitRepo();
+        }
+        @Override public void loadCheckpointDiff(
+            CheckpointId id, Consumer<Optional<int[]>> completed) {
+          Thread.startVirtualThread(() -> {
+            GitCheckpointStore.Diff diff = configured.checkpoints().summary(id);
+            completed.accept(diff.valid() ? Optional.of(new int[] {
+                diff.filesChanged(), diff.insertions(), diff.deletions()}) : Optional.empty());
+          });
+        }
+        @Override public void restoreCheckpoint(
+            CheckpointId id, Consumer<CheckpointPicker.Restore> completed) {
+          Thread.startVirtualThread(() -> {
+            GitCheckpointStore.Restore restored = configured.checkpoints().restore(id);
+            if (!restored.restored()) {
+              completed.accept(new CheckpointPicker.Restore(false, "", restored.error()));
+              return;
+            }
+            AgentLoop previous = activeLoop.get();
+            com.github.skanga.ajent.domain.Thread current = previous.state().thread();
+            int cut = -1;
+            String prompt = "";
+            for (int index = 0; index < current.messages().size(); index++) {
+              Message candidate = current.messages().get(index);
+              if (candidate.checkpointId().filter(id::equals).isPresent()) {
+                cut = index;
+                prompt = candidate.text();
+                break;
+              }
+            }
+            if (cut < 0) {
+              completed.accept(new CheckpointPicker.Restore(
+                  false, "", "files rewound (turn already gone)"));
+              return;
+            }
+            int cutoff = cut;
+            var truncated = new com.github.skanga.ajent.domain.Thread(current.id(), current.title(),
+                current.messages().subList(0, cutoff), current.createdAt(), Instant.now(),
+                current.compactions().stream()
+                    .filter(record -> record.upToIndex() <= cutoff).toList());
+            permission.cancel();
+            previous.close();
+            if (truncated.messages().isEmpty()) threadStore.delete(truncated.id());
+            else threadStore.save(truncated);
+            AgentLoop replacement = configured.sessions().create(truncated, activeProfile::get,
+                (AgentSessionFactory.ConfigurationSource) activeProvider::get,
+                permission, observe);
+            activeLoop.set(replacement);
+            state.set(replacement.state());
+            pendingChanges.set(List.of());
+            completed.accept(new CheckpointPicker.Restore(true, prompt, ""));
+          });
         }
         @Override public Profile cycleProfile() {
           Profile next = switch (activeProfile.get()) {
@@ -417,13 +475,19 @@ final class InteractiveCommand {
         arguments.key(), settings.providerKeys().getOrDefault(provider, ""), environment);
     Path docs = resolveDocs(workspace);
     var todos = new TodoLedger();
+    var checkpoints = new GitCheckpointStore(workspace, sandbox.runner());
     var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
         workspace, workspace, home, docs, new JdkWebTransport(), todos, null, sandbox.runner()));
     var providers = new LiveProviderFactory.Configuration(provider, model, auth, settings.effort(),
         tools.systemPrompt(), 0, environment);
-    return new Configuration(new AgentSessionFactory(tools, providers, client, dataDirectory),
+    CheckpointPort checkpointPort = new CheckpointPort() {
+      @Override public boolean enabled() { return checkpoints.inGitRepo(); }
+      @Override public boolean create(CheckpointId id) { return checkpoints.create(id); }
+    };
+    return new Configuration(new AgentSessionFactory(
+        tools, providers, client, dataDirectory, checkpointPort),
         dataDirectory, profile, model, settingsStore, providers,
-        new ProviderModelCatalog(client), todos, workspace, sandbox.runner());
+        new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints);
   }
 
   static void recordChange(
@@ -492,7 +556,8 @@ final class InteractiveCommand {
   record Configuration(
       AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
       SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
-      ProviderModelCatalog models, TodoLedger todos, Path workspace, ProcessRunner codeRunner) {}
+      ProviderModelCatalog models, TodoLedger todos, Path workspace, ProcessRunner codeRunner,
+      GitCheckpointStore checkpoints) {}
 
   static final class TodoLedger implements HostServices.TodoSink {
     private final AtomicReference<List<PlanModal.Item>> items =
@@ -526,6 +591,9 @@ final class InteractiveCommand {
     void loadThread(ThreadId id, Consumer<String> completed);
     boolean windows();
     void runCodeBlock(CodeBlockPicker.Block block, Consumer<CodeBlockPicker.Result> completed);
+    boolean checkpointsAvailable();
+    void loadCheckpointDiff(CheckpointId id, Consumer<Optional<int[]>> completed);
+    void restoreCheckpoint(CheckpointId id, Consumer<CheckpointPicker.Restore> completed);
     Profile cycleProfile();
     String model();
     void loadModels(Consumer<List<ModelPicker.Model>> receiver);
@@ -607,6 +675,8 @@ final class InteractiveCommand {
     private PickerState.OneAxis threadPicker = new PickerState.Closed();
     private PickerState.Modal plan = new PickerState.ModalClosed();
     private CodeBlockPicker.State codeBlocks = new CodeBlockPicker.Closed();
+    private CheckpointPicker.State checkpoints = new CheckpointPicker.Closed();
+    private boolean checkpointRestoring;
     private List<PlanModal.Item> planItems = List.of();
     private List<ThreadPicker.Entry> threadRows = List.of();
     private boolean threadsLoading;
@@ -659,6 +729,7 @@ final class InteractiveCommand {
       }
       if (codeBlocks instanceof CodeBlockPicker.Open) return codeBlockKey(key, loop);
       if (codeBlocks instanceof CodeBlockPicker.Result) return codeResultKey(key);
+      if (checkpoints instanceof CheckpointPicker.Open) return checkpointKey(key, loop);
       if (LoginModal.isOpen(login)) return loginKey(key, loop);
       if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key);
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
@@ -793,6 +864,8 @@ final class InteractiveCommand {
                 plan = PlanModal.open();
               } else if (command == CommandPalette.Command.RUN_CODE_BLOCK) {
                 openCodeBlocks(loop);
+              } else if (command == CommandPalette.Command.REWIND_CHECKPOINT) {
+                openCheckpoints(loop);
               } else if (command == CommandPalette.Command.CYCLE_PROFILE) {
                 Profile profile = loop.cycleProfile();
                 uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
@@ -864,6 +937,81 @@ final class InteractiveCommand {
         return;
       }
       codeBlocks = CodeBlockPicker.open(blocks.orElseThrow());
+    }
+
+    private void openCheckpoints(AgentControl loop) {
+      if (!(loop.state().phase() instanceof SessionPhase.Idle) || checkpointRestoring) {
+        uiStatus = "cannot rewind while the agent is working";
+        return;
+      }
+      if (!loop.checkpointsAvailable()) {
+        uiStatus = "checkpoints need a git repo";
+        return;
+      }
+      List<CheckpointPicker.Entry> entries = CheckpointPicker.entries(
+          loop.state().thread().messages());
+      if (entries.isEmpty()) {
+        uiStatus = "no checkpoints in this thread yet";
+        return;
+      }
+      checkpoints = CheckpointPicker.open(entries);
+      for (int index = 0; index < entries.size(); index++) {
+        int target = index;
+        loop.loadCheckpointDiff(entries.get(index).id(), diff -> {
+          synchronized (lock) { checkpoints = CheckpointPicker.diff(checkpoints, target, diff); }
+          render();
+        });
+      }
+    }
+
+    private boolean checkpointKey(TerminalKey key, AgentControl loop) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> checkpoints = CheckpointPicker.close(checkpoints);
+          case UP -> checkpoints = CheckpointPicker.move(checkpoints, -1);
+          case DOWN -> checkpoints = CheckpointPicker.move(checkpoints, 1);
+          case HOME -> {
+            if (checkpoints instanceof CheckpointPicker.Open open) {
+              checkpoints = new CheckpointPicker.Open(open.entries(), 0);
+            }
+          }
+          case END -> {
+            if (checkpoints instanceof CheckpointPicker.Open open) {
+              checkpoints = new CheckpointPicker.Open(open.entries(), open.entries().size() - 1);
+            }
+          }
+          case ENTER -> rewindSelected(loop);
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character) {
+        switch (Character.toLowerCase(character.codePoint())) {
+          case 'j' -> checkpoints = CheckpointPicker.move(checkpoints, 1);
+          case 'k' -> checkpoints = CheckpointPicker.move(checkpoints, -1);
+          case 'q' -> checkpoints = CheckpointPicker.close(checkpoints);
+          default -> { }
+        }
+      }
+      render();
+      return true;
+    }
+
+    private void rewindSelected(AgentControl loop) {
+      if (checkpointRestoring) return;
+      CheckpointPicker.selected(checkpoints).ifPresent(entry -> {
+        checkpoints = CheckpointPicker.close(checkpoints);
+        checkpointRestoring = true;
+        uiStatus = "rewinding to checkpointâ€¦";
+        loop.restoreCheckpoint(entry.id(), result -> {
+          synchronized (lock) { checkpointRestoring = false; }
+          if (!result.restored()) {
+            synchronized (lock) { uiStatus = "rewind failed: " + result.error(); }
+            render();
+            return;
+          }
+          resetForThreadSwap();
+          insert(result.prompt());
+        });
+      });
     }
 
     private boolean codeBlockKey(TerminalKey key, AgentControl loop) {
@@ -1229,6 +1377,8 @@ final class InteractiveCommand {
         threadPicker = new PickerState.Closed();
         plan = new PickerState.ModalClosed();
         codeBlocks = new CodeBlockPicker.Closed();
+        checkpoints = new CheckpointPicker.Closed();
+        checkpointRestoring = false;
         login = new LoginModal.Closed();
         diffReview = new PickerState.CellClosed();
         diffFiles = List.of();
@@ -1407,6 +1557,24 @@ final class InteractiveCommand {
             wrap(lines, "  " + line, width, Style.MUTED);
           }
           lines.add(new StyledLine("a attach to composer  y copy  Esc discard", Style.MUTED));
+        }
+        if (checkpoints instanceof CheckpointPicker.Open open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Rewind to Checkpoint", Style.ACCENT));
+          for (int index = 0; index < open.entries().size(); index++) {
+            CheckpointPicker.Entry entry = open.entries().get(index);
+            String diff = switch (entry.diffState()) {
+              case LOADING -> "\u2026";
+              case FAILED -> "";
+              case READY -> entry.clean() ? "no changes" : entry.filesChanged() + " files \u00b7 +"
+                  + entry.insertions() + " \u2212" + entry.deletions();
+            };
+            lines.add(new StyledLine((index == open.index() ? "\u203a " : "  ") + "Turn "
+                + entry.turn() + "  " + entry.preview() + (diff.isEmpty() ? "" : "  " + diff),
+                index == open.index() ? Style.ACCENT : Style.NORMAL));
+          }
+          lines.add(new StyledLine("\u2191\u2193 move  Enter rewind  Esc close", Style.MUTED));
         }
         if (LoginModal.isOpen(login)) {
           lines = new ArrayList<>(lines);

@@ -27,13 +27,24 @@ public final class AgentSessionFactory {
   private final HttpClient client;
   private final Path dataDirectory;
   private final BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers;
+  private final CheckpointPort checkpoints;
 
   public AgentSessionFactory(
       ToolRuntimeFactory.Components tools,
       LiveProviderFactory.Configuration baseProvider,
       HttpClient client,
       Path dataDirectory) {
-    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create);
+    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create,
+        CheckpointPort.disabled());
+  }
+
+  public AgentSessionFactory(
+      ToolRuntimeFactory.Components tools,
+      LiveProviderFactory.Configuration baseProvider,
+      HttpClient client,
+      Path dataDirectory,
+      CheckpointPort checkpoints) {
+    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints);
   }
 
   AgentSessionFactory(
@@ -42,12 +53,23 @@ public final class AgentSessionFactory {
       HttpClient client,
       Path dataDirectory,
       BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers) {
+    this(tools, baseProvider, client, dataDirectory, providers, CheckpointPort.disabled());
+  }
+
+  private AgentSessionFactory(
+      ToolRuntimeFactory.Components tools,
+      LiveProviderFactory.Configuration baseProvider,
+      HttpClient client,
+      Path dataDirectory,
+      BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers,
+      CheckpointPort checkpoints) {
     this.tools = Objects.requireNonNull(tools, "tools");
     this.baseProvider = Objects.requireNonNull(baseProvider, "baseProvider");
     this.client = Objects.requireNonNull(client, "client");
     this.dataDirectory = Objects.requireNonNull(dataDirectory, "dataDirectory")
         .toAbsolutePath().normalize();
     this.providers = Objects.requireNonNull(providers, "providers");
+    this.checkpoints = Objects.requireNonNull(checkpoints, "checkpoints");
   }
 
   public AgentLoop create(
@@ -96,14 +118,18 @@ public final class AgentSessionFactory {
         System::nanoTime, Instant::now, MessageId::random,
         call -> permission(call, Objects.requireNonNull(profile.get(), "profile value")),
         () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(0.80, 1.20),
-        () -> contextMax(Objects.requireNonNull(configuration.get(), "provider configuration"))));
+        () -> contextMax(Objects.requireNonNull(configuration.get(), "provider configuration")),
+        java.util.Optional::empty,
+        () -> checkpoints.enabled()
+            ? java.util.Optional.of(new com.github.skanga.ajent.domain.CheckpointId(
+                MessageId.random().value())) : java.util.Optional.empty()));
     ProviderPort provider = (turnId, messages, cancellation, sink) ->
         providers.apply(Objects.requireNonNull(configuration.get(), "provider configuration"), client)
             .stream(turnId, messages, cancellation, sink);
     return new AgentLoop(
         AgentState.initial(thread), reducer, provider,
         new DispatcherToolPort(tools.dispatcher()), permissions,
-        new FilePersistencePort(dataDirectory), observer);
+        new FilePersistencePort(dataDirectory), observer, checkpoints);
   }
 
   public int contextMax() {
