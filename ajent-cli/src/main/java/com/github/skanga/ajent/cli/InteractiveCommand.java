@@ -223,16 +223,25 @@ final class InteractiveCommand {
         }
         @Override public void runCodeBlock(
             CodeBlockPicker.Block block, Consumer<CodeBlockPicker.Result> completed) {
-          CodeBlockPicker.Shell shell = CodeBlockPicker.shell(block.language(), windows());
+          boolean windows = windows();
+          CodeBlockPicker.Shell shell = CodeBlockPicker.shell(block.language(), windows);
           String command = CodeBlockPicker.commandFor(shell, block.body());
           ProcessRunner.Result result = terminal.suspend(() -> {
-            terminal.write("\r\nâ•­â”€ running â”€â”€â”€â”€â”€\r\n$ " + block.body() + "\r\n");
-            return configured.codeRunner().shell(
-                command, configured.workspace(), 30_000, Duration.ofSeconds(120));
+            terminal.write(codeBlockHeader(windows, block.body()));
+            long started = System.nanoTime();
+            ProcessRunner.Result executed = executeCodeBlock(windows, configured.codeRunner(),
+                command, configured.workspace(), terminal::write,
+                () -> {
+                  JLineTerminalSession.SignalGuard guard = terminal.ignoreInterrupts();
+                  return guard::close;
+                });
+            terminal.write(codeBlockFooter(windows, executed,
+                Duration.ofNanos(System.nanoTime() - started).toSeconds()));
+            return executed;
           });
           String output = result.started() ? result.output()
               : "[failed to start: " + result.startError() + "]";
-          if (result.truncated()) output += "\n[output truncated]";
+          if (windows && result.truncated()) output += "\n[output truncated]";
           completed.accept(new CodeBlockPicker.Result(block.body(), output,
               result.started() ? result.exitCode() : -1, result.timedOut()));
         }
@@ -642,6 +651,35 @@ final class InteractiveCommand {
   private static String detail(Exception exception) {
     return exception.getMessage() == null ? exception.getClass().getSimpleName()
         : exception.getMessage();
+  }
+
+  static ProcessRunner.Result executeCodeBlock(boolean windows, ProcessRunner runner,
+      String command, Path workspace, ProcessRunner.LiveOutput liveOutput,
+      java.util.function.Supplier<ProcessRunner.SignalGuard> signalGuard) {
+    return windows
+        ? runner.shell(command, workspace, 30_000, Duration.ofSeconds(120))
+        : runner.interactivePosixShell(command, workspace, liveOutput, signalGuard);
+  }
+
+  static String codeBlockHeader(boolean windows, String command) {
+    String banner = windows
+        ? "╭─ running ─ (output shown when it finishes) ─────"
+        : "╭─ running ─ Ctrl-C to stop ─────────────────────────────────";
+    return "\u001b[2m\n" + banner + "\u001b[0m\n\u001b[36m$ \u001b[0m\u001b[1m"
+        + command + "\u001b[0m\n";
+  }
+
+  static String codeBlockFooter(
+      boolean windows, ProcessRunner.Result result, long elapsedSeconds) {
+    boolean interrupted = !windows && (result.exitCode() == 130 || result.exitCode() == 131);
+    String status = interrupted ? "\u001b[33m╰─ ■ stopped"
+        : result.timedOut() ? "\u001b[33m╰─ ■ timed out"
+        : result.started() && result.exitCode() == 0 ? "\u001b[32m╰─ ✓ done"
+        : "\u001b[31m╰─ ✕ failed";
+    String prefix = windows ? "\r\u001b[2K\u001b]2;\u0007" : "\n";
+    return prefix + status + "\u001b[0m\u001b[2m  exit "
+        + (result.started() ? result.exitCode() : -1) + "  ·  " + elapsedSeconds
+        + "s\u001b[0m\n";
   }
 
   record Configuration(

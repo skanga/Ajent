@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.jline.terminal.Attributes;
@@ -29,6 +30,11 @@ public final class JLineTerminalSession implements AutoCloseable {
     public Size {
       if (columns < 0 || rows < 0) throw new IllegalArgumentException("negative terminal size");
     }
+  }
+
+  @FunctionalInterface
+  public interface SignalGuard extends AutoCloseable {
+    @Override void close();
   }
 
   private final Terminal terminal;
@@ -94,14 +100,40 @@ public final class JLineTerminalSession implements AutoCloseable {
   }
 
   public void write(String value) {
+    byte[] bytes = Objects.requireNonNull(value, "value").getBytes(StandardCharsets.UTF_8);
+    write(bytes, 0, bytes.length);
+  }
+
+  /** Writes one subprocess-output chunk without decoding and re-encoding it. */
+  public void write(byte[] bytes, int offset, int length) {
     requireOpen();
+    Objects.checkFromIndexSize(offset, length, Objects.requireNonNull(bytes, "bytes").length);
     try {
-      terminal.output().write(Objects.requireNonNull(value, "value")
-          .getBytes(StandardCharsets.UTF_8));
+      terminal.output().write(bytes, offset, length);
       terminal.output().flush();
     } catch (IOException exception) {
       throw new java.io.UncheckedIOException(exception);
     }
+  }
+
+  /** Ignores parent INT/QUIT until the returned idempotent guard is closed. */
+  public SignalGuard ignoreInterrupts() {
+    requireOpen();
+    Terminal.SignalHandler previousInterrupt =
+        terminal.handle(Terminal.Signal.INT, Terminal.SignalHandler.SIG_IGN);
+    final Terminal.SignalHandler previousQuit;
+    try {
+      previousQuit = terminal.handle(Terminal.Signal.QUIT, Terminal.SignalHandler.SIG_IGN);
+    } catch (RuntimeException exception) {
+      terminal.handle(Terminal.Signal.INT, previousInterrupt);
+      throw exception;
+    }
+    var restored = new AtomicBoolean();
+    return () -> {
+      if (!restored.compareAndSet(false, true)) return;
+      terminal.handle(Terminal.Signal.QUIT, previousQuit);
+      terminal.handle(Terminal.Signal.INT, previousInterrupt);
+    };
   }
 
   public void writeSynchronized(String frame) {
