@@ -25,6 +25,8 @@ class FileToolsTest {
       assertThat(change.path()).isEqualTo(file.toAbsolutePath().normalize().toString());
       assertThat(change.added()).isEqualTo(3);
       assertThat(change.after()).isEqualTo("line1\nline2\nline3\n");
+      assertThat(change.hunks()).singleElement().satisfies(hunk ->
+          assertThat(hunk.patch()).contains("+line1", "+line3"));
     });
 
     ToolResult.Success read = success(tools.execute("read", object().put("path", file.toString())));
@@ -39,6 +41,8 @@ class FileToolsTest {
     assertThat(edited.output().change()).isPresent().get().satisfies(change -> {
       assertThat(change.before()).contains("line2");
       assertThat(change.after()).contains("LINE-TWO");
+      assertThat(change.hunks()).singleElement().satisfies(hunk ->
+          assertThat(hunk.patch()).contains("-line2", "+LINE-TWO"));
     });
     assertThat(Files.readString(file)).contains("LINE-TWO").doesNotContain("line2");
 

@@ -120,6 +120,7 @@ include:
 - `#` at a word boundary: attach a workspace symbol excerpt
 - bracketed text paste: insert one compact paste attachment chip
 - `Ctrl-V` / `Alt-V`: smart-paste an image first, then clipboard text
+- `Y` / `N` and `A` / `X` in change review: mark one hunk or all hunks
 
 Write, execution, and network tools are governed by the active permission
 profile. The default `ask` profile prompts before consequential operations.

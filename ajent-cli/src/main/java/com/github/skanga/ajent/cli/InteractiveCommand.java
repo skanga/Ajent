@@ -434,6 +434,9 @@ final class InteractiveCommand {
         @Override public List<DiffReview.File> pendingChanges() {
           return pendingChanges.get().stream().map(InteractiveCommand::reviewFile).toList();
         }
+        @Override public void updatePendingChanges(List<DiffReview.File> reviewed) {
+          pendingChanges.updateAndGet(existing -> mergeReview(existing, reviewed));
+        }
         @Override public void clearPendingChanges() { pendingChanges.set(List.of()); }
       };
       try {
@@ -539,14 +542,39 @@ final class InteractiveCommand {
   }
 
   static DiffReview.File reviewFile(FileChange change) {
-    String patch = "--- " + change.path() + "\n+++ " + change.path() + "\n"
-        + change.before().lines().map(line -> "-" + line).collect(
-            java.util.stream.Collectors.joining("\n"))
-        + (change.before().isEmpty() || change.after().isEmpty() ? "" : "\n")
-        + change.after().lines().map(line -> "+" + line).collect(
-            java.util.stream.Collectors.joining("\n"));
-    return new DiffReview.File(change.path(), List.of(
-        new DiffReview.Hunk(patch, DiffReview.Status.PENDING)));
+    return new DiffReview.File(change.path(), change.added(), change.removed(),
+        change.hunks().stream().map(hunk -> new DiffReview.Hunk(
+            hunk.oldStart(), hunk.oldLength(), hunk.newStart(), hunk.newLength(), hunk.patch(),
+            switch (hunk.status()) {
+              case PENDING -> DiffReview.Status.PENDING;
+              case ACCEPTED -> DiffReview.Status.ACCEPTED;
+              case REJECTED -> DiffReview.Status.REJECTED;
+            })).toList());
+  }
+
+  static List<FileChange> mergeReview(
+      List<FileChange> changes, List<DiffReview.File> reviewed) {
+    var result = new ArrayList<FileChange>(changes.size());
+    for (int fileIndex = 0; fileIndex < changes.size(); fileIndex++) {
+      FileChange change = changes.get(fileIndex);
+      if (fileIndex >= reviewed.size()) {
+        result.add(change);
+        continue;
+      }
+      DiffReview.File file = reviewed.get(fileIndex);
+      var hunks = new ArrayList<>(change.hunks());
+      for (int hunkIndex = 0;
+          hunkIndex < hunks.size() && hunkIndex < file.hunks().size(); hunkIndex++) {
+        com.github.skanga.ajent.tools.runtime.DiffHunk hunk = hunks.get(hunkIndex);
+        hunks.set(hunkIndex, hunk.withStatus(switch (file.hunks().get(hunkIndex).status()) {
+          case PENDING -> com.github.skanga.ajent.tools.runtime.DiffHunk.Status.PENDING;
+          case ACCEPTED -> com.github.skanga.ajent.tools.runtime.DiffHunk.Status.ACCEPTED;
+          case REJECTED -> com.github.skanga.ajent.tools.runtime.DiffHunk.Status.REJECTED;
+        }));
+      }
+      result.add(change.withHunks(hunks));
+    }
+    return List.copyOf(result);
   }
 
   private Path resolveDocs(Path workspace) {
@@ -648,6 +676,7 @@ final class InteractiveCommand {
     boolean switchCustomHost(String specification);
     void exchangeOAuth(LoginModal.ExchangeOAuth exchange, Consumer<String> completed);
     List<DiffReview.File> pendingChanges();
+    void updatePendingChanges(List<DiffReview.File> reviewed);
     void clearPendingChanges();
   }
 
@@ -791,7 +820,7 @@ final class InteractiveCommand {
       if (codeBlocks instanceof CodeBlockPicker.Result) return codeResultKey(key);
       if (checkpoints instanceof CheckpointPicker.Open) return checkpointKey(key, loop);
       if (LoginModal.isOpen(login)) return loginKey(key, loop);
-      if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key);
+      if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key, loop);
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
       if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
       if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
@@ -1049,6 +1078,7 @@ final class InteractiveCommand {
                 diffReview = accepted.state();
                 diffFiles = accepted.files();
                 uiStatus = accepted.status();
+                loop.updatePendingChanges(diffFiles);
               } else if (command == CommandPalette.Command.REJECT_ALL) {
                 if (diffFiles.isEmpty()) diffFiles = loop.pendingChanges();
                 DiffReview.Result rejected = DiffReview.rejectAll(diffReview, diffFiles);
@@ -1468,7 +1498,7 @@ final class InteractiveCommand {
       return true;
     }
 
-    private boolean diffReviewKey(TerminalKey key) {
+    private boolean diffReviewKey(TerminalKey key, AgentControl loop) {
       if (key.key() instanceof TerminalKey.SpecialKey special) {
         diffReview = switch (special) {
           case ESCAPE -> DiffReview.close(diffReview);
@@ -1480,12 +1510,17 @@ final class InteractiveCommand {
         };
       } else if (key.key() instanceof TerminalKey.CharacterKey character) {
         DiffReview.Result changed = switch (Character.toLowerCase(character.codePoint())) {
-          case 'a' -> DiffReview.acceptHunk(diffReview, diffFiles);
-          case 'r' -> DiffReview.rejectHunk(diffReview, diffFiles);
+          case 'y' -> DiffReview.acceptHunk(diffReview, diffFiles);
+          case 'n' -> DiffReview.rejectHunk(diffReview, diffFiles);
+          case 'a' -> DiffReview.acceptAll(diffReview, diffFiles);
+          case 'x' -> DiffReview.rejectAll(diffReview, diffFiles);
           default -> new DiffReview.Result(diffReview, diffFiles, "");
         };
         diffReview = changed.state();
         diffFiles = changed.files();
+        uiStatus = changed.status();
+        loop.updatePendingChanges(diffFiles);
+        if (Character.toLowerCase(character.codePoint()) == 'x') loop.clearPendingChanges();
       }
       render();
       return true;
@@ -1883,8 +1918,16 @@ final class InteractiveCommand {
           DiffReview.Hunk hunk = file.hunks().get(cell.hunkIndex());
           lines = new ArrayList<>(lines);
           lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Changes  " + file.path(), Style.ACCENT));
-          lines.add(new StyledLine("[a] accept  [r] reject  ←/→ file", Style.MUTED));
+          lines.add(new StyledLine("Changes  " + file.path() + "  +" + file.added()
+              + " -" + file.removed() + "  file " + (cell.fileIndex() + 1) + "/"
+              + diffFiles.size(), Style.ACCENT));
+          lines.add(new StyledLine(
+              "[y] accept  [n] reject  [a] all  [x] none  ←/→ file", Style.MUTED));
+          lines.add(new StyledLine(hunk.header() + "  " + switch (hunk.status()) {
+            case PENDING -> "[ pending ]";
+            case ACCEPTED -> "[✓ accepted]";
+            case REJECTED -> "[✗ rejected]";
+          }, Style.MUTED));
           wrap(lines, hunk.patch(), width, switch (hunk.status()) {
             case PENDING -> Style.NORMAL;
             case ACCEPTED -> Style.ACCENT;

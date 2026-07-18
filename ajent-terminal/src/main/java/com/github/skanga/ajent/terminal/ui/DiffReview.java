@@ -10,22 +10,37 @@ public final class DiffReview {
 
   public enum Status { PENDING, ACCEPTED, REJECTED }
 
-  public record Hunk(String patch, Status status) {
+  public record Hunk(
+      int oldStart, int oldLength, int newStart, int newLength, String patch, Status status) {
+    public Hunk(String patch, Status status) { this(1, 0, 1, 0, patch, status); }
+
     public Hunk {
+      if (oldStart < 1 || oldLength < 0 || newStart < 1 || newLength < 0) {
+        throw new IllegalArgumentException("invalid diff hunk coordinates");
+      }
       Objects.requireNonNull(patch, "patch");
       Objects.requireNonNull(status, "status");
     }
 
-    public Hunk withStatus(Status value) { return new Hunk(patch, value); }
+    public Hunk withStatus(Status value) {
+      return new Hunk(oldStart, oldLength, newStart, newLength, patch, value);
+    }
+
+    public String header() {
+      return "@@ -" + oldStart + "," + oldLength + " +" + newStart + "," + newLength + " @@";
+    }
   }
 
-  public record File(String path, List<Hunk> hunks) {
+  public record File(String path, int added, int removed, List<Hunk> hunks) {
+    public File(String path, List<Hunk> hunks) { this(path, 0, 0, hunks); }
+
     public File {
       Objects.requireNonNull(path, "path");
+      if (added < 0 || removed < 0) throw new IllegalArgumentException("negative diff count");
       hunks = List.copyOf(hunks);
     }
 
-    public File withHunks(List<Hunk> value) { return new File(path, value); }
+    public File withHunks(List<Hunk> value) { return new File(path, added, removed, value); }
   }
 
   public record Result(PickerState.TwoAxis state, List<File> files, String status) {

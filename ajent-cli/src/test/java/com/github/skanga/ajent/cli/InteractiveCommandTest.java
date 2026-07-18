@@ -525,7 +525,7 @@ final class InteractiveCommandTest {
     assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text()).isEqualTo("x");
   }
 
-  @Test void liveDiffReviewRoutesHunksAndPaletteWideActions() {
+  @Test void liveDiffReviewRoutesExactNativeHunkAndBulkKeys() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
     var ui = new InteractiveCommand.Ui(terminal, state,
@@ -540,17 +540,25 @@ final class InteractiveCommandTest {
                 com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING))));
     selectCommand(ui, agent, "review changes");
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
-    ui.key(character('a'), agent);
+    ui.key(character('y'), agent);
     ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
-    ui.key(character('r'), agent);
+    ui.key(character('n'), agent);
+    assertThat(agent.changes.get(0).hunks().getFirst().status())
+        .isEqualTo(com.github.skanga.ajent.terminal.ui.DiffReview.Status.ACCEPTED);
+    assertThat(agent.changes.get(1).hunks().getFirst().status())
+        .isEqualTo(com.github.skanga.ajent.terminal.ui.DiffReview.Status.REJECTED);
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
-    ui.key(character('x'), agent);
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
-    assertThat(terminal.bytes.toString()).contains("hanges  a.txt");
+    assertThat(terminal.bytes.toString()).contains(
+        "hanges  a.txt", "[y] accept", "[n] reject", "@@ -1,0 +1,0 @@");
 
-    selectCommand(ui, agent, "accept all");
+    selectCommand(ui, agent, "review changes");
+    ui.key(character('a'), agent);
     assertThat(terminal.bytes.toString()).contains("accepted 2 hunks");
-    selectCommand(ui, agent, "reject all");
+    assertThat(agent.changes).allSatisfy(file -> assertThat(file.hunks())
+        .allSatisfy(hunk -> assertThat(hunk.status())
+            .isEqualTo(com.github.skanga.ajent.terminal.ui.DiffReview.Status.ACCEPTED)));
+    ui.key(character('x'), agent);
     assertThat(agent.changes).isEmpty();
   }
 
@@ -858,14 +866,53 @@ final class InteractiveCommandTest {
     var changes = new AtomicReference<List<com.github.skanga.ajent.tools.runtime.FileChange>>(
         List.of());
     InteractiveCommand.recordChange(new RuntimeMessage.Tick(), changes);
-    var change = new com.github.skanga.ajent.tools.runtime.FileChange(
-        "file.txt", 1, 1, "old", "new");
+    String before = java.util.stream.IntStream.rangeClosed(1, 14)
+        .mapToObj(index -> "line-" + index).collect(java.util.stream.Collectors.joining("\n"));
+    String after = before.replace("line-2", "new-2").replace("line-12", "new-12");
+    var change = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        "file.txt", before, after);
     InteractiveCommand.recordChange(new RuntimeMessage.ToolCompleted(1, "call",
         new com.github.skanga.ajent.runtime.ToolCompletion.Success(
             "ok", Optional.of(change))), changes);
     assertThat(changes.get()).containsExactly(change);
-    assertThat(InteractiveCommand.reviewFile(change).hunks().getFirst().patch())
-        .contains("--- file.txt", "-old", "+new");
+    var review = InteractiveCommand.reviewFile(change);
+    assertThat(review.hunks()).hasSize(2);
+    assertThat(review.hunks().getFirst().patch()).contains("-line-2", "+new-2");
+    assertThat(review.hunks().getFirst().header()).startsWith("@@ -1,");
+    var accepted = review.withHunks(review.hunks().stream()
+        .map(hunk -> hunk.withStatus(
+            com.github.skanga.ajent.terminal.ui.DiffReview.Status.ACCEPTED)).toList());
+    assertThat(InteractiveCommand.mergeReview(List.of(change), List.of(accepted)).getFirst()
+        .hunks()).allSatisfy(hunk -> assertThat(hunk.status())
+            .isEqualTo(com.github.skanga.ajent.tools.runtime.DiffHunk.Status.ACCEPTED));
+
+    var mixedHunks = new ArrayList<>(change.hunks());
+    mixedHunks.set(0, mixedHunks.getFirst().withStatus(
+        com.github.skanga.ajent.tools.runtime.DiffHunk.Status.ACCEPTED));
+    mixedHunks.set(1, mixedHunks.get(1).withStatus(
+        com.github.skanga.ajent.tools.runtime.DiffHunk.Status.REJECTED));
+    var mixed = change.withHunks(mixedHunks);
+    assertThat(InteractiveCommand.reviewFile(mixed).hunks())
+        .extracting(com.github.skanga.ajent.terminal.ui.DiffReview.Hunk::status)
+        .containsExactly(
+            com.github.skanga.ajent.terminal.ui.DiffReview.Status.ACCEPTED,
+            com.github.skanga.ajent.terminal.ui.DiffReview.Status.REJECTED);
+
+    var reviewed = InteractiveCommand.reviewFile(change);
+    var pendingAndRejected = reviewed.withHunks(List.of(
+        reviewed.hunks().getFirst().withStatus(
+            com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING),
+        reviewed.hunks().get(1).withStatus(
+            com.github.skanga.ajent.terminal.ui.DiffReview.Status.REJECTED)));
+    assertThat(InteractiveCommand.mergeReview(List.of(change), List.of(pendingAndRejected))
+        .getFirst().hunks()).extracting(com.github.skanga.ajent.tools.runtime.DiffHunk::status)
+        .containsExactly(com.github.skanga.ajent.tools.runtime.DiffHunk.Status.PENDING,
+            com.github.skanga.ajent.tools.runtime.DiffHunk.Status.REJECTED);
+    assertThat(InteractiveCommand.mergeReview(List.of(change), List.of()))
+        .containsExactly(change);
+    assertThat(InteractiveCommand.mergeReview(List.of(change), List.of(
+        reviewed.withHunks(List.of(reviewed.hunks().getFirst())))).getFirst().hunks())
+        .hasSize(2);
   }
 
   private static void selectCommand(
@@ -1342,6 +1389,10 @@ final class InteractiveCommandTest {
     }
     @Override public List<com.github.skanga.ajent.terminal.ui.DiffReview.File> pendingChanges() {
       return changes;
+    }
+    @Override public void updatePendingChanges(
+        List<com.github.skanga.ajent.terminal.ui.DiffReview.File> reviewed) {
+      changes = List.copyOf(reviewed);
     }
     @Override public void clearPendingChanges() { changes = List.of(); }
   }

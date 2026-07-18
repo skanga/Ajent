@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.github.skanga.ajent.tools.args.ArgReader;
 import com.github.skanga.ajent.tools.edit.FuzzyMatcher;
 import com.github.skanga.ajent.tools.runtime.FileChange;
+import com.github.skanga.ajent.tools.runtime.UnifiedDiff;
 import com.github.skanga.ajent.tools.runtime.ToolError;
 import com.github.skanga.ajent.tools.runtime.ToolErrorKind;
 import com.github.skanga.ajent.tools.runtime.ToolOutput;
@@ -305,28 +306,7 @@ public final class FileTools {
   }
 
   private static FileChange change(Path path, String before, String after) {
-    List<String> oldLines = splitForDiff(before);
-    List<String> newLines = splitForDiff(after);
-    int common = lcsLength(oldLines, newLines);
-    return new FileChange(path.toAbsolutePath().normalize().toString(),
-        newLines.size() - common, oldLines.size() - common, before, after);
-  }
-
-  private static int lcsLength(List<String> first, List<String> second) {
-    int[] prior = new int[second.size() + 1];
-    for (String left : first) {
-      int[] current = new int[second.size() + 1];
-      for (int index = 1; index <= second.size(); index++) {
-        current[index] = left.equals(second.get(index - 1))
-            ? prior[index - 1] + 1 : Math.max(prior[index], current[index - 1]);
-      }
-      prior = current;
-    }
-    return prior[second.size()];
-  }
-
-  private static List<String> splitForDiff(String value) {
-    return List.of(value.split("\\n", -1));
+    return UnifiedDiff.compute(path.toAbsolutePath().normalize().toString(), before, after);
   }
 
   private static List<String> lines(String value) {

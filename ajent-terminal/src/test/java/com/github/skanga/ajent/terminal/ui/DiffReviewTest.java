@@ -59,4 +59,13 @@ final class DiffReviewTest {
     assertThat(DiffReview.acceptAll(new PickerState.OpenAtCell(0, 0), one).status())
         .isEqualTo("accepted 1 hunk");
   }
+
+  @Test void structuredHunkPreservesCoordinatesAcrossStatusChanges() {
+    var hunk = new DiffReview.Hunk(4, 7, 5, 8, " patch\n", DiffReview.Status.PENDING);
+    assertThat(hunk.header()).isEqualTo("@@ -4,7 +5,8 @@");
+    assertThat(hunk.withStatus(DiffReview.Status.ACCEPTED))
+        .extracting(DiffReview.Hunk::oldStart, DiffReview.Hunk::newStart,
+            DiffReview.Hunk::status)
+        .containsExactly(4, 5, DiffReview.Status.ACCEPTED);
+  }
 }
