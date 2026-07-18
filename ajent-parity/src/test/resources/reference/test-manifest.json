@@ -551,9 +551,16 @@
       "classification": "property",
       "surface": "terminal-rendering",
       "referenceRun": "ctest --test-dir <build> -R \"^scrollback_wire_fuzz$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/ScrollbackWireFuzz.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/ScrollbackWirePropertyTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/InlineFrameRenderer.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "W1-W5 translated across the four native terminal shapes, 40 deterministic SplitMix64 walks per shape, exact seed/step envelope, typed recovery, immutable scrollback, shadow verification, Synced outcomes, and exact overflow commits"
+      ]
     },
     {
       "id": "skills_engine_test",

@@ -132,6 +132,13 @@ public final class InlineFrameRenderer {
           owned.previousRows - marker.rows, owned.wireCursorRows, owned.generation + 1));
     }
 
+    /** Commits only rows already known to be above the physical viewport. */
+    public Synced commitScrollbackOverflow(int terminalRows) {
+      if (terminalRows <= 0) throw new IllegalArgumentException("terminal rows must be positive");
+      int overflow = Math.max(0, rows() - terminalRows);
+      return commit(scrollbackMarker(overflow));
+    }
+
     public Finalized finalizeFrame() { return finalizeState(consume()); }
 
     private State live() {
@@ -290,6 +297,10 @@ public final class InlineFrameRenderer {
           break;
         }
       }
+    }
+    if (contentRows < previousRows && firstChanged == commonRows) {
+      // Pure shrink cleanup repaints the new last row before erasing below it.
+      firstChanged = Math.max(0, contentRows - 1);
     }
     boolean same = firstChanged == commonRows && contentRows == previousRows;
     if (same && resetPrefix.isEmpty()) {

@@ -2112,10 +2112,16 @@ final class InteractiveCommand {
         case InlineFrameRenderer.Synced synced -> {
           var witness = synced.verify();
           var proof = synced.checkScrollback(canvas, terminalRows);
-          yield witness.isPresent() && proof.isPresent()
-              ? synced.render(canvas, rows, terminalRows, styles, writer,
-                  witness.orElseThrow(), proof.orElseThrow(), false)
-              : synced.demoteToStale().render(canvas, rows, terminalRows, styles, writer, false);
+          if (witness.isPresent() && proof.isPresent()) {
+            yield synced.render(canvas, rows, terminalRows, styles, writer,
+                witness.orElseThrow(), proof.orElseThrow(), false);
+          }
+          if (witness.isPresent()) {
+            yield synced.commitScrollbackOverflow(terminalRows).demoteToStale()
+                .render(canvas, rows, terminalRows, styles, writer, false);
+          }
+          yield synced.demoteToHardReset()
+              .render(canvas, rows, terminalRows, styles, writer, false);
         }
         case InlineFrameRenderer.Stale stale -> stale.render(
             canvas, rows, terminalRows, styles, writer, false);
