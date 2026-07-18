@@ -77,9 +77,15 @@
     },
     {
       "id": "reducer",
-      "status": "planned-reference-harness-required",
+      "status": "java-canonical-harness-green-native-capture-required",
       "sources": ["agentty/src/runtime/app/update.cpp", "agentty/src/runtime/app/update", "agentty/include/agentty/runtime/msg.hpp"],
-      "cases": ["chat", "fragmented stream", "tool batches", "approve", "reject", "retry", "cancel", "compact", "provider/model/profile switch", "checkpoint", "thread lifecycle"]
+      "cases": ["chat", "fragmented stream", "tool batches", "approve", "reject", "retry", "cancel", "compact", "provider/model/profile switch", "checkpoint", "thread lifecycle"],
+      "javaEvidence": [
+        "com.github.skanga.ajent.runtime.CanonicalReducerTrace",
+        "com.github.skanga.ajent.runtime.CanonicalReducerTraceTest"
+      ],
+      "coveredCanonicalCases": ["chat", "fragmented stream", "multi-tool batch", "approve", "reject", "retry", "cancel", "compact", "profile switch", "checkpoint"],
+      "remainingCanonicalCases": ["provider/model switch trace", "thread lifecycle trace", "raw native capture"]
     },
     {
       "id": "acp",

@@ -18,6 +18,7 @@ Reference-derived work currently includes:
 | Tool effects and path-aware scheduling | `include/agentty/tool/effects.hpp`, `include/agentty/tool/spec.hpp`, `src/runtime/app/cmd_factory.cpp`, `tests/scheduler_path_test.cpp` |
 | Agent doom-loop breaker | `src/runtime/app/cmd_factory.cpp`, `tests/doom_loop_test.cpp` |
 | Salvaged-call re-leak reducer | `src/runtime/app/cmd_factory.cpp`, `tests/salvage_dedup_test.cpp` |
+| Canonical reducer transition traces | `src/runtime/app/update.cpp`, `src/runtime/app/update/stream.cpp`, `src/runtime/app/update/tool.cpp`, `include/agentty/runtime/msg.hpp` |
 | Composer word deletion, attachment placeholders, and undo | `src/runtime/app/update/composer.cpp`, `src/runtime/composer_attachment.cpp`, `src/runtime/view/helpers.cpp`, `tests/composer_edit_test.cpp` |
 | Workspace file/symbol indexing, scored matching, picker reducers, and lazy attachment expansion | `src/workspace/files.cpp`, `src/workspace/symbols.cpp`, `include/agentty/runtime/mention_palette.hpp`, `include/agentty/runtime/symbol_palette.hpp`, `src/runtime/app/update/mention.cpp`, `src/runtime/app/update/symbol.cpp`, `src/runtime/view/pickers.cpp` |
 | Always-chip text paste, image sniff/path ingestion, smart clipboard routing, and OSC query fallback | `src/runtime/app/update/composer.cpp`, `src/io/clipboard.cpp`, `include/agentty/io/clipboard.hpp`, `src/runtime/composer_attachment.cpp`, `maya/src/terminal/ansi.cpp`, `maya/src/app/app.cpp` |
