@@ -79,6 +79,9 @@ public final class AjentCli {
           @Override public int status(PrintStream out) {
             return AuthCommands.systemDefault().status(out);
           }
+          @Override public int skills(PrintStream out) {
+            return SkillCommands.systemDefault().list(out);
+          }
         });
   }
 
@@ -105,6 +108,8 @@ public final class AjentCli {
       return commands.logout(stdout, stderr);
     if (parsed.subcommand() == CliArguments.Subcommand.STATUS)
       return commands.status(stdout);
+    if (parsed.subcommand() == CliArguments.Subcommand.SKILLS)
+      return commands.skills(stdout);
     String command = parsed.subcommand() == CliArguments.Subcommand.NONE
         ? "interactive mode" : parsed.subcommand().commandName();
     stderr.print("ajent: " + command + " is not implemented yet\n");
@@ -115,5 +120,6 @@ public final class AjentCli {
     int login(BufferedReader input, PrintStream output, PrintStream error);
     int logout(PrintStream output, PrintStream error);
     int status(PrintStream output);
+    int skills(PrintStream output);
   }
 }
