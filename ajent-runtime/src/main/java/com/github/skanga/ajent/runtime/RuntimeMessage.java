@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.runtime;
 
+import com.github.skanga.ajent.domain.Attachment;
 import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.ImageContent;
 import com.github.skanga.ajent.domain.Profile;
@@ -9,14 +10,22 @@ import java.util.Objects;
 import java.util.Optional;
 
 public sealed interface RuntimeMessage {
-  record Submit(String text, List<ImageContent> images, Optional<CheckpointId> checkpointId)
+  record Submit(String text, List<ImageContent> images, List<Attachment> attachments,
+      Optional<CheckpointId> checkpointId)
       implements RuntimeMessage {
     public Submit(String text, List<ImageContent> images) {
-      this(text, images, Optional.empty());
+      this(text, images, List.of(), Optional.empty());
+    }
+    public Submit(String text, List<ImageContent> images, List<Attachment> attachments) {
+      this(text, images, attachments, Optional.empty());
+    }
+    public Submit(String text, List<ImageContent> images, Optional<CheckpointId> checkpointId) {
+      this(text, images, List.of(), checkpointId);
     }
     public Submit {
       text = Objects.requireNonNull(text, "text");
       images = List.copyOf(images);
+      attachments = List.copyOf(attachments);
       checkpointId = Objects.requireNonNull(checkpointId, "checkpointId");
     }
   }

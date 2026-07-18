@@ -3,6 +3,7 @@ package com.github.skanga.ajent.runtime;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.domain.ActiveTurn;
+import com.github.skanga.ajent.domain.Attachment;
 import com.github.skanga.ajent.domain.CancellationSignal;
 import com.github.skanga.ajent.domain.CompactionRecord;
 import com.github.skanga.ajent.domain.CheckpointId;
@@ -209,7 +210,8 @@ public final class AgentReducer {
     var messages = new ArrayList<>(state.thread().messages());
     Optional<CheckpointId> checkpoint = submit.checkpointId().isPresent()
         ? submit.checkpointId() : context.checkpointIds().get();
-    messages.add(message(Role.USER, submit.text(), submit.images(), List.of(), now, checkpoint));
+    messages.add(message(Role.USER, submit.text(), submit.images(), submit.attachments(), List.of(),
+        now, checkpoint));
     messages.add(message(Role.ASSISTANT, "", List.of(), List.of(), now));
     var thread = withMessages(state.thread(), messages, now);
     var cancellation = new CancellationSignal();
@@ -1109,14 +1111,15 @@ public final class AgentReducer {
 
   private Message message(Role role, String text, List<ImageContent> images, List<ToolUse> calls,
                           Instant now) {
-    return message(role, text, images, calls, now, Optional.empty());
+    return message(role, text, images, List.of(), calls, now, Optional.empty());
   }
 
-  private Message message(Role role, String text, List<ImageContent> images, List<ToolUse> calls,
-                          Instant now, Optional<CheckpointId> checkpoint) {
+  private Message message(Role role, String text, List<ImageContent> images,
+                          List<Attachment> attachments,
+                          List<ToolUse> calls, Instant now, Optional<CheckpointId> checkpoint) {
     MessageId id = checkpoint.<MessageId>map(value -> new MessageId(value.value()))
         .orElseGet(context.messageIds());
-    return new Message(id, role, text, images, List.of(), "", "", calls,
+    return new Message(id, role, text, images, attachments, "", "", calls,
         now, checkpoint, Optional.empty(), false, false);
   }
 

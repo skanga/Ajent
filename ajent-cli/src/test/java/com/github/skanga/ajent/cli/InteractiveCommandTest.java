@@ -426,9 +426,17 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
     ui.key(special(TerminalKey.SpecialKey.UP), agent);
     ui.key(character('a'), agent);
+    assertThat(terminal.bytes.toString())
+        .contains("[Output: echo one", "1 lines", "8 B]");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
-        .contains("I ran:", "echo one", "output:", "captured");
+    RuntimeMessage.Submit submit = (RuntimeMessage.Submit) agent.messages.getLast();
+    assertThat(submit.text()).isEqualTo("\u0001ATT:0\u0001");
+    assertThat(submit.attachments()).singleElement().satisfies(attachment -> {
+      assertThat(attachment.kind()).isEqualTo(com.github.skanga.ajent.domain.Attachment.Kind.OUTPUT);
+      assertThat(attachment.name()).isEqualTo("echo one");
+      assertThat(new String(attachment.body(), java.nio.charset.StandardCharsets.UTF_8))
+          .isEqualTo("captured");
+    });
 
     ui.key(character('g', true), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);

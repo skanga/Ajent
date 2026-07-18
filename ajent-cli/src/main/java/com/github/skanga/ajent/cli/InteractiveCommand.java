@@ -4,6 +4,8 @@ import com.github.skanga.ajent.core.persistence.Settings;
 import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
+import com.github.skanga.ajent.domain.Attachment;
+import com.github.skanga.ajent.domain.AttachmentText;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.ModelId;
@@ -689,6 +691,7 @@ final class InteractiveCommand {
     private boolean modelsLoading;
     private String uiStatus = "";
     private String composer = "";
+    private List<Attachment> composerAttachments = List.of();
     private int cursor;
     private com.github.skanga.ajent.domain.MessageId revealMessage;
     private TextReveal reveal;
@@ -760,21 +763,35 @@ final class InteractiveCommand {
             if (key.modifiers().shift() || key.modifiers().alt()) insert("\n");
             else if (!composer.isEmpty()) {
               String submitted = composer;
+              List<Attachment> attachments = composerAttachments;
               clearComposer();
-              loop.dispatch(new RuntimeMessage.Submit(submitted, List.of()));
+              loop.dispatch(new RuntimeMessage.Submit(submitted, List.of(), attachments));
             }
           }
           case BACKSPACE -> {
             if (cursor > 0) {
-              int previous = composer.offsetByCodePoints(cursor, -1);
+              int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
+              int previous = chipLength > 0 ? cursor - chipLength
+                  : composer.offsetByCodePoints(cursor, -1);
               composer = composer.substring(0, previous) + composer.substring(cursor);
               cursor = previous;
               render();
             }
           }
-          case LEFT -> { if (cursor > 0) cursor = composer.offsetByCodePoints(cursor, -1); render(); }
+          case LEFT -> {
+            if (cursor > 0) {
+              int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
+              cursor = chipLength > 0 ? cursor - chipLength
+                  : composer.offsetByCodePoints(cursor, -1);
+            }
+            render();
+          }
           case RIGHT -> {
-            if (cursor < composer.length()) cursor = composer.offsetByCodePoints(cursor, 1);
+            if (cursor < composer.length()) {
+              int chipLength = AttachmentText.placeholderLengthAt(composer, cursor);
+              cursor = chipLength > 0 ? cursor + chipLength
+                  : composer.offsetByCodePoints(cursor, 1);
+            }
             render();
           }
           case HOME -> { cursor = 0; render(); }
@@ -1071,12 +1088,17 @@ final class InteractiveCommand {
       } else if (key.key() instanceof TerminalKey.CharacterKey character) {
         switch (Character.toLowerCase(character.codePoint())) {
           case 'a' -> {
-            String attached = "I ran:\n```sh\n" + result.command()
-                + "\n```\noutput:\n```\n" + result.output()
-                + (result.output().isEmpty() || result.output().endsWith("\n") ? "" : "\n")
-                + "```";
             codeBlocks = CodeBlockPicker.close(codeBlocks);
-            insert(attached);
+            byte[] body = result.output().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            long lines = result.output().isEmpty() ? 0
+                : 1 + result.output().chars().filter(value -> value == '\n').count();
+            var attachment = new Attachment(Attachment.Kind.OUTPUT, body, "", "",
+                result.command(), 0, Math.toIntExact(lines), body.length);
+            int index = composerAttachments.size();
+            var revised = new ArrayList<>(composerAttachments);
+            revised.add(attachment);
+            composerAttachments = List.copyOf(revised);
+            insert(AttachmentText.placeholder(index));
             uiStatus = "output attached to composer";
           }
           case 'y' -> {
@@ -1367,6 +1389,7 @@ final class InteractiveCommand {
     private void resetForThreadSwap(String status) {
       synchronized (lock) {
         composer = "";
+        composerAttachments = List.of();
         cursor = 0;
         revealMessage = null;
         reveal = null;
@@ -1408,7 +1431,7 @@ final class InteractiveCommand {
     }
 
     private void clearComposer() {
-      synchronized (lock) { composer = ""; cursor = 0; }
+      synchronized (lock) { composer = ""; composerAttachments = List.of(); cursor = 0; }
       render();
     }
 
@@ -1671,7 +1694,7 @@ final class InteractiveCommand {
         Message message = messages.get(messageIndex);
         if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
         output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
-        String text = message.text();
+        String text = AttachmentText.display(message.text(), message.attachments());
         boolean revealable = message.role() == Role.ASSISTANT
             && messageIndex == messages.size() - 1;
         if (revealable) {
@@ -1706,7 +1729,8 @@ final class InteractiveCommand {
       if (!uiStatus.isEmpty()) wrap(output, uiStatus, width,
           uiStatus.startsWith("error:") ? Style.DANGER : Style.MUTED);
       output.add(new StyledLine("", Style.NORMAL));
-      wrap(output, "> " + composer, width, Style.NORMAL);
+      wrap(output, "> " + AttachmentText.display(composer, composerAttachments), width,
+          Style.NORMAL);
       return new RenderedLines(List.copyOf(output), animating);
     }
 

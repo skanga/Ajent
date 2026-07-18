@@ -2,6 +2,8 @@ package com.github.skanga.ajent.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.github.skanga.ajent.domain.Attachment;
+import com.github.skanga.ajent.domain.AttachmentText;
 import com.github.skanga.ajent.domain.MessageId;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
@@ -24,6 +26,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 final class AgentReducerTest {
+  @Test void submitPersistsCompactAttachmentsAndExpandsThemOnlyForProviderWire() {
+    byte[] output = "captured".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    var attachment = new Attachment(Attachment.Kind.OUTPUT, output, "", "", "echo one",
+        0, 1, output.length);
+    String text = "check " + AttachmentText.placeholder(0);
+
+    var step = reducer(PermissionVerdict.ALLOW).update(AgentState.initial(thread()),
+        new RuntimeMessage.Submit(text, List.of(), List.of(attachment)));
+
+    assertThat(step.state().thread().messages().getFirst().text()).isEqualTo(text);
+    assertThat(step.state().thread().messages().getFirst().attachments())
+        .containsExactly(attachment);
+    var stream = step.effects().stream().filter(RuntimeEffect.StartStream.class::isInstance)
+        .map(RuntimeEffect.StartStream.class::cast).findFirst().orElseThrow();
+    assertThat(stream.messages().getFirst().text())
+        .contains("check", "I ran:", "echo one", "captured");
+  }
+
   @Test void profileChangeDropsSessionAlwaysAllowGrantsWithoutDisturbingTurn() {
     AgentState initial = AgentState.initial(thread());
     AgentState granted = new AgentState(initial.thread(), initial.phase(), initial.activeTurnId(),

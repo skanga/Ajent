@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.runtime;
 
+import com.github.skanga.ajent.domain.AttachmentText;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.MessageId;
 import com.github.skanga.ajent.domain.Role;
@@ -62,13 +63,13 @@ public final class ConversationWire {
   public static List<Message> forNormalTurn(
       com.github.skanga.ajent.domain.Thread thread, int contextMax) {
     var result = new ArrayList<>(messages(thread));
-    if (contextMax <= 0 || result.size() <= 1) return List.copyOf(result);
+    if (contextMax <= 0 || result.size() <= 1) return expandAttachments(result);
     int ceiling = (int) (contextMax * 0.95);
-    if (ceiling <= 0) return List.copyOf(result);
+    if (ceiling <= 0) return expandAttachments(result);
     int drop = frontDropCount(result, ceiling, 1);
     if (drop > 0) result.subList(1, 1 + drop).clear();
     removeLeadingAssistants(result);
-    return List.copyOf(result);
+    return expandAttachments(result);
   }
 
   public static List<Message> forCompaction(
@@ -81,14 +82,14 @@ public final class ConversationWire {
       removeLeadingAssistants(result);
     }
     result.add(syntheticMessage(COMPACTION_SUMMARY_PROMPT, false));
-    return List.copyOf(result);
+    return expandAttachments(result);
   }
 
   public static int estimateTokens(List<Message> messages) {
     long bytes = 0;
     int images = 0;
     for (Message message : messages) {
-      bytes += utf8Length(message.text());
+      bytes += utf8Length(AttachmentText.expand(message.text(), message.attachments()));
       images += message.images().size();
       for (var call : message.toolCalls()) {
         bytes += utf8Length(call.name().value());
@@ -121,7 +122,7 @@ public final class ConversationWire {
   }
 
   private static Weight weight(Message message) {
-    long bytes = utf8Length(message.text());
+    long bytes = utf8Length(AttachmentText.expand(message.text(), message.attachments()));
     for (var call : message.toolCalls()) {
       bytes += utf8Length(call.name().value());
       bytes += utf8Length(call.status().output());
@@ -154,6 +155,15 @@ public final class ConversationWire {
     return new Message(new MessageId(compactSummary ? "compaction-summary" : "compaction-prompt"),
         Role.USER, text, List.of(), List.of(), "", "", List.of(), Instant.EPOCH,
         Optional.empty(), Optional.empty(), compactSummary);
+  }
+
+  private static List<Message> expandAttachments(List<Message> messages) {
+    return messages.stream().map(message -> message.attachments().isEmpty() ? message
+        : new Message(message.id(), message.role(),
+            AttachmentText.expand(message.text(), message.attachments()), message.images(),
+            message.attachments(), message.thinking(), message.thinkingSignature(),
+            message.toolCalls(), message.timestamp(), message.checkpointId(), message.error(),
+            message.textBlockClosed(), message.isCompactSummary())).toList();
   }
 
   private static int utf8Length(String value) {
