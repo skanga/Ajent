@@ -25,6 +25,7 @@ Reference-derived work currently includes:
 | Six-root skill discovery/precedence, lenient Agent Skills metadata, activation payloads, lint, resource enumeration, and external read allowlisting | `tests/skills_engine_test.cpp`, `include/agentty/skills.hpp`, `src/skills.cpp` |
 | MCP config-to-pool bridge, remote tool/effect/resource/prompt projection, and live HTTP capability chain | `tests/mcp_bridge_test.cpp`, `tests/mcp_http_test.cpp`, `include/agentty/mcp/client.hpp`, `src/mcp/bridge.cpp`, `src/mcp/http_server.cpp` |
 | ACP duplex lifecycle, session/mode negotiation, permission callbacks, streamed text/usage/tool updates, approved filesystem dispatch, and rejected non-execution | `tests/acp_integration_test.cpp`, `src/acp/server.cpp`, pinned `acp-cpp` codecs |
+| Complete production-dispatch toolset wiring across catalog, filesystem, search/map, process, host, memory/RAG, web refusal, Git, and diagnostics | `tests/toolset_e2e_test.cpp`, `src/tool/mcp_tools_bridge.cpp`, `src/tool/registry.cpp` |
 | Salvaged-call re-leak reducer | `src/runtime/app/cmd_factory.cpp`, `tests/salvage_dedup_test.cpp` |
 | Canonical reducer transition traces | `src/runtime/app/update.cpp`, `src/runtime/app/update/stream.cpp`, `src/runtime/app/update/tool.cpp`, `include/agentty/runtime/msg.hpp` |
 | Composer word deletion, attachment placeholders, and undo | `src/runtime/app/update/composer.cpp`, `src/runtime/composer_attachment.cpp`, `src/runtime/view/helpers.cpp`, `tests/composer_edit_test.cpp` |
