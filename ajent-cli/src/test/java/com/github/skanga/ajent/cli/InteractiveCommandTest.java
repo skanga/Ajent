@@ -614,17 +614,36 @@ final class InteractiveCommandTest {
   @Test void todoLedgerPublishesInitialAndNormalizedImmutableSnapshots() {
     var ledger = new InteractiveCommand.TodoLedger();
     var observed = new AtomicReference<List<com.github.skanga.ajent.terminal.ui.PlanModal.Item>>();
-    ledger.onChange(observed::set);
+    var notifications = new java.util.concurrent.atomic.AtomicInteger();
+    ledger.onChange(items -> { notifications.incrementAndGet(); observed.set(items); });
     assertThat(observed.get()).isEmpty();
     var source = new ArrayList<com.github.skanga.ajent.tools.host.HostServices.TodoItem>();
     source.add(new com.github.skanga.ajent.tools.host.HostServices.TodoItem("one", "completed"));
     source.add(new com.github.skanga.ajent.tools.host.HostServices.TodoItem("two", "future"));
     ledger.set(source);
+    ledger.set(List.copyOf(source));
     source.clear();
     assertThat(observed.get()).extracting(
         com.github.skanga.ajent.terminal.ui.PlanModal.Item::status).containsExactly(
             com.github.skanga.ajent.terminal.ui.PlanModal.Status.COMPLETED,
             com.github.skanga.ajent.terminal.ui.PlanModal.Status.PENDING);
+    assertThat(notifications).hasValue(2);
+
+    var todo = new ToolUse(new ToolCallId("live"), new ToolName("todo"), Map.of(
+        "todos", List.of("not an object", Map.of("status", "completed"),
+            Map.of("content", "streaming", "status", "in_progress"),
+            Map.of("content", "queued"))), new ToolStatus.Pending(1));
+    var liveThread = thread(List.of(new Message(Role.ASSISTANT, "", List.of(), List.of(todo))));
+    AgentState base = AgentState.initial(liveThread);
+    var live = new AgentState(base.thread(), base.phase(), base.activeTurnId(), base.turnCounter(),
+        base.tokensIn(), base.tokensOut(), base.lastTickNanos(), base.status(),
+        Optional.of(new AgentState.ToolDraft("live", "{}")), base.queued(), base.compaction(),
+        base.oauthRefreshInFlight(), base.truncatedToolIds(), base.sessionGrants());
+    assertThat(InteractiveCommand.liveTodoItems(live)).contains(List.of(
+        new com.github.skanga.ajent.tools.host.HostServices.TodoItem(
+            "streaming", "in_progress"),
+        new com.github.skanga.ajent.tools.host.HostServices.TodoItem("queued", "pending")));
+    assertThat(InteractiveCommand.liveTodoItems(base)).isEmpty();
   }
 
   @Test void liveCodeBlockPickerCopiesEditsRunsAndAttachesExplicitly() {

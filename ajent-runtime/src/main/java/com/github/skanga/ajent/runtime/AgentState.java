@@ -23,10 +23,16 @@ public record AgentState(
     Set<String> truncatedToolIds,
     Set<String> sessionGrants) {
 
-  public record ToolDraft(String callId, String partialJson) {
+  public record ToolDraft(
+      String callId, String partialJson, long lastPreviewNanos, int parseThroughBytes) {
+    public ToolDraft(String callId, String partialJson) { this(callId, partialJson, 0, 0); }
+
     public ToolDraft {
       callId = Objects.requireNonNull(callId, "callId");
       partialJson = Objects.requireNonNull(partialJson, "partialJson");
+      if (lastPreviewNanos < 0 || parseThroughBytes < 0) {
+        throw new IllegalArgumentException("negative tool preview marker");
+      }
     }
   }
 

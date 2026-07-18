@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +42,8 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class AgentReducer {
   private static final int MAX_STREAMING_BYTES = 8 * 1024 * 1024;
   private static final int MAX_TRUNCATION_RETRIES = 2;
+  private static final long TOOL_PREVIEW_INTERVAL_NANOS = Duration.ofMillis(120).toNanos();
+  private static final int TOOL_STRUCTURED_PARSE_GROWTH = 512;
   private static final Duration TICK_REBASE_THRESHOLD = Duration.ofSeconds(2);
   private static final Duration STREAM_STALL = Duration.ofSeconds(120);
   private static final Duration TOOL_NO_RUNNING_GRACE = Duration.ofSeconds(30);
@@ -989,10 +992,52 @@ public final class AgentReducer {
     if (state.toolDraft().isEmpty()) return state;
     AgentState.ToolDraft draft = state.toolDraft().orElseThrow();
     String partial = appendUtf8Capped(draft.partialJson(), fragment, MAX_STREAMING_BYTES);
-    return copy(state, state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+    long now = context.nanoClock().getAsLong();
+    boolean previewDue = draft.lastPreviewNanos() == 0
+        || now - draft.lastPreviewNanos() >= TOOL_PREVIEW_INTERVAL_NANOS;
+    long lastPreview = previewDue ? Math.max(1, now) : draft.lastPreviewNanos();
+    int bytes = partial.getBytes(StandardCharsets.UTF_8).length;
+    boolean parseDue = previewDue && (draft.parseThroughBytes() == 0
+        || bytes >= draft.parseThroughBytes() + TOOL_STRUCTURED_PARSE_GROWTH);
+    int parseThrough = parseDue ? bytes : draft.parseThroughBytes();
+    AgentState revised = copy(state, state.thread(), state.phase(), state.activeTurnId(),
+        state.turnCounter(),
         state.tokensIn(), state.tokensOut(), state.status(),
-        Optional.of(new AgentState.ToolDraft(draft.callId(), partial)), state.queued(),
+        Optional.of(new AgentState.ToolDraft(
+            draft.callId(), partial, lastPreview, parseThrough)), state.queued(),
         state.sessionGrants());
+    if (!parseDue) return revised;
+    Optional<ToolUse> call = findTool(revised, draft.callId());
+    if (call.isEmpty() || !call.orElseThrow().name().value().equals("todo")) return revised;
+    List<Map<String, Object>> todos = previewTodos(partial);
+    if (todos.isEmpty() || todos.equals(call.orElseThrow().arguments().get("todos"))) {
+      return revised;
+    }
+    return updateTool(revised, draft.callId(), current -> {
+      var arguments = new HashMap<String, Object>(current.arguments());
+      arguments.put("todos", todos);
+      return new ToolUse(current.id(), current.name(), arguments, current.status());
+    });
+  }
+
+  private static List<Map<String, Object>> previewTodos(String partialJson) {
+    try {
+      var root = JSON.readTree(PartialJson.close(partialJson));
+      if (!root.isObject() || !root.path("todos").isArray() || root.path("todos").isEmpty()) {
+        return List.of();
+      }
+      var result = new ArrayList<Map<String, Object>>();
+      for (var item : root.path("todos")) {
+        if (!item.isObject() || !item.path("content").isTextual()) continue;
+        String status = item.path("status").isTextual()
+            ? item.path("status").textValue() : "pending";
+        if (!status.equals("completed") && !status.equals("in_progress")) status = "pending";
+        result.add(Map.of("content", item.path("content").textValue(), "status", status));
+      }
+      return List.copyOf(result);
+    } catch (Exception exception) {
+      return List.of();
+    }
   }
 
   private AgentState endTool(AgentState state) {

@@ -147,6 +147,34 @@ final class AgentLoopTest {
     assertThat(persistenceClosed.getCount()).isZero();
   }
 
+  @Test void closeWaitsForAnActiveDispatchToScheduleItsPersistenceEffect() throws Exception {
+    var observerEntered = new CountDownLatch(1);
+    var releaseObserver = new CountDownLatch(1);
+    var closeFinished = new CountDownLatch(1);
+    var saves = new AtomicInteger();
+    var loop = new AgentLoop(AgentState.initial(thread()), reducer(PermissionVerdict.ALLOW),
+        (turn, messages, cancellation, sink) -> {},
+        call -> new ToolCompletion.Success("unused"),
+        call -> new PermissionPort.Decision(true, false), ignored -> saves.incrementAndGet(),
+        state -> {
+          observerEntered.countDown();
+          await(releaseObserver);
+        });
+
+    java.lang.Thread.startVirtualThread(
+        () -> loop.dispatch(new RuntimeMessage.Submit("persist after observer", List.of())));
+    assertThat(observerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+    java.lang.Thread.startVirtualThread(() -> {
+      loop.close();
+      closeFinished.countDown();
+    });
+    assertThat(closeFinished.await(100, TimeUnit.MILLISECONDS)).isFalse();
+
+    releaseObserver.countDown();
+    assertThat(closeFinished.await(5, TimeUnit.SECONDS)).isTrue();
+    assertThat(saves).hasValue(1);
+  }
+
   @Test void interpretsScheduledRetryWithoutBlockingWorkers() throws Exception {
     var idle = new CountDownLatch(1);
     var providerCalls = new AtomicInteger();

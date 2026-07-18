@@ -20,9 +20,11 @@ import com.github.skanga.ajent.provider.stream.StreamEvent;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 final class AgentReducerTest {
@@ -830,6 +832,47 @@ final class AgentReducerTest {
     assertThat(finalized.effects()).singleElement().isInstanceOfSatisfying(
         RuntimeEffect.ExecuteTool.class,
         effect -> assertThat(effect.call().arguments()).containsEntry("path", "README.md"));
+  }
+
+  @Test void todoArgumentsPreviewRowsLiveWithNativeTimeAndGrowthBounds() {
+    var clock = new AtomicLong(1);
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("plan", "todo"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta(
+        "{\"todos\":[{\"content\":\"one\",\"status\":\"in_progress\"},"));
+    assertThat(state.thread().messages().getLast().toolCalls().getFirst().arguments())
+        .containsEntry("todos", List.of(Map.of("content", "one", "status", "in_progress")));
+    assertThat(state.toolDraft()).get().satisfies(draft -> {
+      assertThat(draft.lastPreviewNanos()).isEqualTo(1);
+      assertThat(draft.parseThroughBytes()).isPositive();
+    });
+
+    clock.addAndGet(Duration.ofMillis(50).toNanos());
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta(
+        "{\"content\":\"two\",\"status\":\"unknown\"}]}" + " ".repeat(512)));
+    assertThat((List<?>) state.thread().messages().getLast().toolCalls().getFirst()
+        .arguments().get("todos")).hasSize(1);
+
+    clock.addAndGet(Duration.ofMillis(71).toNanos());
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta(" "));
+    assertThat(state.thread().messages().getLast().toolCalls().getFirst()
+        .arguments().get("todos")).isEqualTo(List.of(
+            Map.of("content", "one", "status", "in_progress"),
+            Map.of("content", "two", "status", "pending")));
+
+    state = event(reducer, state, 1, new StreamEvent.ToolUseEnd());
+    assertThat(state.toolDraft()).isEmpty();
+    assertThat(state.thread().messages().getLast().toolCalls().getFirst().arguments())
+        .containsKey("todos");
+  }
+
+  @Test void nonTodoAndMalformedEmptyTodoPreviewsRemainNoOps() {
+    AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = submit(reducer);
+    state = event(reducer, state, 1, new StreamEvent.ToolUseStart("read", "read"));
+    state = event(reducer, state, 1, new StreamEvent.ToolUseDelta("{\"todos\":[{}]}"));
+    assertThat(state.thread().messages().getLast().toolCalls().getFirst().arguments()).isEmpty();
   }
 
   @Test void toolBlockCloseRetainsMidStringTruncationUntilTurnFinish() {

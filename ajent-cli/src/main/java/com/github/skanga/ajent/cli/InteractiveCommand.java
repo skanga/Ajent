@@ -156,6 +156,7 @@ final class InteractiveCommand {
       BiConsumer<RuntimeMessage, AgentState> observe = (message, next) -> {
         recordChange(message, pendingChanges);
         state.set(next);
+        liveTodoItems(next).ifPresent(configured.todos()::set);
         Ui current = activeUi.get();
         if (current != null) current.render();
       };
@@ -542,6 +543,31 @@ final class InteractiveCommand {
     }
   }
 
+  static Optional<List<HostServices.TodoItem>> liveTodoItems(AgentState state) {
+    if (state.toolDraft().isEmpty()) return Optional.empty();
+    String callId = state.toolDraft().orElseThrow().callId();
+    for (int messageIndex = state.thread().messages().size() - 1;
+        messageIndex >= 0; messageIndex--) {
+      List<ToolUse> calls = state.thread().messages().get(messageIndex).toolCalls();
+      for (int callIndex = calls.size() - 1; callIndex >= 0; callIndex--) {
+        ToolUse call = calls.get(callIndex);
+        if (!call.id().value().equals(callId) || !call.name().value().equals("todo")) continue;
+        Object raw = call.arguments().get("todos");
+        if (!(raw instanceof List<?> values) || values.isEmpty()) return Optional.empty();
+        var items = new ArrayList<HostServices.TodoItem>();
+        for (Object value : values) {
+          if (!(value instanceof Map<?, ?> item) || !(item.get("content") instanceof String content)) {
+            continue;
+          }
+          String status = item.get("status") instanceof String text ? text : "pending";
+          items.add(new HostServices.TodoItem(content, status));
+        }
+        return items.isEmpty() ? Optional.empty() : Optional.of(List.copyOf(items));
+      }
+    }
+    return Optional.empty();
+  }
+
   static DiffReview.File reviewFile(FileChange change) {
     return new DiffReview.File(change.path(), change.added(), change.removed(),
         change.hunks().stream().map(hunk -> new DiffReview.Hunk(
@@ -631,7 +657,8 @@ final class InteractiveCommand {
     @Override public void set(List<HostServices.TodoItem> values) {
       List<PlanModal.Item> next = values.stream()
           .map(item -> PlanModal.Item.fromTool(item.content(), item.status())).toList();
-      items.set(next);
+      List<PlanModal.Item> previous = items.getAndSet(next);
+      if (previous.equals(next)) return;
       changed.accept(next);
     }
 

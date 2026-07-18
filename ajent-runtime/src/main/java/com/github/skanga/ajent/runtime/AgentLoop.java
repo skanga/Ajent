@@ -24,6 +24,7 @@ public final class AgentLoop implements AutoCloseable {
   private final ExecutorService tasks;
   private final ScheduledExecutorService scheduler;
   private AgentState state;
+  private int activeDispatches;
   private boolean closed;
 
   public AgentLoop(AgentState initial, AgentReducer reducer, ProviderPort provider, ToolPort tools,
@@ -112,12 +113,22 @@ public final class AgentLoop implements AutoCloseable {
     AgentReducer.Step step;
     synchronized (lock) {
       if (closed) throw new IllegalStateException("agent loop is closed");
-      step = reducer.update(state, message);
-      state = step.state();
+      activeDispatches++;
     }
-    observer.accept(message, step.state());
-    step.effects().forEach(this::execute);
-    return step.state();
+    try {
+      synchronized (lock) {
+        step = reducer.update(state, message);
+        state = step.state();
+      }
+      observer.accept(message, step.state());
+      step.effects().forEach(this::execute);
+      return step.state();
+    } finally {
+      synchronized (lock) {
+        activeDispatches--;
+        lock.notifyAll();
+      }
+    }
   }
 
   private static BiConsumer<RuntimeMessage, AgentState> states(Consumer<AgentState> observer) {
@@ -198,16 +209,28 @@ public final class AgentLoop implements AutoCloseable {
   }
 
   @Override public void close() {
+    boolean interrupted = false;
     synchronized (lock) {
       if (closed) return;
+      while (activeDispatches != 0) {
+        try {
+          lock.wait();
+        } catch (InterruptedException exception) {
+          interrupted = true;
+        }
+      }
       closed = true;
       state.phase().active().ifPresent(active -> active.cancellation().cancel());
     }
-    scheduler.shutdownNow();
     try {
-      tasks.close();
+      scheduler.shutdownNow();
+      try {
+        tasks.close();
+      } finally {
+        persistence.close();
+      }
     } finally {
-      persistence.close();
+      if (interrupted) java.lang.Thread.currentThread().interrupt();
     }
   }
 }

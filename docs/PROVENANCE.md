@@ -22,6 +22,7 @@ Reference-derived work currently includes:
 | Workspace file/symbol indexing, scored matching, picker reducers, and lazy attachment expansion | `src/workspace/files.cpp`, `src/workspace/symbols.cpp`, `include/agentty/runtime/mention_palette.hpp`, `include/agentty/runtime/symbol_palette.hpp`, `src/runtime/app/update/mention.cpp`, `src/runtime/app/update/symbol.cpp`, `src/runtime/view/pickers.cpp` |
 | Always-chip text paste, image sniff/path ingestion, smart clipboard routing, and OSC query fallback | `src/runtime/app/update/composer.cpp`, `src/io/clipboard.cpp`, `include/agentty/io/clipboard.hpp`, `src/runtime/composer_attachment.cpp`, `maya/src/terminal/ansi.cpp`, `maya/src/app/app.cpp` |
 | Structured bounded-LCS hunks, unified rendering/reconstruction, and review reducer | `src/diff/diff.cpp`, `include/agentty/diff/diff.hpp`, `src/runtime/app/update/diff.cpp`, `src/runtime/view/diff_review.cpp` |
+| Partial-stream todo projection, parse throttling, plan synchronization, and settled updates | `src/runtime/app/update/stream_preview.cpp`, `src/runtime/app/update/stream.cpp`, `src/runtime/app/update/tool.cpp` |
 | CLI reference fixtures | downloaded AgenTTY 0.2.8 Windows binary plus `src/runtime/main.cpp` |
 
 The reference checkout and binary remain local under ignored `agentty/` and are not part of Ajent's Git history. Raw retained fixtures are small behavioral outputs and carry source commit and binary hashes in the reference manifests.
