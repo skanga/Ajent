@@ -102,6 +102,9 @@ class AjentCliTest {
       @Override public int airgap(CliArguments arguments, PrintStream output, PrintStream error) {
         output.print("airgap:" + String.join(",", arguments.airgapArguments())); return 17;
       }
+      @Override public int interactive(CliArguments arguments, PrintStream error) {
+        error.print("interactive:" + arguments.provider()); return 18;
+      }
     };
     assertThat(run(services, "answer\n", "login")).satisfies(result -> {
       assertThat(result.exitCode()).isEqualTo(11); assertThat(result.stdout()).isEqualTo("login:answer");
@@ -126,10 +129,10 @@ class AjentCliTest {
           assertThat(result.exitCode()).isEqualTo(17);
           assertThat(result.stdout()).isEqualTo("airgap:host,--acp,-m,model");
         });
-  }
-
-  @Test void recognizedButPendingCommandsReturnSoftwareError() {
-    assertThat(run().stderr()).contains("interactive mode is not implemented yet");
+    assertThat(run(services, "", "--provider", "ollama")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(18);
+      assertThat(result.stderr()).isEqualTo("interactive:ollama");
+    });
   }
 
   private static Execution run(String... arguments) {
