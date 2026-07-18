@@ -24,9 +24,13 @@
       "classification": "integration",
       "surface": "acp",
       "referenceRun": "ctest --test-dir <build> -R \"^acp_integration_test$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/test/java/com/github/skanga/ajent/parity/AcpIntegrationTest.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-protocol/src/test/java/com/github/skanga/ajent/protocol/acp/AcpJsonRpcServerTest.java",
+      "supportingCounterparts": [
+        "ajent-runtime/src/test/java/com/github/skanga/ajent/runtime/AgentSessionFactoryTest.java",
+        "ajent-cli/src/test/java/com/github/skanga/ajent/cli/AcpCommandTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": ["mvn -q verify", "all 26 reference checks translated with real duplex permission flow, production filesystem dispatch, persistence, approval, and rejection"]
     },
     {
       "id": "anthropic_md_stream",

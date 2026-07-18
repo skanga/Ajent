@@ -22,9 +22,13 @@ import com.github.skanga.ajent.provider.stream.StreamEvent;
 import com.github.skanga.ajent.runtime.AgentLoop;
 import com.github.skanga.ajent.runtime.AgentReducer;
 import com.github.skanga.ajent.runtime.AgentState;
+import com.github.skanga.ajent.runtime.DispatcherToolPort;
+import com.github.skanga.ajent.runtime.FilePersistencePort;
 import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.PermissionVerdict;
 import com.github.skanga.ajent.runtime.ToolCompletion;
+import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -440,6 +444,102 @@ final class AcpJsonRpcServerTest {
         .load(directory.resolve("threads/prompt-session.json"));
     assertThat(persisted).isInstanceOfSatisfying(ThreadLoadResult.Success.class, loaded ->
         assertThat(loaded.thread().messages()).hasSize(3));
+  }
+
+  @Test void pinnedIntegrationExecutesApprovedWriteAndNeverExecutesRejectedWrite(
+      @TempDir Path directory) throws Exception {
+    Path workspace = Files.createDirectories(directory.resolve("workspace"));
+    Path target = workspace.resolve("out.txt");
+    var tools = ToolRuntimeFactory.compose(
+        ToolRuntimeFactory.Configuration.standalone(workspace, directory.resolve("home")));
+    var completions = new AtomicInteger();
+    var sawToolResult = new AtomicBoolean();
+    String arguments = JSON.createObjectNode().put("path", target.toString())
+        .put("content", "hello from acp\n").toString();
+    AcpJsonRpcServer.SessionFactory factory = (thread, profile, model, permissions, observer) ->
+        new AgentLoop(AgentState.initial(thread), new AgentReducer(new AgentReducer.Context(
+            System::nanoTime, java.time.Instant::now, MessageId::random,
+            call -> PermissionVerdict.PROMPT)),
+            (turn, messages, cancellation, sink) -> {
+              int completion = completions.getAndIncrement();
+              if (completion % 2 == 0) {
+                String id = "write-real-" + completion;
+                sink.accept(new StreamEvent.Started());
+                sink.accept(new StreamEvent.TextDelta("Writing the file."));
+                sink.accept(new StreamEvent.ToolUseStart(id, "write"));
+                sink.accept(new StreamEvent.ToolUseDelta(arguments));
+                sink.accept(new StreamEvent.ToolUseEnd());
+                sink.accept(new StreamEvent.Usage(1_200, 40, 0, 0));
+                sink.accept(new StreamEvent.Finished(StopReason.TOOL_USE));
+              } else {
+                String expected = "write-real-" + (completion - 1);
+                sawToolResult.set(messages.stream().flatMap(message -> message.toolCalls().stream())
+                    .anyMatch(call -> call.id().value().equals(expected)
+                        && !(call.status() instanceof ToolStatus.Pending)));
+                sink.accept(new StreamEvent.TextDelta("Done."));
+                sink.accept(new StreamEvent.Usage(1_300, 10, 0, 0));
+                sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
+              }
+            }, new DispatcherToolPort(tools.dispatcher()), permissions,
+            new FilePersistencePort(directory), observer);
+    var server = new AcpJsonRpcServer(directory, () -> new ThreadId("real-acp-session"),
+        Profile.ASK, "model", () -> true, () -> {}, "test", factory, 200_000);
+    result(server, 1, "session/new", "{\"cwd\":" + JSON.writeValueAsString(workspace.toString())
+        + "}");
+    var frames = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    var permissionCalls = new AtomicInteger();
+    var reject = new AtomicBoolean();
+    AcpJsonRpcServer.Client client = new AcpJsonRpcServer.Client() {
+      @Override public void send(String frame) { frames.add(parse(frame)); }
+
+      @Override public java.util.concurrent.CompletionStage<PermissionPort.Decision>
+          requestPermission(String sessionId, ToolUse call) {
+        permissionCalls.incrementAndGet();
+        assertThat(sessionId).isEqualTo("real-acp-session");
+        assertThat(call.name().value()).isEqualTo("write");
+        return java.util.concurrent.CompletableFuture.completedFuture(
+            new PermissionPort.Decision(!reject.get(), false));
+      }
+    };
+
+    List<String> approved = server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{
+          "sessionId":"real-acp-session","prompt":[{"type":"text","text":"write"}]}}
+        """, client).toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS);
+    assertThat(parse(approved.getLast()).path("result").path("stopReason").textValue())
+        .isEqualTo("end_turn");
+    assertThat(completions).hasValue(2);
+    assertThat(permissionCalls).hasValue(1);
+    assertThat(sawToolResult).isTrue();
+    assertThat(Files.readString(target)).contains("hello from acp");
+    List<JsonNode> approvedUpdates = frames.stream()
+        .map(frame -> frame.path("params").path("update")).toList();
+    assertThat(approvedUpdates.stream().filter(update ->
+        "agent_message_chunk".equals(update.path("sessionUpdate").asText())))
+        .extracting(update -> update.path("content").path("text").asText())
+        .contains("Writing the file.", "Done.");
+    assertThat(approvedUpdates.stream().filter(update ->
+        "usage_update".equals(update.path("sessionUpdate").asText()))).hasSize(2);
+    assertThat(approvedUpdates.stream().filter(update ->
+        "completed".equals(update.path("status").asText()))).hasSize(1);
+
+    Files.delete(target);
+    reject.set(true);
+    int framesBeforeReject = frames.size();
+    List<String> rejected = server.handleLineAsync("""
+        {"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{
+          "sessionId":"real-acp-session","prompt":[{"type":"text","text":"again"}]}}
+        """, client).toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS);
+    assertThat(parse(rejected.getLast()).path("result").path("stopReason").textValue())
+        .isEqualTo("end_turn");
+    assertThat(completions).hasValue(4);
+    assertThat(permissionCalls).hasValue(2);
+    assertThat(sawToolResult).isTrue();
+    assertThat(target).doesNotExist();
+    assertThat(frames.subList(framesBeforeReject, frames.size()).stream()
+        .map(frame -> frame.path("params").path("update"))
+        .filter(update -> "failed".equals(update.path("status").asText()))).hasSize(1);
+    result(server, 4, "session/close", "{\"sessionId\":\"real-acp-session\"}");
   }
 
   @Test void stdioRemainsDuplexWhilePermissionAndPromptAreOutstanding(@TempDir Path directory)
