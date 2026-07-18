@@ -23,6 +23,7 @@ import com.github.skanga.ajent.terminal.JLineTerminalSession;
 import com.github.skanga.ajent.terminal.input.TerminalEvent;
 import com.github.skanga.ajent.terminal.input.TerminalKey;
 import com.github.skanga.ajent.terminal.render.CanvasSerializer;
+import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
 import com.github.skanga.ajent.terminal.render.InlineFrameRenderer;
 import com.github.skanga.ajent.terminal.render.TerminalCanvas;
 import com.github.skanga.ajent.terminal.render.TerminalColor;
@@ -603,16 +604,8 @@ final class InteractiveCommand {
     }
 
     private static void wrap(List<StyledLine> lines, String text, int width, Style style) {
-      if (text.isEmpty()) { lines.add(new StyledLine("", style)); return; }
-      for (String logical : text.split("\\R", -1)) {
-        if (logical.isEmpty()) { lines.add(new StyledLine("", style)); continue; }
-        int start = 0;
-        while (start < logical.length()) {
-          int end = Math.min(logical.length(), start + width);
-          if (end < logical.length() && Character.isHighSurrogate(logical.charAt(end - 1))) end--;
-          lines.add(new StyledLine(logical.substring(start, end), style));
-          start = end;
-        }
+      for (String line : ColumnTextWrapper.wrap(text, width)) {
+        lines.add(new StyledLine(line, style));
       }
     }
 

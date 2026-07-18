@@ -77,5 +77,10 @@ bounded catch-up after a long pause, final drain after the provider becomes
 idle, and termination of the wake-up chain at the live edge. The remaining
 reveal work is the styled scramble/gradient trail and caret overlay.
 
+The compact live view also routes every textual row through the pinned
+Unicode-width table. `ColumnTextWrapperTest` proves CJK/emoji cell wrapping,
+supplementary-code-point atomicity, logical blank-line preservation, and
+forward progress in a one-column viewport.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.
