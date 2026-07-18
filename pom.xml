@@ -20,6 +20,7 @@
     <maven.compiler.release>25</maven.compiler.release>
     <junit.version>6.1.0</junit.version><assertj.version>3.27.6</assertj.version><jackson.version>2.22.0</jackson.version>
     <jline.version>3.30.0</jline.version>
+    <flexmark.version>0.64.8</flexmark.version>
     <maven.compiler.version>3.14.1</maven.compiler.version><maven.enforcer.version>3.6.3</maven.enforcer.version>
     <maven.surefire.version>3.5.4</maven.surefire.version><maven.failsafe.version>3.5.4</maven.failsafe.version>
     <jacoco.version>0.8.15</jacoco.version>
@@ -33,6 +34,10 @@
     <dependency><groupId>org.assertj</groupId><artifactId>assertj-core</artifactId><version>${assertj.version}</version></dependency>
     <dependency><groupId>org.jline</groupId><artifactId>jline-terminal</artifactId><version>${jline.version}</version></dependency>
     <dependency><groupId>org.jline</groupId><artifactId>jline-terminal-ffm</artifactId><version>${jline.version}</version></dependency>
+    <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark</artifactId><version>${flexmark.version}</version></dependency>
+    <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark-ext-gfm-strikethrough</artifactId><version>${flexmark.version}</version></dependency>
+    <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark-ext-tables</artifactId><version>${flexmark.version}</version></dependency>
+    <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark-ext-gfm-tasklist</artifactId><version>${flexmark.version}</version></dependency>
   </dependencies></dependencyManagement>
   <build>
     <pluginManagement><plugins>

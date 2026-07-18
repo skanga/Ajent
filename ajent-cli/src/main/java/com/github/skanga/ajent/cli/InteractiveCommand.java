@@ -43,12 +43,12 @@ import com.github.skanga.ajent.terminal.input.TerminalKey;
 import com.github.skanga.ajent.terminal.render.CanvasSerializer;
 import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
 import com.github.skanga.ajent.terminal.render.InlineFrameRenderer;
+import com.github.skanga.ajent.terminal.render.MarkdownTerminalRenderer;
 import com.github.skanga.ajent.terminal.render.TerminalCanvas;
 import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.TextReveal;
-import com.github.skanga.ajent.terminal.render.TextRevealEffect;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
 import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
@@ -2139,13 +2139,12 @@ final class InteractiveCommand {
         if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
         output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
         String text = AttachmentText.display(message.text(), message.attachments());
-        TextRevealEffect.Decoration visual = null;
+        TextReveal.Frame revealFrame = null;
         boolean revealable = message.role() == Role.ASSISTANT
             && messageIndex == messages.size() - 1;
         if (revealable) {
           boolean streaming = !(state.phase() instanceof SessionPhase.Idle)
               && !message.textBlockClosed();
-          TextReveal.Frame revealFrame;
           if (!message.id().equals(revealMessage)) {
             revealMessage = message.id();
             reveal = new TextReveal();
@@ -2153,12 +2152,11 @@ final class InteractiveCommand {
           } else {
             revealFrame = reveal.update(text, streaming, nowNanos);
           }
-          text = revealFrame.text();
-          visual = revealFrame.visual(TerminalStyle.EMPTY);
           animating |= revealFrame.requiresAnimation();
         }
-        if (visual == null) wrap(output, text, width, Style.NORMAL);
-        else wrapReveal(output, visual, width);
+        if (revealFrame != null) appendMarkdown(output, revealFrame, width);
+        else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, width);
+        else wrap(output, text, width, Style.NORMAL);
         Map<String, java.util.Set<Integer>> grepHits =
             ToolBodyPreview.collectGrepHits(message.toolCalls());
         for (ToolUse call : message.toolCalls()) {
@@ -2200,37 +2198,21 @@ final class InteractiveCommand {
       }
     }
 
-    private static void wrapReveal(
-        List<StyledLine> lines, TextRevealEffect.Decoration decoration, int width) {
-      var spans = new ArrayList<StyledSpan>();
-      var text = new StringBuilder();
-      int columns = 0;
-      for (TextRevealEffect.Glyph glyph : decoration.glyphs()) {
-        if (glyph.sourceCodePoint() == '\n') {
-          lines.add(new StyledLine(text.toString(), Style.NORMAL, List.copyOf(spans)));
-          spans.clear();
-          text.setLength(0);
-          columns = 0;
-          continue;
-        }
-        int glyphWidth = com.github.skanga.ajent.terminal.render.UnicodeWidth.of(
-            glyph.sourceCodePoint());
-        if (columns > 0 && columns + glyphWidth > width) {
-          lines.add(new StyledLine(text.toString(), Style.NORMAL, List.copyOf(spans)));
-          spans.clear();
-          text.setLength(0);
-          columns = 0;
-        }
-        text.append(glyph.text());
-        if (!spans.isEmpty() && spans.getLast().style().equals(glyph.style())) {
-          StyledSpan previous = spans.removeLast();
-          spans.add(new StyledSpan(previous.text() + glyph.text(), previous.style()));
-        } else {
-          spans.add(new StyledSpan(glyph.text(), glyph.style()));
-        }
-        columns += glyphWidth;
+    private static void appendMarkdown(List<StyledLine> lines, String source, int width) {
+      appendMarkdown(lines, MarkdownTerminalRenderer.render(source, width));
+    }
+
+    private static void appendMarkdown(List<StyledLine> lines, TextReveal.Frame frame, int width) {
+      appendMarkdown(lines, MarkdownTerminalRenderer.render(frame, width));
+    }
+
+    private static void appendMarkdown(
+        List<StyledLine> lines, List<MarkdownTerminalRenderer.Line> rendered) {
+      for (MarkdownTerminalRenderer.Line line : rendered) {
+        List<StyledSpan> spans = line.spans().stream()
+            .map(span -> new StyledSpan(span.text(), span.style())).toList();
+        lines.add(new StyledLine(line.text(), Style.NORMAL, spans));
       }
-      lines.add(new StyledLine(text.toString(), Style.NORMAL, List.copyOf(spans)));
     }
 
     private enum Style { NORMAL, ACCENT, MUTED, DANGER, SUCCESS }

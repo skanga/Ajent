@@ -540,6 +540,23 @@ final class InteractiveCommandTest {
     assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text()).isEqualTo("x@");
   }
 
+  @Test void workspacePickersRenderEmptyAndNoMatchStates() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(character('#'), agent);
+    assertThat(terminal.bytes.toString()).contains("no symbols indexed");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+
+    agent.workspaceFiles = List.of("README.md", "src/Main.java");
+    ui.key(character('@'), agent);
+    ui.key(character('z'), agent);
+    assertThat(terminal.bytes.toString()).contains("no matches");
+  }
+
   @Test void emptyMentionBackspaceClosesWithoutLeakingTheTrigger() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
@@ -1131,6 +1148,28 @@ final class InteractiveCommandTest {
         new InteractiveCommand.PermissionGate()).render();
   }
 
+  @Test void settledAssistantMarkdownRendersAsStyledTerminalContent() {
+    String markdown = """
+        # Heading
+
+        **bold** value
+
+        | Name | State |
+        |------|-------|
+        | Ajent | ready |
+        """;
+    AgentState state = AgentState.initial(thread(List.of(
+        new Message(Role.ASSISTANT, markdown, List.of(), List.of()))));
+    var terminal = new FakeTerminal();
+
+    new InteractiveCommand.Ui(terminal, new AtomicReference<>(state),
+        new InteractiveCommand.PermissionGate()).render();
+
+    String wire = terminal.bytes.toString();
+    assertThat(wire).contains("Heading", "bold", "Ajent", "ready", "\u250c", "\u252c")
+        .doesNotContain("# Heading", "**bold**", "|------|");
+  }
+
   @Test void streamingTranscriptRequestsFramesAndFinalizationSettles() {
     Message assistant = new Message(Role.ASSISTANT, "abcdef", List.of(), List.of());
     AgentState streaming = withPhase(AgentState.initial(thread(List.of(assistant))),
@@ -1157,6 +1196,28 @@ final class InteractiveCommandTest {
     // The inline renderer emits only changed cells, so the final suffix proves catch-up.
     assertThat(terminal.bytes.toString()).contains("ef");
     assertThat(animation.frame).isNull();
+  }
+
+  @Test void streamingAssistantMarkdownNeverExposesSourcePunctuation() {
+    String markdown = """
+        ## Live heading
+
+        | Key | Value |
+        |-----|-------|
+        | one | two |
+        """;
+    Message assistant = new Message(Role.ASSISTANT, markdown, List.of(), List.of());
+    AgentState streaming = withPhase(AgentState.initial(thread(List.of(assistant))),
+        new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1)));
+    var terminal = new FakeTerminal();
+    var animation = new ManualAnimation();
+
+    new InteractiveCommand.Ui(terminal, new AtomicReference<>(streaming),
+        new InteractiveCommand.PermissionGate(), animation).render();
+
+    assertThat(terminal.bytes.toString()).contains("┌", "┬")
+        .doesNotContain("## Live heading", "|-----|", "| Key | Value |");
+    assertThat(animation.requested).isOne();
   }
 
   @Test void liveToolViewerOwnsListBodyNavigationAndOsc52Copy() {
