@@ -348,6 +348,48 @@ final class InteractiveCommandTest {
     assertThat(agent.changes).isEmpty();
   }
 
+  @Test void livePlanTracksTodoToolUpdatesAndOwnsKeysUntilEscape() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 12);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.updatePlan(List.of(
+        com.github.skanga.ajent.terminal.ui.PlanModal.Item.fromTool("queue", "pending"),
+        com.github.skanga.ajent.terminal.ui.PlanModal.Item.fromTool("work", "in_progress"),
+        com.github.skanga.ajent.terminal.ui.PlanModal.Item.fromTool("ship", "completed")));
+    ui.key(character('t', true), agent);
+    assertThat(terminal.bytes.toString()).contains(
+        "Plan", "[ ] queue", "[-] work", "[x] ship", "1/3 completed");
+    ui.key(character('z'), agent);
+    assertThat(agent.messages).isEmpty();
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    ui.key(character('z'), agent);
+    ui.key(character('u', true), agent);
+
+    ui.updatePlan(List.of());
+    selectCommand(ui, agent, "open plan");
+    assertThat(terminal.bytes.toString())
+        .contains("No tasks yet.", "The agent will create tasks as it works.");
+  }
+
+  @Test void todoLedgerPublishesInitialAndNormalizedImmutableSnapshots() {
+    var ledger = new InteractiveCommand.TodoLedger();
+    var observed = new AtomicReference<List<com.github.skanga.ajent.terminal.ui.PlanModal.Item>>();
+    ledger.onChange(observed::set);
+    assertThat(observed.get()).isEmpty();
+    var source = new ArrayList<com.github.skanga.ajent.tools.host.HostServices.TodoItem>();
+    source.add(new com.github.skanga.ajent.tools.host.HostServices.TodoItem("one", "completed"));
+    source.add(new com.github.skanga.ajent.tools.host.HostServices.TodoItem("two", "future"));
+    ledger.set(source);
+    source.clear();
+    assertThat(observed.get()).extracting(
+        com.github.skanga.ajent.terminal.ui.PlanModal.Item::status).containsExactly(
+            com.github.skanga.ajent.terminal.ui.PlanModal.Status.COMPLETED,
+            com.github.skanga.ajent.terminal.ui.PlanModal.Status.PENDING);
+  }
+
   @Test void savedThreadPickerLoadsAtCurrentNavigatesAndSwapsWholeView() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();

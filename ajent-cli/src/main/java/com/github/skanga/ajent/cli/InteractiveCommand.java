@@ -43,6 +43,7 @@ import com.github.skanga.ajent.terminal.ui.DiffReview;
 import com.github.skanga.ajent.terminal.ui.ModelPicker;
 import com.github.skanga.ajent.terminal.ui.LoginModal;
 import com.github.skanga.ajent.terminal.ui.PickerState;
+import com.github.skanga.ajent.terminal.ui.PlanModal;
 import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.terminal.ui.ThreadPicker;
@@ -50,6 +51,7 @@ import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.runtime.FileChange;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
+import com.github.skanga.ajent.tools.host.HostServices;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.awt.Desktop;
@@ -126,6 +128,7 @@ final class InteractiveCommand {
         @Override public void write(String value) { terminal.write(value); }
       }, state, permission, animations);
       activeUi.set(ui);
+      configured.todos().onChange(ui::updatePlan);
       permission.onChange(ui::render);
       var threadStore = new ThreadStore(configured.dataDirectory());
       var conversation = new com.github.skanga.ajent.domain.Thread(
@@ -391,13 +394,14 @@ final class InteractiveCommand {
     ProviderAuth auth = ProviderAuthResolver.resolve(provider, providerAuth(anthropic.credential()),
         arguments.key(), settings.providerKeys().getOrDefault(provider, ""), environment);
     Path docs = resolveDocs(workspace);
+    var todos = new TodoLedger();
     var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
-        workspace, workspace, home, docs, new JdkWebTransport(), null, null, sandbox.runner()));
+        workspace, workspace, home, docs, new JdkWebTransport(), todos, null, sandbox.runner()));
     var providers = new LiveProviderFactory.Configuration(provider, model, auth, settings.effort(),
         tools.systemPrompt(), 0, environment);
     return new Configuration(new AgentSessionFactory(tools, providers, client, dataDirectory),
         dataDirectory, profile, model, settingsStore, providers,
-        new ProviderModelCatalog(client));
+        new ProviderModelCatalog(client), todos);
   }
 
   static void recordChange(
@@ -466,7 +470,25 @@ final class InteractiveCommand {
   record Configuration(
       AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
       SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
-      ProviderModelCatalog models) {}
+      ProviderModelCatalog models, TodoLedger todos) {}
+
+  static final class TodoLedger implements HostServices.TodoSink {
+    private final AtomicReference<List<PlanModal.Item>> items =
+        new AtomicReference<>(List.of());
+    private volatile Consumer<List<PlanModal.Item>> changed = ignored -> {};
+
+    @Override public void set(List<HostServices.TodoItem> values) {
+      List<PlanModal.Item> next = values.stream()
+          .map(item -> PlanModal.Item.fromTool(item.content(), item.status())).toList();
+      items.set(next);
+      changed.accept(next);
+    }
+
+    void onChange(Consumer<List<PlanModal.Item>> listener) {
+      changed = Objects.requireNonNull(listener, "listener");
+      listener.accept(items.get());
+    }
+  }
 
   interface TerminalPort {
     JLineTerminalSession.Size size();
@@ -559,6 +581,8 @@ final class InteractiveCommand {
     private PickerState.OneAxis modelPicker = new PickerState.Closed();
     private PickerState.OneAxis providerPicker = new PickerState.Closed();
     private PickerState.OneAxis threadPicker = new PickerState.Closed();
+    private PickerState.Modal plan = new PickerState.ModalClosed();
+    private List<PlanModal.Item> planItems = List.of();
     private List<ThreadPicker.Entry> threadRows = List.of();
     private boolean threadsLoading;
     private boolean threadLoading;
@@ -603,6 +627,11 @@ final class InteractiveCommand {
         }
         return true;
       }
+      if (plan instanceof PickerState.OpenModal) {
+        if (key.key() == TerminalKey.SpecialKey.ESCAPE) plan = PlanModal.close(plan);
+        render();
+        return true;
+      }
       if (LoginModal.isOpen(login)) return loginKey(key, loop);
       if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key);
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
@@ -615,6 +644,7 @@ final class InteractiveCommand {
         if (codePoint == 'c') return false;
         if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
         if (codePoint == 'j') { openThreadPicker(loop); render(); return true; }
+        if (codePoint == 't') { plan = PlanModal.open(); render(); return true; }
         if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
         if (codePoint == 'd' && composer.isEmpty()) return false;
         if (codePoint == 'u') { composer = composer.substring(cursor); cursor = 0; render(); return true; }
@@ -731,6 +761,8 @@ final class InteractiveCommand {
                 resetForThreadSwap();
               } else if (command == CommandPalette.Command.OPEN_THREADS) {
                 openThreadPicker(loop);
+              } else if (command == CommandPalette.Command.OPEN_PLAN) {
+                plan = PlanModal.open();
               } else if (command == CommandPalette.Command.CYCLE_PROFILE) {
                 Profile profile = loop.cycleProfile();
                 uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
@@ -1073,6 +1105,7 @@ final class InteractiveCommand {
         modelPicker = new PickerState.Closed();
         providerPicker = new PickerState.Closed();
         threadPicker = new PickerState.Closed();
+        plan = new PickerState.ModalClosed();
         login = new LoginModal.Closed();
         diffReview = new PickerState.CellClosed();
         diffFiles = List.of();
@@ -1192,6 +1225,30 @@ final class InteractiveCommand {
           }
           lines.add(new StyledLine(
               "â†‘â†“ move  PgUp/PgDn page  Enter open  N new  Esc close", Style.MUTED));
+        }
+        if (plan instanceof PickerState.OpenModal) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Plan", Style.ACCENT));
+          if (planItems.isEmpty()) {
+            lines.add(new StyledLine("  No tasks yet.", Style.MUTED));
+            lines.add(new StyledLine("  The agent will create tasks as it works.", Style.MUTED));
+          } else {
+            for (PlanModal.Item item : planItems) {
+              String marker = switch (item.status()) {
+                case PENDING -> "[ ] ";
+                case IN_PROGRESS -> "[-] ";
+                case COMPLETED -> "[x] ";
+              };
+              wrap(lines, marker + item.content(), width,
+                  item.status() == PlanModal.Status.IN_PROGRESS ? Style.ACCENT : Style.NORMAL);
+            }
+            PlanModal.Progress progress = PlanModal.progress(planItems);
+            lines.add(new StyledLine(progress.completed() + "/" + progress.total()
+                + " completed", progress.completed() == progress.total()
+                    ? Style.ACCENT : Style.MUTED));
+          }
+          lines.add(new StyledLine("Esc close", Style.MUTED));
         }
         if (LoginModal.isOpen(login)) {
           lines = new ArrayList<>(lines);
@@ -1340,6 +1397,11 @@ final class InteractiveCommand {
     private static String displayTool(String name) {
       if (name.isEmpty()) return name;
       return Character.toUpperCase(name.charAt(0)) + name.substring(1).replace('_', ' ');
+    }
+
+    void updatePlan(List<PlanModal.Item> items) {
+      synchronized (lock) { planItems = List.copyOf(items); }
+      render();
     }
   }
 }
