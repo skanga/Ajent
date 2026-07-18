@@ -87,6 +87,28 @@ final class StreamingMarkdownTest {
   }
 
   @Test
+  void foldsOnlyClosedFencedCodeBlocksWhoseBodiesExceedFortyLines() {
+    var body = new StringBuilder("```mermaid\n");
+    for (int line = 0; line < 41; line++) body.append("node-").append(line).append('\n');
+    String unterminated = body.toString();
+    String closed = unterminated + "```\n";
+
+    assertThat(MarkdownTerminalRenderer.render(unterminated, 80))
+        .extracting(MarkdownTerminalRenderer.Line::text)
+        .contains("node-0", "node-40")
+        .doesNotContain("â–¸ 41 lines hidden");
+    assertThat(MarkdownTerminalRenderer.render(closed, 80))
+        .extracting(MarkdownTerminalRenderer.Line::text)
+        .containsExactly("â–¸ 41 lines hidden");
+
+    String fortyLines = closed.replace("node-40\n", "");
+    assertThat(MarkdownTerminalRenderer.render(fortyLines, 80))
+        .extracting(MarkdownTerminalRenderer.Line::text)
+        .contains("node-0", "node-39")
+        .doesNotContain("â–¸ 40 lines hidden");
+  }
+
+  @Test
   void exposesNativeBlockKindsSourceExtentsAndIncrementalLifecycle() {
     String source = """
         paragraph

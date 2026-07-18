@@ -365,7 +365,7 @@ final class MidrunWireTest {
   }
 
   /** Byte-faithful subset of ANSI used by InlineFrameRenderer. */
-  private static final class AnsiEmulator {
+  static final class AnsiEmulator {
     private final int columns;
     private final int rows;
     private final List<char[]> screen = new ArrayList<>();
@@ -374,13 +374,13 @@ final class MidrunWireTest {
     private int row;
     private boolean autoWrap = true;
 
-    private AnsiEmulator(int columns, int rows) {
+    AnsiEmulator(int columns, int rows) {
       this.columns = columns;
       this.rows = rows;
       for (int index = 0; index < rows; index++) screen.add(blank());
     }
 
-    private void feed(String input) {
+    void feed(String input) {
       for (int offset = 0; offset < input.length();) {
         int codePoint = input.codePointAt(offset);
         offset += Character.charCount(codePoint);
@@ -391,13 +391,13 @@ final class MidrunWireTest {
       }
     }
 
-    private List<String> transcript() {
+    List<String> transcript() {
       var result = new ArrayList<>(scrollback);
       for (char[] line : screen) result.add(trim(line));
       return result;
     }
 
-    private List<String> scrollback() { return List.copyOf(scrollback); }
+    List<String> scrollback() { return List.copyOf(scrollback); }
 
     private int escape(String input, int offset) {
       if (offset >= input.length() || input.charAt(offset) != '[') return offset + 1;

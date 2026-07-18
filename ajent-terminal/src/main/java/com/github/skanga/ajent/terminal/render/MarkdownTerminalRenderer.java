@@ -30,6 +30,7 @@ import java.util.Objects;
 
 /** CommonMark/GFM-to-terminal renderer used by live and settled assistant turns. */
 public final class MarkdownTerminalRenderer {
+  private static final int CODE_FOLD_LINE_THRESHOLD = 40;
   private static final TerminalStyle HEADING = TerminalStyle.EMPTY
       .withForeground(TerminalColor.cyan()).withBold();
   private static final TerminalStyle CODE = TerminalStyle.EMPTY
@@ -149,7 +150,13 @@ public final class MarkdownTerminalRenderer {
     } else if (block instanceof Paragraph) {
       output.addAll(wrap(inline(block, TerminalStyle.EMPTY), width, ""));
     } else if (block instanceof FencedCodeBlock fenced) {
-      renderCode(fenced.getContentChars().toString(), width, output);
+      String source = fenced.getContentChars().toString();
+      int lines = codeLines(source);
+      if (!fenced.getClosingMarker().isEmpty() && lines > CODE_FOLD_LINE_THRESHOLD) {
+        output.add(line("â–¸ " + lines + " lines hidden", MUTED));
+      } else {
+        renderCode(source, width, output);
+      }
     } else if (block instanceof IndentedCodeBlock indented) {
       renderCode(indented.getContentChars().toString(), width, output);
     } else if (block instanceof BlockQuote) {
@@ -246,6 +253,16 @@ public final class MarkdownTerminalRenderer {
       if (value.isEmpty()) output.add(line("", CODE));
       else output.addAll(wrap(List.of(new Span(value, CODE)), width, ""));
     }
+  }
+
+  private static int codeLines(String source) {
+    if (source.isEmpty()) return 0;
+    String normalized = source.replace("\r\n", "\n").replace('\r', '\n');
+    int lines = 1;
+    for (int index = 0; index < normalized.length(); index++) {
+      if (normalized.charAt(index) == '\n') lines++;
+    }
+    return normalized.endsWith("\n") ? lines - 1 : lines;
   }
 
   private static List<Span> inline(Node parent, TerminalStyle base) {
