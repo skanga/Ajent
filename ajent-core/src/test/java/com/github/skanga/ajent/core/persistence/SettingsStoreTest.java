@@ -23,6 +23,9 @@ class SettingsStoreTest {
         .isEqualTo("selected");
     assertThat(defaults.withFavoriteModels(List.of(new ModelId("favorite"))).favoriteModels())
         .containsExactly(new ModelId("favorite"));
+    Settings provider = defaults.withProviderModel("ollama", new ModelId("qwen"));
+    assertThat(provider.provider()).isEqualTo("ollama");
+    assertThat(provider.providerModels()).containsEntry("ollama", "qwen");
   }
   private static final ObjectMapper JSON = new ObjectMapper();
 

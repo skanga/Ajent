@@ -47,6 +47,7 @@ final class AgentSessionFactoryTest {
       loop.dispatch(new RuntimeMessage.Submit("hello", List.of()));
       waitFor(() -> captured.get() != null);
       assertThat(captured.get().model()).isEqualTo("qwen3:14b");
+      assertThat(captured.get().provider()).isEqualTo("ollama");
     }
 
     var liveProfile = new AtomicReference<>(Profile.WRITE);
@@ -63,7 +64,19 @@ final class AgentSessionFactoryTest {
       assertThat(captured.get().model()).isEqualTo("second");
     }
 
-    assertThat(captured.get().provider()).isEqualTo("ollama");
+    var liveConfiguration = new AtomicReference<>(base);
+    try (var loop = factory.create(
+        new Thread(new ThreadId("provider"), "Provider", List.of()), liveProfile::get,
+        (AgentSessionFactory.ConfigurationSource) liveConfiguration::get,
+        call -> new PermissionPort.Decision(true, false), (message, state) -> {})) {
+      liveConfiguration.set(new LiveProviderFactory.Configuration(
+          "openai", "third", new ProviderAuth.ApiKey("key"), "", tools.systemPrompt(),
+          65_536, Map.of()));
+      loop.dispatch(new RuntimeMessage.Submit("hello", List.of()));
+      waitFor(() -> captured.get() != null && "openai".equals(captured.get().provider()));
+      assertThat(captured.get().model()).isEqualTo("third");
+    }
+
     assertThat(factory.contextMax()).isEqualTo(32_768);
   }
 

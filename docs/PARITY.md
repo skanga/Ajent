@@ -104,5 +104,15 @@ in-flight HTTP request is never cancelled, while a tool continuation or later
 turn observes the new model. Selection and favorites are atomically persisted;
 an empty provider catalog retains the current model as a safe visible row.
 
+The provider picker now renders AgenTTY's eight ordered presets plus the
+custom-host sentinel and owns wraparound/jump/page navigation. Provider
+configuration is resolved at each stream launch, so a preset switch preserves
+the transcript and in-flight request while later launches observe the new
+backend. Switches resolve freshly saved Anthropic credentials and each
+provider's saved/environment key chain, refuse a hosted backend that would
+immediately 401, recall its last model, persist provider/model together, and
+open a fresh asynchronous model picker. The custom-host row is routed but its
+free-text login-modal handoff remains to be connected.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.

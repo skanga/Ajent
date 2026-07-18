@@ -18,6 +18,10 @@ import java.util.function.Supplier;
 
 /** Composes one independent live agent loop for an ACP or terminal session. */
 public final class AgentSessionFactory {
+  @FunctionalInterface
+  public interface ConfigurationSource {
+    LiveProviderFactory.Configuration get();
+  }
   private final ToolRuntimeFactory.Components tools;
   private final LiveProviderFactory.Configuration baseProvider;
   private final HttpClient client;
@@ -72,18 +76,29 @@ public final class AgentSessionFactory {
       Supplier<String> model,
       PermissionPort permissions,
       BiConsumer<RuntimeMessage, AgentState> observer) {
+    return create(thread, profile,
+        () -> withModel(Objects.requireNonNull(model.get(), "model value")),
+        permissions, observer);
+  }
+
+  public AgentLoop create(
+      Thread thread,
+      Supplier<Profile> profile,
+      ConfigurationSource configuration,
+      PermissionPort permissions,
+      BiConsumer<RuntimeMessage, AgentState> observer) {
     Objects.requireNonNull(thread, "thread");
     Objects.requireNonNull(profile, "profile");
-    Objects.requireNonNull(model, "model");
+    Objects.requireNonNull(configuration, "configuration");
     Objects.requireNonNull(permissions, "permissions");
     Objects.requireNonNull(observer, "observer");
     var reducer = new AgentReducer(new AgentReducer.Context(
         System::nanoTime, Instant::now, MessageId::random,
         call -> permission(call, Objects.requireNonNull(profile.get(), "profile value")),
         () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(0.80, 1.20),
-        () -> contextMax(withModel(Objects.requireNonNull(model.get(), "model value")))));
+        () -> contextMax(Objects.requireNonNull(configuration.get(), "provider configuration"))));
     ProviderPort provider = (turnId, messages, cancellation, sink) ->
-        providers.apply(withModel(Objects.requireNonNull(model.get(), "model value")), client)
+        providers.apply(Objects.requireNonNull(configuration.get(), "provider configuration"), client)
             .stream(turnId, messages, cancellation, sink);
     return new AgentLoop(
         AgentState.initial(thread), reducer, provider,

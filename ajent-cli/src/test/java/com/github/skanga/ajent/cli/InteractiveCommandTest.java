@@ -113,6 +113,43 @@ final class InteractiveCommandTest {
     state.set(withPhase(state.get(), new SessionPhase.Streaming(
         ActiveTurn.start(new CancellationSignal(), 1))));
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.provider).isEqualTo("ollama");
+    assertThat(terminal.bytes.toString()).contains("Providers").contains("provider: Ollama");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent); // closes model picker opened after switch
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.PAGE_DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.TAB), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("custom host requires login entry");
+
+    agent.rejectProvider = true;
+    ui.key(character('k', true), agent);
+    for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(character('x'), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("login required: Anthropic");
+    agent.rejectProvider = false;
+
+    ui.key(character('k', true), agent);
+    for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
     assertThat(agent.messages.getLast()).isInstanceOf(RuntimeMessage.Cancel.class);
     assertThat(ui.key(character('c', true), agent)).isFalse();
   }
@@ -130,6 +167,8 @@ final class InteractiveCommandTest {
     assertThat(ui.key(special(TerminalKey.SpecialKey.TAB), agent)).isTrue();
     assertThat(ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent)).isTrue();
     ui.key(character('a'), agent);
+    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
+    ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER, false, true, false), agent);
     ui.key(character('u', true), agent);
     ui.key(character('x'), agent);
@@ -166,6 +205,9 @@ final class InteractiveCommandTest {
     var ui = new InteractiveCommand.Ui(terminal, state,
         new InteractiveCommand.PermissionGate());
     var agent = new FakeAgent(state);
+    ui.key(character('k', true), agent);
+    for (int codePoint : "no such command".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     ui.key(character('k', true), agent);
     for (int codePoint : "compact".codePoints().toArray()) ui.key(character(codePoint), agent);
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
@@ -220,6 +262,21 @@ final class InteractiveCommandTest {
     for (int codePoint : "open model".codePoints().toArray()) ui.key(character(codePoint), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     ui.key(special(TerminalKey.SpecialKey.TAB), agent);
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+  }
+
+  @Test void modelPickerRendersLoadingBeforeDeferredCatalogArrives() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.deferModels = true;
+    ui.key(character('k', true), agent);
+    for (int codePoint : "open model".codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("loading");
+    agent.completeModels();
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
 
@@ -291,6 +348,16 @@ final class InteractiveCommandTest {
     terminal.size = new JLineTerminalSession.Size(20, 4);
     ui.render();
     assertThat(terminal.bytes.toString()).contains("read").contains("ready");
+  }
+
+  @Test void settledAssistantBeforeUserIsNotTreatedAsLiveTail() {
+    AgentState state = AgentState.initial(thread(List.of(
+        new Message(Role.ASSISTANT, "complete", List.of(), List.of()),
+        new Message(Role.USER, "next", List.of(), List.of()))));
+    var terminal = new FakeTerminal();
+    new InteractiveCommand.Ui(terminal, new AtomicReference<>(state),
+        new InteractiveCommand.PermissionGate()).render();
+    assertThat(terminal.bytes.toString()).contains("complete").contains("next");
   }
 
   @Test void streamingTranscriptRequestsFramesAndFinalizationSettles() {
@@ -414,6 +481,11 @@ final class InteractiveCommandTest {
     private Profile profile = Profile.ASK;
     private String model = "alpha";
     private List<String> favorites = List.of();
+    private String provider = "anthropic";
+    private boolean rejectProvider;
+    private boolean deferModels;
+    private java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>>
+        pendingModels;
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
     @Override public AgentState state() { return state.get(); }
     @Override public void dispatch(RuntimeMessage message) { messages.add(message); }
@@ -429,12 +501,34 @@ final class InteractiveCommandTest {
     @Override public String model() { return model; }
     @Override public void loadModels(
         java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>> receiver) {
-      receiver.accept(List.of(
+      if (deferModels) { pendingModels = receiver; return; }
+      receiver.accept(modelRows());
+    }
+    private List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model> modelRows() {
+      return List.of(
           new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("alpha", "Alpha", false),
-          new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("beta", "Beta", false)));
+          new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("beta", "Beta", false));
+    }
+    private void completeModels() {
+      deferModels = false;
+      java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>> next =
+          pendingModels;
+      pendingModels = null;
+      next.accept(modelRows());
     }
     @Override public void selectModel(String value) { model = value; }
     @Override public void saveFavorites(List<String> values) { favorites = List.copyOf(values); }
+    @Override public String provider() { return provider; }
+    @Override public List<com.github.skanga.ajent.terminal.ui.ProviderPicker.Provider> providers() {
+      return List.of(
+          new com.github.skanga.ajent.terminal.ui.ProviderPicker.Provider("anthropic", "Anthropic"),
+          new com.github.skanga.ajent.terminal.ui.ProviderPicker.Provider("ollama", "Ollama"));
+    }
+    @Override public boolean selectProvider(String value) {
+      if (rejectProvider) return false;
+      provider = value;
+      return true;
+    }
   }
 
   private static final class ManualAnimation implements InteractiveCommand.AnimationPort {

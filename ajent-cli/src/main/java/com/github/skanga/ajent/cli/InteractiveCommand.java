@@ -15,6 +15,7 @@ import com.github.skanga.ajent.provider.auth.CredentialResolver;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
 import com.github.skanga.ajent.provider.openai.ProviderAuthResolver;
+import com.github.skanga.ajent.provider.openai.ProviderRegistry;
 import com.github.skanga.ajent.runtime.AgentLoop;
 import com.github.skanga.ajent.runtime.AgentSessionFactory;
 import com.github.skanga.ajent.runtime.AgentState;
@@ -35,6 +36,7 @@ import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.ModelPicker;
 import com.github.skanga.ajent.terminal.ui.PickerState;
+import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
@@ -102,7 +104,7 @@ final class InteractiveCommand {
     var state = new AtomicReference<AgentState>();
     var activeLoop = new AtomicReference<AgentLoop>();
     var activeProfile = new AtomicReference<>(configured.profile());
-    var activeModel = new AtomicReference<>(configured.model());
+    var activeProvider = new AtomicReference<>(configured.providerConfiguration());
     var activeUi = new AtomicReference<Ui>();
     var permission = new PermissionGate();
     try (var animations = new FrameScheduler()) {
@@ -116,7 +118,8 @@ final class InteractiveCommand {
       var conversation = new com.github.skanga.ajent.domain.Thread(
           threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
       AgentLoop initialLoop = configured.sessions().create(conversation, activeProfile::get,
-          activeModel::get, permission, (message, next) -> {
+          (AgentSessionFactory.ConfigurationSource) activeProvider::get,
+          permission, (message, next) -> {
             state.set(next);
             Ui current = activeUi.get();
             if (current != null) current.render();
@@ -135,7 +138,8 @@ final class InteractiveCommand {
           var fresh = new com.github.skanga.ajent.domain.Thread(
               threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
           AgentLoop replacement = configured.sessions().create(fresh, activeProfile::get,
-              activeModel::get, permission, (message, next) -> {
+              (AgentSessionFactory.ConfigurationSource) activeProvider::get,
+              permission, (message, next) -> {
                 state.set(next);
                 Ui current = activeUi.get();
                 if (current != null) current.render();
@@ -154,32 +158,62 @@ final class InteractiveCommand {
           configured.settings().save(configured.settings().load().withProfile(next));
           return next;
         }
-        @Override public String model() { return activeModel.get(); }
+        @Override public String model() { return activeProvider.get().model(); }
         @Override public void loadModels(Consumer<List<ModelPicker.Model>> receiver) {
           Thread.startVirtualThread(() -> {
             List<com.github.skanga.ajent.provider.ProviderModel> discovered =
-                configured.provider().equals("anthropic")
-                    ? configured.models().listAnthropicModels(configured.auth())
-                    : configured.models().listModels(configured.auth(),
+                activeProvider.get().provider().equals("anthropic")
+                    ? configured.models().listAnthropicModels(activeProvider.get().auth())
+                    : configured.models().listModels(activeProvider.get().auth(),
                         com.github.skanga.ajent.provider.openai.Endpoint.fromSpec(
-                            configured.provider()));
+                            activeProvider.get().provider()));
             Settings saved = configured.settings().load();
             List<ModelPicker.Model> result = discovered.stream().map(model ->
                 new ModelPicker.Model(model.id(), model.displayName(),
                     saved.favoriteModels().contains(new ModelId(model.id())))).toList();
             if (result.isEmpty()) {
-              result = List.of(new ModelPicker.Model(activeModel.get(), activeModel.get(), false));
+              result = List.of(new ModelPicker.Model(model(), model(), false));
             }
             if (activeUi.get() != null) receiver.accept(result);
           });
         }
         @Override public void selectModel(String model) {
-          activeModel.set(model);
-          configured.settings().save(configured.settings().load().withModel(new ModelId(model)));
+          activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
+              current.provider(), model, current.auth(), current.effort(), current.systemPrompt(),
+              current.contextWindow(), current.environment()));
+          configured.settings().save(configured.settings().load().withProviderModel(
+              activeProvider.get().provider(), new ModelId(model)));
         }
         @Override public void saveFavorites(List<String> models) {
           configured.settings().save(configured.settings().load().withFavoriteModels(
               models.stream().map(ModelId::new).toList()));
+        }
+        @Override public String provider() { return activeProvider.get().provider(); }
+        @Override public List<ProviderPicker.Provider> providers() {
+          return ProviderRegistry.presets().stream()
+              .map(preset -> new ProviderPicker.Provider(preset.id(), preset.label())).toList();
+        }
+        @Override public boolean selectProvider(String provider) {
+          Settings saved = configured.settings().load();
+          CredentialResolver.Resolution anthropic = CredentialResolver.resolve(
+              "", environment, credentials.load(), System.currentTimeMillis());
+          ProviderAuth auth = ProviderAuthResolver.resolve(provider,
+              providerAuth(anthropic.credential()), "",
+              saved.providerKeys().getOrDefault(provider, ""), environment);
+          var preset = ProviderRegistry.presetFor(provider);
+          boolean needsKey = preset.isPresent()
+              && preset.orElseThrow().kind() == ProviderRegistry.Kind.OPENAI
+              && !preset.orElseThrow().local()
+              && preset.orElseThrow().authStyle() != ProviderRegistry.AuthStyle.NONE;
+          if (needsKey && auth.isEmpty()) return false;
+          String recalled = saved.providerModels().getOrDefault(provider, "");
+          if (recalled.isBlank()) recalled = activeProvider.get().model();
+          String selectedModel = recalled;
+          activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
+              provider, selectedModel, auth, current.effort(), current.systemPrompt(),
+              current.contextWindow(), current.environment()));
+          configured.settings().save(saved.withProviderModel(provider, new ModelId(selectedModel)));
+          return true;
         }
       };
       try {
@@ -257,7 +291,7 @@ final class InteractiveCommand {
     var providers = new LiveProviderFactory.Configuration(provider, model, auth, settings.effort(),
         tools.systemPrompt(), 0, environment);
     return new Configuration(new AgentSessionFactory(tools, providers, client, dataDirectory),
-        dataDirectory, profile, model, settingsStore, provider, auth,
+        dataDirectory, profile, model, settingsStore, providers,
         new ProviderModelCatalog(client));
   }
 
@@ -302,7 +336,8 @@ final class InteractiveCommand {
 
   record Configuration(
       AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
-      SettingsStore settings, String provider, ProviderAuth auth, ProviderModelCatalog models) {}
+      SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
+      ProviderModelCatalog models) {}
 
   interface TerminalPort {
     JLineTerminalSession.Size size();
@@ -318,6 +353,9 @@ final class InteractiveCommand {
     void loadModels(Consumer<List<ModelPicker.Model>> receiver);
     void selectModel(String model);
     void saveFavorites(List<String> models);
+    String provider();
+    List<ProviderPicker.Provider> providers();
+    boolean selectProvider(String provider);
   }
 
   interface AnimationPort {
@@ -379,6 +417,8 @@ final class InteractiveCommand {
     private CommandPalette.State palette = new CommandPalette.Closed();
     private ToolOutputViewer.State toolViewer = new ToolOutputViewer.Closed();
     private PickerState.OneAxis modelPicker = new PickerState.Closed();
+    private PickerState.OneAxis providerPicker = new PickerState.Closed();
+    private List<ProviderPicker.Provider> providerRows = List.of();
     private List<ModelPicker.Model> models = List.of();
     private boolean modelsLoading;
     private String uiStatus = "";
@@ -418,6 +458,7 @@ final class InteractiveCommand {
       }
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
       if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
+      if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
       if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
       if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
         int codePoint = Character.toLowerCase(character.codePoint());
@@ -538,6 +579,9 @@ final class InteractiveCommand {
                 openToolViewer(loop.state());
               } else if (command == CommandPalette.Command.OPEN_MODELS) {
                 openModelPicker(loop);
+              } else if (command == CommandPalette.Command.OPEN_PROVIDERS) {
+                providerRows = loop.providers();
+                providerPicker = ProviderPicker.open(providerRows, loop.provider());
               }
             }
           }
@@ -606,6 +650,45 @@ final class InteractiveCommand {
       return true;
     }
 
+    private boolean providerPickerKey(TerminalKey key, AgentControl loop) {
+      List<ProviderPicker.Provider> providers = providerRows;
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> providerPicker = new PickerState.Closed();
+          case UP -> providerPicker = ProviderPicker.move(providerPicker, providers, -1);
+          case DOWN -> providerPicker = ProviderPicker.move(providerPicker, providers, 1);
+          case HOME -> providerPicker = ProviderPicker.jump(
+              providerPicker, providers, ProviderPicker.Jump.HOME);
+          case END -> providerPicker = ProviderPicker.jump(
+              providerPicker, providers, ProviderPicker.Jump.END);
+          case PAGE_UP -> providerPicker = ProviderPicker.jump(
+              providerPicker, providers, ProviderPicker.Jump.PAGE_UP);
+          case PAGE_DOWN -> providerPicker = ProviderPicker.jump(
+              providerPicker, providers, ProviderPicker.Jump.PAGE_DOWN);
+          case ENTER -> {
+            ProviderPicker.Selection selected = ProviderPicker.select(providerPicker, providers);
+            providerPicker = selected.state();
+            selected.action().ifPresent(action -> {
+              if (action instanceof ProviderPicker.SelectProvider choice) {
+                if (loop.selectProvider(choice.provider().id())) {
+                  uiStatus = "provider: " + choice.provider().label();
+                  models = List.of();
+                  openModelPicker(loop);
+                } else {
+                  uiStatus = "login required: " + choice.provider().label();
+                }
+              } else {
+                uiStatus = "custom host requires login entry";
+              }
+            });
+          }
+          default -> { }
+        }
+      }
+      render();
+      return true;
+    }
+
     private void resetForNewThread() {
       synchronized (lock) {
         composer = "";
@@ -615,6 +698,7 @@ final class InteractiveCommand {
         palette = new CommandPalette.Closed();
         toolViewer = new ToolOutputViewer.Closed();
         modelPicker = new PickerState.Closed();
+        providerPicker = new PickerState.Closed();
         uiStatus = "";
         frame = new InlineFrameRenderer.Empty();
         terminal.write("\u001b[2J\u001b[3J\u001b[H");
@@ -684,6 +768,18 @@ final class InteractiveCommand {
             String marker = index == open.index() ? "› " : "  ";
             String favorite = model.favorite() ? "★ " : "  ";
             lines.add(new StyledLine(marker + favorite + model.displayName(),
+                index == open.index() ? Style.ACCENT : Style.NORMAL));
+          }
+        }
+        if (providerPicker instanceof PickerState.OpenAt open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Providers", Style.ACCENT));
+          List<ProviderPicker.Provider> providers = providerRows;
+          for (int index = 0; index <= providers.size(); index++) {
+            String label = index == providers.size()
+                ? "Custom host…" : providers.get(index).label();
+            lines.add(new StyledLine((index == open.index() ? "› " : "  ") + label,
                 index == open.index() ? Style.ACCENT : Style.NORMAL));
           }
         }

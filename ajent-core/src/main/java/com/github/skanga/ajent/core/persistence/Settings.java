@@ -4,6 +4,7 @@ import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.domain.Profile;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 
 /** Immutable user settings persisted by AgenTTY's filesystem store. */
@@ -46,5 +47,12 @@ public record Settings(
   public Settings withFavoriteModels(List<ModelId> values) {
     return new Settings(modelId, profile, values, provider, providerKeys,
         providerModels, effort, alwaysAllowTools);
+  }
+
+  public Settings withProviderModel(String providerId, ModelId value) {
+    var models = new LinkedHashMap<>(providerModels);
+    models.put(providerId, value.value());
+    return new Settings(value, profile, favoriteModels, providerId, providerKeys,
+        models, effort, alwaysAllowTools);
   }
 }
