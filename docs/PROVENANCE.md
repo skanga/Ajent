@@ -20,7 +20,7 @@ Reference-derived work currently includes:
 | Salvaged-call re-leak reducer | `src/runtime/app/cmd_factory.cpp`, `tests/salvage_dedup_test.cpp` |
 | Composer word deletion, attachment placeholders, and undo | `src/runtime/app/update/composer.cpp`, `src/runtime/composer_attachment.cpp`, `src/runtime/view/helpers.cpp`, `tests/composer_edit_test.cpp` |
 | Workspace file/symbol indexing, scored matching, picker reducers, and lazy attachment expansion | `src/workspace/files.cpp`, `src/workspace/symbols.cpp`, `include/agentty/runtime/mention_palette.hpp`, `include/agentty/runtime/symbol_palette.hpp`, `src/runtime/app/update/mention.cpp`, `src/runtime/app/update/symbol.cpp`, `src/runtime/view/pickers.cpp` |
-| Always-chip text paste, image sniff/path ingestion, and smart clipboard routing | `src/runtime/app/update/composer.cpp`, `src/io/clipboard.cpp`, `include/agentty/io/clipboard.hpp`, `src/runtime/composer_attachment.cpp` |
+| Always-chip text paste, image sniff/path ingestion, smart clipboard routing, and OSC query fallback | `src/runtime/app/update/composer.cpp`, `src/io/clipboard.cpp`, `include/agentty/io/clipboard.hpp`, `src/runtime/composer_attachment.cpp`, `maya/src/terminal/ansi.cpp`, `maya/src/app/app.cpp` |
 | Structured bounded-LCS hunks, unified rendering/reconstruction, and review reducer | `src/diff/diff.cpp`, `include/agentty/diff/diff.hpp`, `src/runtime/app/update/diff.cpp`, `src/runtime/view/diff_review.cpp` |
 | CLI reference fixtures | downloaded AgenTTY 0.2.8 Windows binary plus `src/runtime/main.cpp` |
 

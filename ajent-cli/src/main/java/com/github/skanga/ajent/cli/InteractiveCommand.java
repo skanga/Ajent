@@ -36,6 +36,7 @@ import com.github.skanga.ajent.runtime.RuntimeMessage;
 import com.github.skanga.ajent.runtime.ToolCompletion;
 import com.github.skanga.ajent.terminal.JLineTerminalSession;
 import com.github.skanga.ajent.terminal.input.TerminalEvent;
+import com.github.skanga.ajent.terminal.input.TerminalClipboardQuery;
 import com.github.skanga.ajent.terminal.input.TerminalKey;
 import com.github.skanga.ajent.terminal.render.CanvasSerializer;
 import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
@@ -928,7 +929,13 @@ final class InteractiveCommand {
         return;
       }
       Optional<String> text = clipboard.text();
-      if (text.isPresent() && !text.orElseThrow().isEmpty()) paste(text.orElseThrow());
+      if (text.isPresent() && !text.orElseThrow().isEmpty()) {
+        paste(text.orElseThrow());
+        return;
+      }
+      uiStatus = "reading clipboard from your terminal\u2026";
+      terminal.write(TerminalClipboardQuery.forEnvironment(environment));
+      render();
     }
 
     private boolean mentionKey(TerminalKey key) {

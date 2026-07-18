@@ -310,6 +310,29 @@ final class InteractiveCommandTest {
     emptyUi.key(special(TerminalKey.SpecialKey.ENTER), emptyAgent);
     assertThat(((RuntimeMessage.Submit) emptyAgent.messages.getLast()).attachments())
         .hasSize(1);
+
+    var unavailable = new com.github.skanga.ajent.tools.attachment.ClipboardReader() {
+      @Override public Optional<com.github.skanga.ajent.domain.Attachment> image() {
+        return Optional.empty();
+      }
+      @Override public Optional<String> text() { return Optional.empty(); }
+    };
+    var queryTerminal = new FakeTerminal();
+    var queryUi = new InteractiveCommand.Ui(queryTerminal, state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(),
+        Map.of("TERM", "xterm-kitty"), unavailable);
+    var queryAgent = new FakeAgent(state);
+    queryUi.key(character(22, true), queryAgent);
+    assertThat(queryTerminal.bytes.toString())
+        .contains(com.github.skanga.ajent.terminal.input.TerminalClipboardQuery.OSC_5522_KITTY)
+        .contains("reading clipboard from your terminal");
+    assertThat(queryAgent.messages).isEmpty();
+    queryUi.paste(png); // decoded OSC 5522 reply re-enters the ordinary paste path
+    queryUi.key(special(TerminalKey.SpecialKey.ENTER), queryAgent);
+    assertThat(((RuntimeMessage.Submit) queryAgent.messages.getLast()).attachments())
+        .singleElement().satisfies(attachment ->
+            assertThat(attachment.kind()).isEqualTo(
+                com.github.skanga.ajent.domain.Attachment.Kind.IMAGE));
   }
 
   @Test void composerCoversIdleControlsBoundariesAndIgnoredKeys() {
