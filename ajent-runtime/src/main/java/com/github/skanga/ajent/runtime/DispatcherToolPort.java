@@ -18,7 +18,8 @@ public final class DispatcherToolPort implements ToolPort {
   @Override public ToolCompletion execute(ToolUse call) {
     try {
       return switch (dispatcher.execute(call.name().value(), JSON.valueToTree(call.arguments()))) {
-        case ToolResult.Success success -> new ToolCompletion.Success(success.output().text());
+        case ToolResult.Success success -> new ToolCompletion.Success(
+            success.output().text(), success.output().change());
         case ToolResult.Failure failure -> new ToolCompletion.Failure(failure.error().render());
       };
     } catch (RuntimeException exception) {

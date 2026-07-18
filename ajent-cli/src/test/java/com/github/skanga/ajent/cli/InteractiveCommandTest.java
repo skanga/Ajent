@@ -319,6 +319,56 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
 
+  @Test void liveDiffReviewRoutesHunksAndPaletteWideActions() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.changes = List.of(
+        new com.github.skanga.ajent.terminal.ui.DiffReview.File("a.txt", List.of(
+            new com.github.skanga.ajent.terminal.ui.DiffReview.Hunk("-old\n+new",
+                com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING))),
+        new com.github.skanga.ajent.terminal.ui.DiffReview.File("b.txt", List.of(
+            new com.github.skanga.ajent.terminal.ui.DiffReview.Hunk("+body",
+                com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING))));
+    selectCommand(ui, agent, "review changes");
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(character('a'), agent);
+    ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
+    ui.key(character('r'), agent);
+    ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
+    ui.key(character('x'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+    assertThat(terminal.bytes.toString()).contains("hanges  a.txt");
+
+    selectCommand(ui, agent, "accept all");
+    assertThat(terminal.bytes.toString()).contains("accepted 2 hunks");
+    selectCommand(ui, agent, "reject all");
+    assertThat(agent.changes).isEmpty();
+  }
+
+  @Test void structuredToolCompletionBuildsReviewPatch() {
+    var changes = new AtomicReference<List<com.github.skanga.ajent.tools.runtime.FileChange>>(
+        List.of());
+    InteractiveCommand.recordChange(new RuntimeMessage.Tick(), changes);
+    var change = new com.github.skanga.ajent.tools.runtime.FileChange(
+        "file.txt", 1, 1, "old", "new");
+    InteractiveCommand.recordChange(new RuntimeMessage.ToolCompleted(1, "call",
+        new com.github.skanga.ajent.runtime.ToolCompletion.Success(
+            "ok", Optional.of(change))), changes);
+    assertThat(changes.get()).containsExactly(change);
+    assertThat(InteractiveCommand.reviewFile(change).hunks().getFirst().patch())
+        .contains("--- file.txt", "-old", "+new");
+  }
+
+  private static void selectCommand(
+      InteractiveCommand.Ui ui, FakeAgent agent, String query) {
+    ui.key(character('k', true), agent);
+    for (int codePoint : query.codePoints().toArray()) ui.key(character(codePoint), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+  }
+
   @Test void liveLoginSupportsAnthropicKeyAndOauthBrowserExchange() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
@@ -632,6 +682,7 @@ final class InteractiveCommandTest {
     private boolean failCustomHost;
     private boolean deferOAuth;
     private java.util.function.Consumer<String> pendingOAuth;
+    private List<com.github.skanga.ajent.terminal.ui.DiffReview.File> changes = List.of();
     private java.util.function.Consumer<List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model>>
         pendingModels;
     FakeAgent(AtomicReference<AgentState> state) { this.state = state; }
@@ -710,6 +761,10 @@ final class InteractiveCommandTest {
       pendingOAuth = null;
       next.accept(failure);
     }
+    @Override public List<com.github.skanga.ajent.terminal.ui.DiffReview.File> pendingChanges() {
+      return changes;
+    }
+    @Override public void clearPendingChanges() { changes = List.of(); }
   }
 
   private static final class ManualAnimation implements InteractiveCommand.AnimationPort {

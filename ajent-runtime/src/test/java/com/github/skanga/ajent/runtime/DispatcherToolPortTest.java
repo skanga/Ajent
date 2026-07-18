@@ -23,7 +23,17 @@ final class DispatcherToolPortTest {
     var port = new DispatcherToolPort(dispatcher);
     ToolCompletion success = port.execute(call("read", Map.of("path", "note.txt")));
     assertThat(success).isInstanceOfSatisfying(ToolCompletion.Success.class,
-        result -> assertThat(result.output()).contains("hello from file"));
+        result -> {
+          assertThat(result.output()).contains("hello from file");
+          assertThat(result.change()).isEmpty();
+        });
+    ToolCompletion written = port.execute(call("write", Map.of(
+        "path", "changed.txt", "content", "new body")));
+    assertThat(written).isInstanceOfSatisfying(ToolCompletion.Success.class,
+        result -> assertThat(result.change()).hasValueSatisfying(change -> {
+          assertThat(change.path()).endsWith("changed.txt");
+          assertThat(change.after()).isEqualTo("new body");
+        }));
     ToolCompletion failure = port.execute(call("does_not_exist", Map.of()));
     assertThat(failure).isInstanceOfSatisfying(ToolCompletion.Failure.class,
         result -> assertThat(result.error()).contains("[unknown]", "unknown tool"));

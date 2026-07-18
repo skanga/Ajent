@@ -24,6 +24,7 @@ import com.github.skanga.ajent.runtime.AgentState;
 import com.github.skanga.ajent.runtime.LiveProviderFactory;
 import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.RuntimeMessage;
+import com.github.skanga.ajent.runtime.ToolCompletion;
 import com.github.skanga.ajent.terminal.JLineTerminalSession;
 import com.github.skanga.ajent.terminal.input.TerminalEvent;
 import com.github.skanga.ajent.terminal.input.TerminalKey;
@@ -36,6 +37,7 @@ import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.TextReveal;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
+import com.github.skanga.ajent.terminal.ui.DiffReview;
 import com.github.skanga.ajent.terminal.ui.ModelPicker;
 import com.github.skanga.ajent.terminal.ui.LoginModal;
 import com.github.skanga.ajent.terminal.ui.PickerState;
@@ -43,6 +45,7 @@ import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
+import com.github.skanga.ajent.tools.runtime.FileChange;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -111,6 +114,7 @@ final class InteractiveCommand {
     var activeProfile = new AtomicReference<>(configured.profile());
     var activeProvider = new AtomicReference<>(configured.providerConfiguration());
     var activeUi = new AtomicReference<Ui>();
+    var pendingChanges = new AtomicReference<List<FileChange>>(List.of());
     var permission = new PermissionGate();
     try (var animations = new FrameScheduler()) {
       var ui = new Ui(new TerminalPort() {
@@ -125,6 +129,7 @@ final class InteractiveCommand {
       AgentLoop initialLoop = configured.sessions().create(conversation, activeProfile::get,
           (AgentSessionFactory.ConfigurationSource) activeProvider::get,
           permission, (message, next) -> {
+            recordChange(message, pendingChanges);
             state.set(next);
             Ui current = activeUi.get();
             if (current != null) current.render();
@@ -146,12 +151,14 @@ final class InteractiveCommand {
           AgentLoop replacement = configured.sessions().create(fresh, activeProfile::get,
               (AgentSessionFactory.ConfigurationSource) activeProvider::get,
               permission, (message, next) -> {
+                recordChange(message, pendingChanges);
                 state.set(next);
                 Ui current = activeUi.get();
                 if (current != null) current.render();
               });
           activeLoop.set(replacement);
           state.set(replacement.state());
+          pendingChanges.set(List.of());
         }
         @Override public Profile cycleProfile() {
           Profile next = switch (activeProfile.get()) {
@@ -276,6 +283,10 @@ final class InteractiveCommand {
             completed.accept(saved ? "" : "failed to save credentials");
           });
         }
+        @Override public List<DiffReview.File> pendingChanges() {
+          return pendingChanges.get().stream().map(InteractiveCommand::reviewFile).toList();
+        }
+        @Override public void clearPendingChanges() { pendingChanges.set(List.of()); }
       };
       try {
         terminal.onResize(ignored -> ui.render());
@@ -356,6 +367,30 @@ final class InteractiveCommand {
         new ProviderModelCatalog(client));
   }
 
+  static void recordChange(
+      RuntimeMessage message, AtomicReference<List<FileChange>> changes) {
+    if (message instanceof RuntimeMessage.ToolCompleted completed
+        && completed.result() instanceof ToolCompletion.Success success
+        && success.change().isPresent()) {
+      changes.updateAndGet(existing -> {
+        var revised = new ArrayList<>(existing);
+        revised.add(success.change().orElseThrow());
+        return List.copyOf(revised);
+      });
+    }
+  }
+
+  static DiffReview.File reviewFile(FileChange change) {
+    String patch = "--- " + change.path() + "\n+++ " + change.path() + "\n"
+        + change.before().lines().map(line -> "-" + line).collect(
+            java.util.stream.Collectors.joining("\n"))
+        + (change.before().isEmpty() || change.after().isEmpty() ? "" : "\n")
+        + change.after().lines().map(line -> "+" + line).collect(
+            java.util.stream.Collectors.joining("\n"));
+    return new DiffReview.File(change.path(), List.of(
+        new DiffReview.Hunk(patch, DiffReview.Status.PENDING)));
+  }
+
   private Path resolveDocs(Path workspace) {
     String configured = environment.getOrDefault("AGENTTY_DOCS_DIR", "");
     if (!configured.isBlank()) {
@@ -423,6 +458,8 @@ final class InteractiveCommand {
     boolean installProviderKey(String provider, String key);
     boolean switchCustomHost(String specification);
     void exchangeOAuth(LoginModal.ExchangeOAuth exchange, Consumer<String> completed);
+    List<DiffReview.File> pendingChanges();
+    void clearPendingChanges();
   }
 
   interface AnimationPort {
@@ -487,6 +524,8 @@ final class InteractiveCommand {
     private PickerState.OneAxis providerPicker = new PickerState.Closed();
     private List<ProviderPicker.Provider> providerRows = List.of();
     private LoginModal.State login = new LoginModal.Closed();
+    private PickerState.TwoAxis diffReview = new PickerState.CellClosed();
+    private List<DiffReview.File> diffFiles = List.of();
     private List<ModelPicker.Model> models = List.of();
     private boolean modelsLoading;
     private String uiStatus = "";
@@ -525,6 +564,7 @@ final class InteractiveCommand {
         return true;
       }
       if (LoginModal.isOpen(login)) return loginKey(key, loop);
+      if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key);
       if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
       if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
       if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
@@ -653,6 +693,24 @@ final class InteractiveCommand {
                 providerPicker = ProviderPicker.open(providerRows, loop.provider());
               } else if (command == CommandPalette.Command.OPEN_LOGIN) {
                 login = LoginModal.open();
+              } else if (command == CommandPalette.Command.REVIEW_CHANGES) {
+                DiffReview.Result opened = DiffReview.open(loop.pendingChanges());
+                diffReview = opened.state();
+                diffFiles = opened.files();
+                uiStatus = opened.status();
+              } else if (command == CommandPalette.Command.ACCEPT_ALL) {
+                if (diffFiles.isEmpty()) diffFiles = loop.pendingChanges();
+                DiffReview.Result accepted = DiffReview.acceptAll(diffReview, diffFiles);
+                diffReview = accepted.state();
+                diffFiles = accepted.files();
+                uiStatus = accepted.status();
+              } else if (command == CommandPalette.Command.REJECT_ALL) {
+                if (diffFiles.isEmpty()) diffFiles = loop.pendingChanges();
+                DiffReview.Result rejected = DiffReview.rejectAll(diffReview, diffFiles);
+                diffReview = rejected.state();
+                diffFiles = rejected.files();
+                uiStatus = rejected.status();
+                loop.clearPendingChanges();
               }
             }
           }
@@ -785,6 +843,29 @@ final class InteractiveCommand {
       return true;
     }
 
+    private boolean diffReviewKey(TerminalKey key) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        diffReview = switch (special) {
+          case ESCAPE -> DiffReview.close(diffReview);
+          case UP -> DiffReview.move(diffReview, diffFiles, -1);
+          case DOWN -> DiffReview.move(diffReview, diffFiles, 1);
+          case LEFT -> DiffReview.previousFile(diffReview, diffFiles);
+          case RIGHT -> DiffReview.nextFile(diffReview, diffFiles);
+          default -> diffReview;
+        };
+      } else if (key.key() instanceof TerminalKey.CharacterKey character) {
+        DiffReview.Result changed = switch (Character.toLowerCase(character.codePoint())) {
+          case 'a' -> DiffReview.acceptHunk(diffReview, diffFiles);
+          case 'r' -> DiffReview.rejectHunk(diffReview, diffFiles);
+          default -> new DiffReview.Result(diffReview, diffFiles, "");
+        };
+        diffReview = changed.state();
+        diffFiles = changed.files();
+      }
+      render();
+      return true;
+    }
+
     private void applyLogin(LoginModal.Transition transition, AgentControl loop) {
       login = transition.state();
       transition.action().ifPresent(action -> {
@@ -838,6 +919,8 @@ final class InteractiveCommand {
         modelPicker = new PickerState.Closed();
         providerPicker = new PickerState.Closed();
         login = new LoginModal.Closed();
+        diffReview = new PickerState.CellClosed();
+        diffFiles = List.of();
         uiStatus = "";
         frame = new InlineFrameRenderer.Empty();
         terminal.write("\u001b[2J\u001b[3J\u001b[H");
@@ -956,6 +1039,19 @@ final class InteractiveCommand {
             case LoginModal.Failed failed ->
                 lines.add(new StyledLine("error: " + failed.message(), Style.DANGER));
             case LoginModal.Closed ignored -> { }
+        }
+        if (diffReview instanceof PickerState.OpenAtCell cell && !diffFiles.isEmpty()) {
+          DiffReview.File file = diffFiles.get(cell.fileIndex());
+          DiffReview.Hunk hunk = file.hunks().get(cell.hunkIndex());
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Changes  " + file.path(), Style.ACCENT));
+          lines.add(new StyledLine("[a] accept  [r] reject  ←/→ file", Style.MUTED));
+          wrap(lines, hunk.patch(), width, switch (hunk.status()) {
+            case PENDING -> Style.NORMAL;
+            case ACCEPTED -> Style.ACCENT;
+            case REJECTED -> Style.DANGER;
+          });
         }
         var canvas = new TerminalCanvas(width, Math.max(1, lines.size()));
         int normal = 0;

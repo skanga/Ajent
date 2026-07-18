@@ -123,5 +123,13 @@ persists encrypted API-key/OAuth credentials (including expiry), installs
 fresh Anthropic auth into future launches, saves provider keys before a
 hosted switch, and refetches models after provider/custom-host completion.
 
+Filesystem write/edit completions now preserve their structured `FileChange`
+through the runtime adapter instead of dropping it. The interactive controller
+accumulates a per-thread pending ledger; Review changes renders a two-axis
+file/hunk modal with accept/reject and file navigation, while palette-wide
+Accept all / Reject all update or clear the same ledger with native count
+statuses. Each tool change is currently projected as one before/after hunk;
+native multi-hunk diff splitting remains a refinement.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.
