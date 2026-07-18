@@ -46,6 +46,7 @@ import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.TextReveal;
+import com.github.skanga.ajent.terminal.render.TextRevealEffect;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
 import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
@@ -2075,7 +2076,16 @@ final class InteractiveCommand {
             case NORMAL -> normal; case ACCENT -> accent; case MUTED -> muted;
             case DANGER -> danger; case SUCCESS -> success;
           };
-          canvas.writeText(0, row, line.text(), style);
+          if (line.spans().isEmpty()) {
+            canvas.writeText(0, row, line.text(), style);
+          } else {
+            int column = 0;
+            for (StyledSpan span : line.spans()) {
+              canvas.writeText(column, row, span.text(), styles.intern(span.style()));
+              column += com.github.skanga.ajent.terminal.render.UnicodeWidth.stringWidth(
+                  span.text(), com.github.skanga.ajent.terminal.render.UnicodeWidth.Mode.MODERN);
+            }
+          }
         }
         var rows = CanvasSerializer.contentRows(canvas);
         frame = render(frame, canvas, rows, Math.max(1, size.rows()), styles,
@@ -2122,6 +2132,7 @@ final class InteractiveCommand {
         if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
         output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
         String text = AttachmentText.display(message.text(), message.attachments());
+        TextRevealEffect.Decoration visual = null;
         boolean revealable = message.role() == Role.ASSISTANT
             && messageIndex == messages.size() - 1;
         if (revealable) {
@@ -2136,9 +2147,11 @@ final class InteractiveCommand {
             revealFrame = reveal.update(text, streaming, nowNanos);
           }
           text = revealFrame.text();
-          animating |= revealFrame.animating();
+          visual = revealFrame.visual(TerminalStyle.EMPTY);
+          animating |= revealFrame.requiresAnimation();
         }
-        wrap(output, text, width, Style.NORMAL);
+        if (visual == null) wrap(output, text, width, Style.NORMAL);
+        else wrapReveal(output, visual, width);
         Map<String, java.util.Set<Integer>> grepHits =
             ToolBodyPreview.collectGrepHits(message.toolCalls());
         for (ToolUse call : message.toolCalls()) {
@@ -2180,8 +2193,45 @@ final class InteractiveCommand {
       }
     }
 
+    private static void wrapReveal(
+        List<StyledLine> lines, TextRevealEffect.Decoration decoration, int width) {
+      var spans = new ArrayList<StyledSpan>();
+      var text = new StringBuilder();
+      int columns = 0;
+      for (TextRevealEffect.Glyph glyph : decoration.glyphs()) {
+        if (glyph.sourceCodePoint() == '\n') {
+          lines.add(new StyledLine(text.toString(), Style.NORMAL, List.copyOf(spans)));
+          spans.clear();
+          text.setLength(0);
+          columns = 0;
+          continue;
+        }
+        int glyphWidth = com.github.skanga.ajent.terminal.render.UnicodeWidth.of(
+            glyph.sourceCodePoint());
+        if (columns > 0 && columns + glyphWidth > width) {
+          lines.add(new StyledLine(text.toString(), Style.NORMAL, List.copyOf(spans)));
+          spans.clear();
+          text.setLength(0);
+          columns = 0;
+        }
+        text.append(glyph.text());
+        if (!spans.isEmpty() && spans.getLast().style().equals(glyph.style())) {
+          StyledSpan previous = spans.removeLast();
+          spans.add(new StyledSpan(previous.text() + glyph.text(), previous.style()));
+        } else {
+          spans.add(new StyledSpan(glyph.text(), glyph.style()));
+        }
+        columns += glyphWidth;
+      }
+      lines.add(new StyledLine(text.toString(), Style.NORMAL, List.copyOf(spans)));
+    }
+
     private enum Style { NORMAL, ACCENT, MUTED, DANGER, SUCCESS }
-    private record StyledLine(String text, Style style) {}
+    private record StyledSpan(String text, TerminalStyle style) {}
+    private record StyledLine(String text, Style style, List<StyledSpan> spans) {
+      private StyledLine(String text, Style style) { this(text, style, List.of()); }
+      private StyledLine { spans = List.copyOf(spans); }
+    }
     private record RenderedLines(List<StyledLine> lines, boolean animating) {}
 
     private static String displayTool(String name) {

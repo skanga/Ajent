@@ -1144,12 +1144,13 @@ final class InteractiveCommandTest {
     ui.render();
     assertThat(animation.requested).isEqualTo(1);
     assertThat(terminal.bytes.toString()).doesNotContain("abcdef");
+    assertThat(terminal.bytes.toString()).contains("38;2;");
     animation.now = 20_000_000;
     animation.runFrame();
     assertThat(animation.requested).isEqualTo(2);
 
     state.set(withPhase(state.get(), new SessionPhase.Idle()));
-    for (int index = 0; index < 20 && animation.frame != null; index++) {
+    for (int index = 0; index < 50 && animation.frame != null; index++) {
       animation.now += 16_000_000;
       animation.runFrame();
     }

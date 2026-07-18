@@ -52,4 +52,38 @@ final class TextRevealTest {
     assertThat(completed.animating()).isFalse();
     assertThat(completed.text()).isEqualTo("abc");
   }
+
+  @Test void visualFrameGhostsAheadOfCursorPulsesAtLiveEdgeAndSettlesCleanly() {
+    var reveal = new TextReveal(90, 0.15, 0.16);
+    TextReveal.Frame initial = reveal.begin("abc", true, 0);
+    assertThat(initial.visual(TerminalStyle.EMPTY).text()).isEqualTo("a  ");
+    assertThat(initial.requiresAnimation()).isTrue();
+
+    TextReveal.Frame caught = reveal.update("abc", true, 1_000_000_000L);
+    assertThat(caught.animating()).isFalse();
+    assertThat(UnicodeWidth.stringWidth(caught.visual(TerminalStyle.EMPTY).text(),
+        UnicodeWidth.Mode.MODERN)).isEqualTo(3);
+    assertThat(caught.visual(TerminalStyle.EMPTY).text()).isNotEqualTo("abc");
+    assertThat(caught.visual(TerminalStyle.EMPTY).glyphs().getLast().style().bold()).isTrue();
+    assertThat(caught.requiresAnimation()).isTrue();
+
+    TextReveal.Frame closing = reveal.update("abc", false, 1_016_000_000L);
+    assertThat(closing.requiresAnimation()).isTrue();
+    TextReveal.Frame settled = reveal.update("abc", false, 1_500_000_000L);
+    assertThat(settled.visual(TerminalStyle.EMPTY).text()).isEqualTo("abc");
+    assertThat(settled.visual(TerminalStyle.EMPTY).glyphs())
+        .allSatisfy(glyph -> assertThat(glyph.style()).isEqualTo(TerminalStyle.EMPTY));
+    assertThat(settled.requiresAnimation()).isFalse();
+
+    var quietReveal = new TextReveal();
+    quietReveal.begin("abc", true, 0);
+    quietReveal.update("abc", true, 1_000_000_000L);
+    assertThat(quietReveal.update("abc", true, 5_100_000_000L).requiresAnimation()).isFalse();
+
+    var resumed = new TextReveal();
+    resumed.begin("abc", false, 0);
+    TextReveal.Frame resumedLive = resumed.update("abc", true, 1_000_000);
+    assertThat(resumedLive.requiresAnimation()).isTrue();
+    assertThat(resumedLive.visual(TerminalStyle.EMPTY).glyphs().getLast().style().bold()).isTrue();
+  }
 }

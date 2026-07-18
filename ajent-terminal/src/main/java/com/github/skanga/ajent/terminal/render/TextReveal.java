@@ -10,7 +10,10 @@ public final class TextReveal {
   private final double finalizeSeconds;
   private String source = "";
   private long lastNanos;
+  private long lastRevealNanos;
+  private int lastRevealed;
   private boolean live;
+  private boolean effects;
 
   public TextReveal() {
     this(90, 0.15, 0.16);
@@ -26,10 +29,13 @@ public final class TextReveal {
     source = Objects.requireNonNull(text, "text");
     cursor.reset();
     lastNanos = nowNanos;
+    lastRevealNanos = nowNanos;
     live = streaming;
+    effects = streaming;
     int total = source.codePointCount(0, source.length());
     if (!streaming) cursor.setPosition(total);
-    return frame(total);
+    lastRevealed = streaming ? 0 : total;
+    return frame(total, nowNanos);
   }
 
   /** Reconciles a streaming snapshot and advances the cursor by wall-clock time. */
@@ -42,32 +48,73 @@ public final class TextReveal {
       cursor.reset();
       if (!streaming) cursor.setPosition(total);
       lastNanos = nowNanos;
+      lastRevealNanos = nowNanos;
       live = streaming;
-      return frame(total);
+      effects = streaming;
+      lastRevealed = streaming ? 0 : total;
+      return frame(total, nowNanos);
     }
     source = text;
     if (live && !streaming) cursor.setDeadline(finalizeSeconds);
-    else if (streaming) cursor.clearDeadline();
+    else if (streaming) {
+      cursor.clearDeadline();
+      effects = true;
+    }
     live = streaming;
     double elapsed = Math.max(0, nowNanos - lastNanos) / 1_000_000_000.0;
     cursor.tick(total, Math.min(FRAME_GAP_CAP_SECONDS, elapsed));
     lastNanos = nowNanos;
-    return frame(total);
+    return frame(total, nowNanos);
   }
 
-  private Frame frame(int total) {
+  private Frame frame(int total, long nowNanos) {
     int revealed = Math.min(total, Math.max(0, (int) cursor.position()));
+    if (revealed != lastRevealed) {
+      lastRevealNanos = nowNanos;
+      lastRevealed = revealed;
+    }
     int end = source.offsetByCodePoints(0, revealed);
-    return new Frame(source.substring(0, end), revealed < total, revealed, total);
+    long edgeAgeMillis = Math.max(0, nowNanos - lastRevealNanos) / 1_000_000;
+    return new Frame(source.substring(0, end), revealed < total, revealed, total,
+        source, nowNanos / 1_000_000, edgeAgeMillis, live, effects);
   }
 
   public record Frame(String text, boolean animating, int revealedCodePoints,
-                      int totalCodePoints) {
+                      int totalCodePoints, String source, long totalMillis,
+                      long edgeAgeMillis, boolean live, boolean effects) {
+    private static final long SCRAMBLE_SETTLE_MILLIS = 220 + 6 * 26;
+    private static final long CARET_PULSE_WINDOW_MILLIS = 4_000;
+
+    public Frame(String text, boolean animating, int revealedCodePoints, int totalCodePoints) {
+      this(text, animating, revealedCodePoints, totalCodePoints, text, 0, 1_000, false, false);
+    }
+
     public Frame {
       text = Objects.requireNonNull(text, "text");
+      source = Objects.requireNonNull(source, "source");
       if (revealedCodePoints < 0 || totalCodePoints < revealedCodePoints) {
         throw new IllegalArgumentException("invalid reveal bounds");
       }
+    }
+
+    public TextRevealEffect.Decoration visual(TerminalStyle base) {
+      boolean active = effects && (live || animating
+          || edgeAgeMillis < SCRAMBLE_SETTLE_MILLIS);
+      TextRevealEffect.Parameters parameters = TextRevealEffect.Parameters.defaults(
+          totalMillis, active ? edgeAgeMillis : 1_000,
+          active ? revealedCodePoints : totalCodePoints, totalCodePoints);
+      if (active && revealedCodePoints < totalCodePoints) {
+        parameters = parameters.withClip(totalCodePoints - revealedCodePoints);
+      }
+      TextRevealEffect.Decoration decorated =
+          TextRevealEffect.decorate(source, base, parameters.withScramble(active));
+      return live && !animating
+          ? TextRevealEffect.decorateEndCaret(decorated, totalMillis, 650) : decorated;
+    }
+
+    public boolean requiresAnimation() {
+      return animating || live && edgeAgeMillis <= CARET_PULSE_WINDOW_MILLIS
+          || effects && edgeAgeMillis < SCRAMBLE_SETTLE_MILLIS;
     }
   }
 }
