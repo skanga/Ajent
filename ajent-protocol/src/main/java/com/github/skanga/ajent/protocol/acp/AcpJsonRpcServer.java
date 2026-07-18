@@ -83,6 +83,7 @@ public final class AcpJsonRpcServer {
   private final Profile initialProfile;
   private final String initialModel;
   private final BooleanSupplier authenticated;
+  private final BooleanSupplier promptAuthorized;
   private final Runnable logout;
   private final String version;
   private final SessionFactory sessionFactory;
@@ -98,7 +99,7 @@ public final class AcpJsonRpcServer {
       Runnable logout,
       String version) {
     this(dataDirectory, ids, initialProfile, initialModel, authenticated, logout, version,
-        null, 0);
+        null, 0, authenticated);
   }
 
   public AcpJsonRpcServer(
@@ -111,6 +112,21 @@ public final class AcpJsonRpcServer {
       String version,
       SessionFactory sessionFactory,
       int contextMax) {
+    this(dataDirectory, ids, initialProfile, initialModel, authenticated, logout, version,
+        sessionFactory, contextMax, authenticated);
+  }
+
+  public AcpJsonRpcServer(
+      Path dataDirectory,
+      Supplier<ThreadId> ids,
+      Profile initialProfile,
+      String initialModel,
+      BooleanSupplier authenticated,
+      Runnable logout,
+      String version,
+      SessionFactory sessionFactory,
+      int contextMax,
+      BooleanSupplier promptAuthorized) {
     Path root = Objects.requireNonNull(dataDirectory, "dataDirectory").toAbsolutePath();
     threadsDirectory = root.resolve("threads");
     sessionIndex = threadsDirectory.resolve("acp_sessions.json");
@@ -119,6 +135,7 @@ public final class AcpJsonRpcServer {
     this.initialProfile = Objects.requireNonNull(initialProfile, "initialProfile");
     this.initialModel = Objects.requireNonNull(initialModel, "initialModel");
     this.authenticated = Objects.requireNonNull(authenticated, "authenticated");
+    this.promptAuthorized = Objects.requireNonNull(promptAuthorized, "promptAuthorized");
     this.logout = Objects.requireNonNull(logout, "logout");
     this.version = Objects.requireNonNull(version, "version");
     this.sessionFactory = sessionFactory;
@@ -394,7 +411,7 @@ public final class AcpJsonRpcServer {
     if (sessionFactory == null) {
       throw new RpcFailure(METHOD_NOT_FOUND, "Method not found: session/prompt");
     }
-    if (!authenticated.getAsBoolean()) {
+    if (!promptAuthorized.getAsBoolean()) {
       throw new RpcFailure(AUTH_REQUIRED,
           "ajent has no credentials — run `ajent login` first");
     }

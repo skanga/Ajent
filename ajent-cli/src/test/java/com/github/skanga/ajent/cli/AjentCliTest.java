@@ -95,6 +95,10 @@ class AjentCliTest {
                                     PrintStream output, PrintStream error) {
         output.print("mcp:" + arguments.workspace()); return 15;
       }
+      @Override public int acp(CliArguments arguments, BufferedReader input,
+                               PrintStream output, PrintStream error) {
+        output.print("acp:" + arguments.model()); return 16;
+      }
     };
     assertThat(run(services, "answer\n", "login")).satisfies(result -> {
       assertThat(result.exitCode()).isEqualTo(11); assertThat(result.stdout()).isEqualTo("login:answer");
@@ -111,10 +115,13 @@ class AjentCliTest {
     assertThat(run(services, "", "mcp-serve", "--workspace", "work")).satisfies(result -> {
       assertThat(result.exitCode()).isEqualTo(15); assertThat(result.stdout()).isEqualTo("mcp:work");
     });
+    assertThat(run(services, "", "acp", "--model", "model")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(16); assertThat(result.stdout()).isEqualTo("acp:model");
+    });
   }
 
   @Test void recognizedButPendingCommandsReturnSoftwareError() {
-    for (String command : new String[] {"acp", "airgap"}) {
+    for (String command : new String[] {"airgap"}) {
       Execution result = run(command);
       assertThat(result.exitCode()).as(command).isEqualTo(70);
       assertThat(result.stderr()).contains(command, "is not implemented yet");

@@ -632,6 +632,19 @@ final class AcpJsonRpcServerTest {
           "sessionId":"auth","prompt":[{"type":"text","text":"x"}]}}
         """, rejectingClient()).toCompletableFuture().get().getLast());
     assertThat(auth.path("error").path("code").intValue()).isEqualTo(-32000);
+
+    var keylessLocal = new AcpJsonRpcServer(directory,
+        () -> new ThreadId("local"), Profile.ASK, "local-model",
+        () -> false, () -> {}, "test", factory, 100_000, () -> true);
+    result(keylessLocal, 11, "session/new", "{\"cwd\":\"C:/local\"}");
+    JsonNode local = parse(keylessLocal.handleLineAsync("""
+        {"jsonrpc":"2.0","id":12,"method":"session/prompt","params":{
+          "sessionId":"local","prompt":[{"type":"text","text":"x"}]}}
+        """, rejectingClient()).toCompletableFuture()
+        .get(5, java.util.concurrent.TimeUnit.SECONDS).getLast());
+    assertThat(local.path("error").path("code").intValue()).isNotEqualTo(-32000);
+    assertThat(call(keylessLocal, 13, "authenticate", "{\"methodId\":\"agent\"}")
+        .getLast().path("error").path("code").intValue()).isEqualTo(-32000);
   }
 
   @Test void promptValidatesBlocksRuntimeNotificationsAndFactoryFailures(@TempDir Path directory)
