@@ -600,9 +600,16 @@
       "classification": "diagnostic",
       "surface": "terminal-rendering",
       "referenceRun": "manual harness required; source is not registered by CMake",
-      "javaCounterpart": "ajent-parity/src/testFixtures/java/com/github/skanga/ajent/parity/ScrollbackPrefixHarnessDiagnostic.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-cli/src/test/java/com/github/skanga/ajent/cli/ScrollbackPrefixHarnessTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/InlineFrameRenderer.java",
+        "ajent-cli/src/test/java/com/github/skanga/ajent/cli/MidrunWireTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q test",
+        "all five native public-inline-frame scenarios run across 80x24, 40x10, 120x50, and 60x8 with a physical ANSI scrollback emulator"
+      ]
     },
     {
       "id": "scrollback_wire_fuzz",

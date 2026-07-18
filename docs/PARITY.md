@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 40 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 41 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -111,6 +111,15 @@ than existing only as a test model. Ajent also fingerprints its viewport and thr
 resize or same-shaped thread swap cannot suppress the required hard reset. Requested reveal,
 freeze, and first-paint trim transitions remain an explicit ungated one-shot chain; once they
 settle, unchanged observer ticks skip layout and paint.
+
+The standalone `scrollback_prefix_harness.cpp` is no longer treated as an informational probe.
+`ScrollbackPrefixHarnessTest` ports all five assertion-bearing scenarios across its exact four
+terminal shapes: oversized startup ordering and uniqueness, committed-prefix proof and clamp,
+the deliberately detectable bare re-emit hazard versus HardReset safety, generation-bound marker
+commit with stale reuse rejection, and witnessed/rejected/vacuous scrollback proofs. The Java
+proof type now exposes the native validity, overflow-count, and binding observations while keeping
+single-use ownership enforcement in the render signature. Emitted bytes are checked through the
+same ANSI viewport/native-scrollback emulator used by the full wire oracle.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The

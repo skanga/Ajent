@@ -80,7 +80,7 @@ public final class InlineFrameRenderer {
     public Optional<ScrollbackProof> checkScrollback(TerminalCanvas canvas, int terminalRows) {
       State current = live();
       if (current.previousRows <= terminalRows) {
-        return Optional.of(new ScrollbackProof(this, current.generation, 0));
+        return Optional.of(new ScrollbackProof(null, current.generation, 0));
       }
       int overflow = current.previousRows - terminalRows;
       if (canvas.width() != current.previousWidth || overflow > CanvasSerializer.contentHeight(canvas)) {
@@ -218,6 +218,7 @@ public final class InlineFrameRenderer {
     private Synced owner;
     private final long generation;
     private final int overflow;
+    private boolean consumed;
 
     private ScrollbackProof(Synced owner, long generation, int overflow) {
       this.owner = owner;
@@ -225,11 +226,18 @@ public final class InlineFrameRenderer {
       this.overflow = overflow;
     }
 
+    public boolean valid() { return !consumed; }
+    public int overflowRows() { return overflow; }
+    public boolean bound() { return owner != null; }
+
     private void consume(Synced expected, State state, int terminalRows) {
       int actualOverflow = Math.max(0, state.previousRows - terminalRows);
-      if (owner != expected || generation != state.generation || overflow != actualOverflow) {
+      boolean correctOwner = overflow == 0 ? owner == null : owner == expected;
+      if (consumed || !correctOwner
+          || generation != state.generation || overflow != actualOverflow) {
         throw new IllegalArgumentException("scrollback proof does not belong to this frame");
       }
+      consumed = true;
       owner = null;
     }
   }
