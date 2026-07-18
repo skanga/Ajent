@@ -61,6 +61,14 @@ class AttachmentTextTest {
         .isEqualTo("I ran:\n```sh\necho ok\n```\noutput:\n```\nok\n```\n");
   }
 
+  @Test void expansionResolvesLazyBodiesWithoutMutatingPersistedAttachment() {
+    var file = attachment(Attachment.Kind.FILE_REF, "", "src/A.java", "", "", 0);
+    assertThat(AttachmentText.expand(AttachmentText.placeholder(0), List.of(file),
+        ignored -> "latest".getBytes(StandardCharsets.UTF_8)))
+        .isEqualTo("// path: src/A.java\nlatest\n");
+    assertThat(file.body()).isEmpty();
+  }
+
   @Test void buildsCompactNativeLabels() {
     assertThat(AttachmentText.chipLabel(attachment(
         Attachment.Kind.FILE_REF, "", "src/main/A.java", "", "", 0))).isEqualTo("@A.java");

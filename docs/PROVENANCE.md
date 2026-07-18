@@ -19,6 +19,7 @@ Reference-derived work currently includes:
 | Agent doom-loop breaker | `src/runtime/app/cmd_factory.cpp`, `tests/doom_loop_test.cpp` |
 | Salvaged-call re-leak reducer | `src/runtime/app/cmd_factory.cpp`, `tests/salvage_dedup_test.cpp` |
 | Composer word deletion, attachment placeholders, and undo | `src/runtime/app/update/composer.cpp`, `src/runtime/composer_attachment.cpp`, `src/runtime/view/helpers.cpp`, `tests/composer_edit_test.cpp` |
+| Workspace file/symbol indexing, scored matching, picker reducers, and lazy attachment expansion | `src/workspace/files.cpp`, `src/workspace/symbols.cpp`, `include/agentty/runtime/mention_palette.hpp`, `include/agentty/runtime/symbol_palette.hpp`, `src/runtime/app/update/mention.cpp`, `src/runtime/app/update/symbol.cpp`, `src/runtime/view/pickers.cpp` |
 | CLI reference fixtures | downloaded AgenTTY 0.2.8 Windows binary plus `src/runtime/main.cpp` |
 
 The reference checkout and binary remain local under ignored `agentty/` and are not part of Ajent's Git history. Raw retained fixtures are small behavioral outputs and carry source commit and binary hashes in the reference manifests.

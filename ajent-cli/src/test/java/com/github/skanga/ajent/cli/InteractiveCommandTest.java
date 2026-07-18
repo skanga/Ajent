@@ -346,6 +346,63 @@ final class InteractiveCommandTest {
     assertThat(agent.effort).isEqualTo(com.github.skanga.ajent.domain.Effort.NONE);
   }
 
+  @Test void mentionAndSymbolPickersInsertCompactTypedAttachmentsAtWordBoundaries() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.workspaceFiles = List.of("README.md", "src/A.java", "src/B.java");
+    agent.workspaceSymbols = List.of(
+        new com.github.skanga.ajent.core.workspace.WorkspaceSymbol("Alpha", "src/A.java", 7),
+        new com.github.skanga.ajent.core.workspace.WorkspaceSymbol("work", "src/B.java", 12));
+
+    ui.key(character('@'), agent);
+    assertThat(terminal.bytes.toString()).contains("Mention File", "type to filter files");
+    ui.key(character('a'), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("[@A.java]");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    RuntimeMessage.Submit fileSubmit = (RuntimeMessage.Submit) agent.messages.getLast();
+    assertThat(fileSubmit.text()).isEqualTo("\u0001ATT:0\u0001");
+    assertThat(fileSubmit.attachments()).singleElement().satisfies(attachment -> {
+      assertThat(attachment.kind()).isEqualTo(com.github.skanga.ajent.domain.Attachment.Kind.FILE_REF);
+      assertThat(attachment.path()).isEqualTo("src/A.java");
+      assertThat(attachment.body()).isEmpty();
+    });
+
+    ui.key(character('#'), agent);
+    ui.key(character('w'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(terminal.bytes.toString()).contains("[#work \u00b7 B.java:12]");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    RuntimeMessage.Submit symbolSubmit = (RuntimeMessage.Submit) agent.messages.getLast();
+    assertThat(symbolSubmit.attachments()).singleElement().satisfies(attachment -> {
+      assertThat(attachment.kind()).isEqualTo(com.github.skanga.ajent.domain.Attachment.Kind.SYMBOL);
+      assertThat(attachment.name()).isEqualTo("work");
+      assertThat(attachment.lineNumber()).isEqualTo(12);
+    });
+
+    ui.key(character('x'), agent);
+    ui.key(character('@'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text()).isEqualTo("x@");
+  }
+
+  @Test void emptyMentionBackspaceClosesWithoutLeakingTheTrigger() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.key(character('@'), agent);
+    ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent);
+    ui.key(character('x'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text()).isEqualTo("x");
+  }
+
   @Test void liveDiffReviewRoutesHunksAndPaletteWideActions() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
@@ -1003,6 +1060,8 @@ final class InteractiveCommandTest {
     private boolean rejectProvider;
     private boolean deferModels;
     private List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model> availableModels;
+    private List<String> workspaceFiles = List.of();
+    private List<com.github.skanga.ajent.core.workspace.WorkspaceSymbol> workspaceSymbols = List.of();
     private String anthropicKey = "";
     private String providerKey = "";
     private URI browser;
@@ -1111,6 +1170,10 @@ final class InteractiveCommandTest {
     }
     @Override public void selectModel(String value) { model = value; }
     @Override public void saveFavorites(List<String> values) { favorites = List.copyOf(values); }
+    @Override public List<String> workspaceFiles() { return workspaceFiles; }
+    @Override public List<com.github.skanga.ajent.core.workspace.WorkspaceSymbol> workspaceSymbols() {
+      return workspaceSymbols;
+    }
     @Override public String provider() { return provider; }
     @Override public List<com.github.skanga.ajent.terminal.ui.ProviderPicker.Provider> providers() {
       return List.of(

@@ -28,6 +28,7 @@ public final class AgentSessionFactory {
   private final Path dataDirectory;
   private final BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers;
   private final CheckpointPort checkpoints;
+  private final AttachmentContentPort attachmentContent;
 
   public AgentSessionFactory(
       ToolRuntimeFactory.Components tools,
@@ -35,7 +36,7 @@ public final class AgentSessionFactory {
       HttpClient client,
       Path dataDirectory) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create,
-        CheckpointPort.disabled());
+        CheckpointPort.disabled(), AttachmentContentPort.inline());
   }
 
   public AgentSessionFactory(
@@ -44,7 +45,19 @@ public final class AgentSessionFactory {
       HttpClient client,
       Path dataDirectory,
       CheckpointPort checkpoints) {
-    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints);
+    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
+        AttachmentContentPort.inline());
+  }
+
+  public AgentSessionFactory(
+      ToolRuntimeFactory.Components tools,
+      LiveProviderFactory.Configuration baseProvider,
+      HttpClient client,
+      Path dataDirectory,
+      CheckpointPort checkpoints,
+      AttachmentContentPort attachmentContent) {
+    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
+        attachmentContent);
   }
 
   AgentSessionFactory(
@@ -53,7 +66,8 @@ public final class AgentSessionFactory {
       HttpClient client,
       Path dataDirectory,
       BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers) {
-    this(tools, baseProvider, client, dataDirectory, providers, CheckpointPort.disabled());
+    this(tools, baseProvider, client, dataDirectory, providers, CheckpointPort.disabled(),
+        AttachmentContentPort.inline());
   }
 
   private AgentSessionFactory(
@@ -62,7 +76,8 @@ public final class AgentSessionFactory {
       HttpClient client,
       Path dataDirectory,
       BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers,
-      CheckpointPort checkpoints) {
+      CheckpointPort checkpoints,
+      AttachmentContentPort attachmentContent) {
     this.tools = Objects.requireNonNull(tools, "tools");
     this.baseProvider = Objects.requireNonNull(baseProvider, "baseProvider");
     this.client = Objects.requireNonNull(client, "client");
@@ -70,6 +85,7 @@ public final class AgentSessionFactory {
         .toAbsolutePath().normalize();
     this.providers = Objects.requireNonNull(providers, "providers");
     this.checkpoints = Objects.requireNonNull(checkpoints, "checkpoints");
+    this.attachmentContent = Objects.requireNonNull(attachmentContent, "attachmentContent");
   }
 
   public AgentLoop create(
@@ -122,7 +138,8 @@ public final class AgentSessionFactory {
         java.util.Optional::empty,
         () -> checkpoints.enabled()
             ? java.util.Optional.of(new com.github.skanga.ajent.domain.CheckpointId(
-                MessageId.random().value())) : java.util.Optional.empty()));
+                MessageId.random().value())) : java.util.Optional.empty(),
+        attachmentContent));
     ProviderPort provider = (turnId, messages, cancellation, sink) ->
         providers.apply(Objects.requireNonNull(configuration.get(), "provider configuration"), client)
             .stream(turnId, messages, cancellation, sink);

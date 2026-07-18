@@ -116,6 +116,8 @@ include:
 - `Ctrl-G`: run a fenced code block from the latest assistant reply
 - `Ctrl-O`: inspect tool output
 - `Left` / `Right` in the model picker: cycle supported reasoning effort
+- `@` at a word boundary: attach a workspace file
+- `#` at a word boundary: attach a workspace symbol excerpt
 
 Write, execution, and network tools are governed by the active permission
 profile. The default `ask` profile prompts before consequential operations.

@@ -64,13 +64,14 @@ public final class AgentReducer {
                         DoubleSupplier retryJitter,
                         IntSupplier contextMax,
                         Supplier<Optional<String>> oauthRefreshToken,
-                        Supplier<Optional<CheckpointId>> checkpointIds) {
+                        Supplier<Optional<CheckpointId>> checkpointIds,
+                        AttachmentContentPort attachmentContent) {
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                    Supplier<MessageId> messageIds,
                    Function<ToolUse, PermissionVerdict> permissions) {
       this(nanoClock, wallClock, messageIds, permissions,
           () -> ThreadLocalRandom.current().nextDouble(0.80, 1.20), () -> 200_000,
-          Optional::empty, Optional::empty);
+          Optional::empty, Optional::empty, AttachmentContentPort.inline());
     }
 
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
@@ -78,7 +79,7 @@ public final class AgentReducer {
                    Function<ToolUse, PermissionVerdict> permissions,
                    DoubleSupplier retryJitter) {
       this(nanoClock, wallClock, messageIds, permissions, retryJitter, () -> 200_000,
-          Optional::empty, Optional::empty);
+          Optional::empty, Optional::empty, AttachmentContentPort.inline());
     }
 
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
@@ -86,7 +87,7 @@ public final class AgentReducer {
                    Function<ToolUse, PermissionVerdict> permissions,
                    DoubleSupplier retryJitter, IntSupplier contextMax) {
       this(nanoClock, wallClock, messageIds, permissions, retryJitter, contextMax,
-          Optional::empty, Optional::empty);
+          Optional::empty, Optional::empty, AttachmentContentPort.inline());
     }
 
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
@@ -95,7 +96,17 @@ public final class AgentReducer {
                    DoubleSupplier retryJitter, IntSupplier contextMax,
                    Supplier<Optional<String>> oauthRefreshToken) {
       this(nanoClock, wallClock, messageIds, permissions, retryJitter, contextMax,
-          oauthRefreshToken, Optional::empty);
+          oauthRefreshToken, Optional::empty, AttachmentContentPort.inline());
+    }
+
+    public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
+                   Supplier<MessageId> messageIds,
+                   Function<ToolUse, PermissionVerdict> permissions,
+                   DoubleSupplier retryJitter, IntSupplier contextMax,
+                   Supplier<Optional<String>> oauthRefreshToken,
+                   Supplier<Optional<CheckpointId>> checkpointIds) {
+      this(nanoClock, wallClock, messageIds, permissions, retryJitter, contextMax,
+          oauthRefreshToken, checkpointIds, AttachmentContentPort.inline());
     }
 
     public Context {
@@ -107,6 +118,7 @@ public final class AgentReducer {
       Objects.requireNonNull(contextMax, "contextMax");
       Objects.requireNonNull(oauthRefreshToken, "oauthRefreshToken");
       Objects.requireNonNull(checkpointIds, "checkpointIds");
+      Objects.requireNonNull(attachmentContent, "attachmentContent");
     }
   }
 
@@ -943,12 +955,14 @@ public final class AgentReducer {
   }
 
   private List<Message> wireMessages(com.github.skanga.ajent.domain.Thread thread) {
-    return ConversationWire.forNormalTurn(thread, context.contextMax().getAsInt());
+    return ConversationWire.forNormalTurn(
+        thread, context.contextMax().getAsInt(), context.attachmentContent()::body);
   }
 
   private List<Message> activeWireMessages(AgentState state) {
     return state.compaction().active().isPresent()
-        ? ConversationWire.forCompaction(state.thread(), context.contextMax().getAsInt())
+        ? ConversationWire.forCompaction(state.thread(), context.contextMax().getAsInt(),
+            context.attachmentContent()::body)
         : wireMessages(state.thread());
   }
 

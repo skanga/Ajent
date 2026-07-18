@@ -4,6 +4,7 @@ import com.github.skanga.ajent.core.persistence.Settings;
 import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
+import com.github.skanga.ajent.core.workspace.WorkspaceSymbol;
 import com.github.skanga.ajent.domain.Attachment;
 import com.github.skanga.ajent.domain.AttachmentText;
 import com.github.skanga.ajent.domain.Effort;
@@ -50,9 +51,11 @@ import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
 import com.github.skanga.ajent.terminal.ui.DiffReview;
 import com.github.skanga.ajent.terminal.ui.ModelPicker;
 import com.github.skanga.ajent.terminal.ui.LoginModal;
+import com.github.skanga.ajent.terminal.ui.MentionPicker;
 import com.github.skanga.ajent.terminal.ui.PickerState;
 import com.github.skanga.ajent.terminal.ui.PlanModal;
 import com.github.skanga.ajent.terminal.ui.ProviderPicker;
+import com.github.skanga.ajent.terminal.ui.SymbolPicker;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.terminal.ui.ThreadPicker;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
@@ -62,6 +65,7 @@ import com.github.skanga.ajent.tools.runtime.FileChange;
 import com.github.skanga.ajent.tools.web.JdkWebTransport;
 import com.github.skanga.ajent.tools.host.HostServices;
 import com.github.skanga.ajent.tools.workspace.GitCheckpointStore;
+import com.github.skanga.ajent.tools.workspace.WorkspaceIndex;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.awt.Desktop;
@@ -335,6 +339,10 @@ final class InteractiveCommand {
           configured.settings().save(configured.settings().load().withFavoriteModels(
               models.stream().map(ModelId::new).toList()));
         }
+        @Override public List<String> workspaceFiles() { return configured.workspaceIndex().files(); }
+        @Override public List<WorkspaceSymbol> workspaceSymbols() {
+          return configured.workspaceIndex().symbols();
+        }
         @Override public String provider() { return activeProvider.get().provider(); }
         @Override public List<ProviderPicker.Provider> providers() {
           return ProviderRegistry.presets().stream()
@@ -497,6 +505,7 @@ final class InteractiveCommand {
     Path docs = resolveDocs(workspace);
     var todos = new TodoLedger();
     var checkpoints = new GitCheckpointStore(workspace, sandbox.runner());
+    var workspaceIndex = new WorkspaceIndex(workspace);
     var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
         workspace, workspace, home, docs, new JdkWebTransport(), todos, null, sandbox.runner()));
     String effort = Effort.fromWire(settings.effort()).clamp(ModelCapabilities.fromId(model)).wire();
@@ -507,9 +516,10 @@ final class InteractiveCommand {
       @Override public boolean create(CheckpointId id) { return checkpoints.create(id); }
     };
     return new Configuration(new AgentSessionFactory(
-        tools, providers, client, dataDirectory, checkpointPort),
+        tools, providers, client, dataDirectory, checkpointPort, workspaceIndex::attachmentBody),
         dataDirectory, profile, model, settingsStore, providers,
-        new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints);
+        new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints,
+        workspaceIndex);
   }
 
   static void recordChange(
@@ -579,7 +589,7 @@ final class InteractiveCommand {
       AgentSessionFactory sessions, Path dataDirectory, Profile profile, String model,
       SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
       ProviderModelCatalog models, TodoLedger todos, Path workspace, ProcessRunner codeRunner,
-      GitCheckpointStore checkpoints) {}
+      GitCheckpointStore checkpoints, WorkspaceIndex workspaceIndex) {}
 
   static final class TodoLedger implements HostServices.TodoSink {
     private final AtomicReference<List<PlanModal.Item>> items =
@@ -623,6 +633,8 @@ final class InteractiveCommand {
     void loadModels(Consumer<List<ModelPicker.Model>> receiver);
     void selectModel(String model);
     void saveFavorites(List<String> models);
+    List<String> workspaceFiles();
+    List<WorkspaceSymbol> workspaceSymbols();
     String provider();
     List<ProviderPicker.Provider> providers();
     boolean selectProvider(String provider);
@@ -700,6 +712,8 @@ final class InteractiveCommand {
     private PickerState.Modal plan = new PickerState.ModalClosed();
     private CodeBlockPicker.State codeBlocks = new CodeBlockPicker.Closed();
     private CheckpointPicker.State checkpoints = new CheckpointPicker.Closed();
+    private MentionPicker.State mentions = new MentionPicker.Closed();
+    private SymbolPicker.State symbols = new SymbolPicker.Closed();
     private boolean checkpointRestoring;
     private List<PlanModal.Item> planItems = List.of();
     private List<ThreadPicker.Entry> threadRows = List.of();
@@ -753,6 +767,8 @@ final class InteractiveCommand {
         render();
         return true;
       }
+      if (mentions instanceof MentionPicker.Open) return mentionKey(key);
+      if (symbols instanceof SymbolPicker.Open) return symbolKey(key);
       if (codeBlocks instanceof CodeBlockPicker.Open) return codeBlockKey(key, loop);
       if (codeBlocks instanceof CodeBlockPicker.Result) return codeResultKey(key);
       if (checkpoints instanceof CheckpointPicker.Open) return checkpointKey(key, loop);
@@ -827,9 +843,72 @@ final class InteractiveCommand {
         return true;
       }
       if (key.key() instanceof TerminalKey.CharacterKey character && !key.modifiers().alt()) {
-        insert(new String(Character.toChars(character.codePoint())));
+        int codePoint = character.codePoint();
+        if ((codePoint == '@' || codePoint == '#') && atWordBoundary()) {
+          if (codePoint == '@') mentions = MentionPicker.open(loop.workspaceFiles());
+          else symbols = SymbolPicker.open(loop.workspaceSymbols());
+          render();
+        } else {
+          insert(new String(Character.toChars(codePoint)));
+        }
       }
       return true;
+    }
+
+    private boolean atWordBoundary() {
+      if (cursor == 0) return true;
+      char previous = composer.charAt(cursor - 1);
+      return previous == ' ' || previous == '\t' || previous == '\n';
+    }
+
+    private boolean mentionKey(TerminalKey key) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> mentions = MentionPicker.close(mentions);
+          case ENTER -> {
+            MentionPicker.Selection selected = MentionPicker.select(mentions);
+            mentions = selected.state();
+            selected.attachment().ifPresent(this::insertAttachment);
+          }
+          case UP -> mentions = MentionPicker.move(mentions, -1);
+          case DOWN -> mentions = MentionPicker.move(mentions, 1);
+          case BACKSPACE -> mentions = MentionPicker.backspace(mentions);
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character) {
+        mentions = MentionPicker.input(mentions, character.codePoint());
+      }
+      render();
+      return true;
+    }
+
+    private boolean symbolKey(TerminalKey key) {
+      if (key.key() instanceof TerminalKey.SpecialKey special) {
+        switch (special) {
+          case ESCAPE -> symbols = SymbolPicker.close(symbols);
+          case ENTER -> {
+            SymbolPicker.Selection selected = SymbolPicker.select(symbols);
+            symbols = selected.state();
+            selected.attachment().ifPresent(this::insertAttachment);
+          }
+          case UP -> symbols = SymbolPicker.move(symbols, -1);
+          case DOWN -> symbols = SymbolPicker.move(symbols, 1);
+          case BACKSPACE -> symbols = SymbolPicker.backspace(symbols);
+          default -> { }
+        }
+      } else if (key.key() instanceof TerminalKey.CharacterKey character) {
+        symbols = SymbolPicker.input(symbols, character.codePoint());
+      }
+      render();
+      return true;
+    }
+
+    private void insertAttachment(Attachment attachment) {
+      int index = composerAttachments.size();
+      var revised = new ArrayList<>(composerAttachments);
+      revised.add(attachment);
+      composerAttachments = List.copyOf(revised);
+      insert(AttachmentText.placeholder(index));
     }
 
     private void openToolViewer(AgentState state) {
@@ -1432,6 +1511,8 @@ final class InteractiveCommand {
         plan = new PickerState.ModalClosed();
         codeBlocks = new CodeBlockPicker.Closed();
         checkpoints = new CheckpointPicker.Closed();
+        mentions = new MentionPicker.Closed();
+        symbols = new SymbolPicker.Closed();
         checkpointRestoring = false;
         login = new LoginModal.Closed();
         diffReview = new PickerState.CellClosed();
@@ -1502,6 +1583,57 @@ final class InteractiveCommand {
                   entry.failed() ? Style.DANGER : index == open.index()
                       ? Style.ACCENT : Style.NORMAL));
             }
+          }
+        }
+        if (mentions instanceof MentionPicker.Open open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Mention File", Style.ACCENT));
+          lines.add(new StyledLine(open.query().isEmpty()
+              ? "@ type to filter files\u2026" : "@ " + open.query(), Style.MUTED));
+          List<Integer> matches = MentionPicker.matches(open);
+          if (open.files().isEmpty()) {
+            lines.add(new StyledLine("  workspace empty (or no readable files)", Style.MUTED));
+          } else if (matches.isEmpty()) {
+            lines.add(new StyledLine("  no matches", Style.MUTED));
+          } else {
+            int start = pickerStart(open.index(), matches.size());
+            int end = Math.min(matches.size(), start + 14);
+            for (int index = start; index < end; index++) {
+              String path = open.files().get(matches.get(index));
+              String parent = parentSegment(path);
+              lines.add(new StyledLine((index == open.index() ? "\u203a " : "  ")
+                  + filenameOnly(path) + (parent.isEmpty() ? "" : "  " + parent),
+                  index == open.index() ? Style.ACCENT : Style.NORMAL));
+            }
+            if (matches.size() > 14) lines.add(new StyledLine(
+                "  " + (open.index() + 1) + "/" + matches.size(), Style.MUTED));
+          }
+        }
+        if (symbols instanceof SymbolPicker.Open open) {
+          lines = new ArrayList<>(lines);
+          lines.add(new StyledLine("", Style.NORMAL));
+          lines.add(new StyledLine("Symbol", Style.ACCENT));
+          lines.add(new StyledLine(open.query().isEmpty()
+              ? "# type to filter symbols\u2026" : "# " + open.query(), Style.MUTED));
+          List<Integer> matches = SymbolPicker.matches(open);
+          if (open.symbols().isEmpty()) {
+            lines.add(new StyledLine("  no symbols indexed", Style.MUTED));
+          } else if (matches.isEmpty()) {
+            lines.add(new StyledLine("  no matches", Style.MUTED));
+          } else {
+            int start = pickerStart(open.index(), matches.size());
+            int end = Math.min(matches.size(), start + 14);
+            for (int index = start; index < end; index++) {
+              WorkspaceSymbol symbol = open.symbols().get(matches.get(index));
+              String parent = parentSegment(symbol.path());
+              lines.add(new StyledLine((index == open.index() ? "\u203a " : "  ")
+                  + symbol.name() + "  " + filenameOnly(symbol.path()) + ":"
+                  + symbol.lineNumber() + (parent.isEmpty() ? "" : "  " + parent),
+                  index == open.index() ? Style.ACCENT : Style.NORMAL));
+            }
+            if (matches.size() > 14) lines.add(new StyledLine(
+                "  " + (open.index() + 1) + "/" + matches.size(), Style.MUTED));
           }
         }
         if (modelPicker instanceof PickerState.OpenAt open) {
@@ -1788,6 +1920,23 @@ final class InteractiveCommand {
     private static String displayTool(String name) {
       if (name.isEmpty()) return name;
       return Character.toUpperCase(name.charAt(0)) + name.substring(1).replace('_', ' ');
+    }
+
+    private static String filenameOnly(String path) {
+      int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+      return slash < 0 ? path : path.substring(slash + 1);
+    }
+
+    private static String parentSegment(String path) {
+      int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+      if (slash <= 0) return "";
+      String parent = path.substring(0, slash);
+      int previous = Math.max(parent.lastIndexOf('/'), parent.lastIndexOf('\\'));
+      return previous < 0 ? parent : parent.substring(previous + 1);
+    }
+
+    private static int pickerStart(int index, int size) {
+      return Math.max(0, Math.min(Math.max(0, size - 14), index - 7));
     }
 
     void updatePlan(List<PlanModal.Item> items) {

@@ -44,6 +44,27 @@ final class AgentReducerTest {
         .contains("check", "I ran:", "echo one", "captured");
   }
 
+  @Test void providerProjectionLoadsLazyFileBodyWithoutChangingPersistedMessage() {
+    var ids = new AtomicInteger();
+    var reducer = new AgentReducer(new AgentReducer.Context(System::nanoTime, Instant::now,
+        () -> new MessageId("lazy-" + ids.incrementAndGet()), ignored -> PermissionVerdict.ALLOW,
+        () -> 1.0, () -> 200_000, Optional::empty, Optional::empty,
+        attachment -> "latest bytes".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    var file = new Attachment(Attachment.Kind.FILE_REF, new byte[0], "src/A.java", "", "",
+        0, 0, 0);
+    String text = AttachmentText.placeholder(0);
+
+    var step = reducer.update(AgentState.initial(thread()),
+        new RuntimeMessage.Submit(text, List.of(), List.of(file)));
+
+    assertThat(step.state().thread().messages().getFirst().text()).isEqualTo(text);
+    assertThat(step.state().thread().messages().getFirst().attachments().getFirst().body()).isEmpty();
+    var stream = step.effects().stream().filter(RuntimeEffect.StartStream.class::isInstance)
+        .map(RuntimeEffect.StartStream.class::cast).findFirst().orElseThrow();
+    assertThat(stream.messages().getFirst().text())
+        .isEqualTo("// path: src/A.java\nlatest bytes\n");
+  }
+
   @Test void profileChangeDropsSessionAlwaysAllowGrantsWithoutDisturbingTurn() {
     AgentState initial = AgentState.initial(thread());
     AgentState granted = new AgentState(initial.thread(), initial.phase(), initial.activeTurnId(),

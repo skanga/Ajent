@@ -10,6 +10,11 @@ public final class AttachmentText {
 
   private AttachmentText() {}
 
+  @FunctionalInterface
+  public interface BodyResolver {
+    byte[] body(Attachment attachment);
+  }
+
   public static String placeholder(int index) {
     if (index < 0) throw new IllegalArgumentException("index cannot be negative");
     return SENTINEL + "ATT:" + index + SENTINEL;
@@ -47,11 +52,16 @@ public final class AttachmentText {
   }
 
   public static String expand(String text, List<Attachment> attachments) {
-    return replace(text, attachments, false);
+    return expand(text, attachments, Attachment::body);
+  }
+
+  public static String expand(
+      String text, List<Attachment> attachments, BodyResolver resolver) {
+    return replace(text, attachments, false, resolver);
   }
 
   public static String display(String text, List<Attachment> attachments) {
-    return replace(text, attachments, true);
+    return replace(text, attachments, true, Attachment::body);
   }
 
   public static String chipLabel(Attachment attachment) {
@@ -66,7 +76,8 @@ public final class AttachmentText {
     };
   }
 
-  private static String replace(String text, List<Attachment> attachments, boolean chips) {
+  private static String replace(
+      String text, List<Attachment> attachments, boolean chips, BodyResolver resolver) {
     var output = new StringBuilder(text.length() + attachments.size() * 64);
     int cursor = 0;
     while (cursor < text.length()) {
@@ -76,7 +87,7 @@ public final class AttachmentText {
           int index = placeholderIndex(text, cursor);
           if (index >= 0 && index < attachments.size()) {
             if (chips) output.append('[').append(chipLabel(attachments.get(index))).append(']');
-            else appendBody(output, attachments.get(index));
+            else appendBody(output, attachments.get(index), resolver);
           }
           cursor += length;
           if (!chips && cursor < text.length()) output.append('\n');
@@ -90,17 +101,18 @@ public final class AttachmentText {
     return chips ? output.toString() : collapseNewlines(output);
   }
 
-  private static void appendBody(StringBuilder output, Attachment attachment) {
+  private static void appendBody(
+      StringBuilder output, Attachment attachment, BodyResolver resolver) {
     if (!output.isEmpty() && output.charAt(output.length() - 1) != '\n') output.append('\n');
     if (!output.isEmpty() && (output.length() < 2 || output.charAt(output.length() - 2) != '\n')) {
       output.append('\n');
     }
-    output.append(renderBody(attachment));
+    output.append(renderBody(attachment, resolver));
     if (output.isEmpty() || output.charAt(output.length() - 1) != '\n') output.append('\n');
   }
 
-  private static String renderBody(Attachment attachment) {
-    String body = new String(attachment.body(), StandardCharsets.UTF_8);
+  private static String renderBody(Attachment attachment, BodyResolver resolver) {
+    String body = new String(resolver.body(attachment), StandardCharsets.UTF_8);
     return switch (attachment.kind()) {
       case PASTE -> body;
       case FILE_REF -> "// path: " + attachment.path() + "\n" + truncateFile(body);

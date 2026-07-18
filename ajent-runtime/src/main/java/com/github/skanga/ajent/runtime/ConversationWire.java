@@ -1,6 +1,7 @@
 package com.github.skanga.ajent.runtime;
 
 import com.github.skanga.ajent.domain.AttachmentText;
+import com.github.skanga.ajent.domain.Attachment;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.MessageId;
 import com.github.skanga.ajent.domain.Role;
@@ -62,34 +63,49 @@ public final class ConversationWire {
 
   public static List<Message> forNormalTurn(
       com.github.skanga.ajent.domain.Thread thread, int contextMax) {
+    return forNormalTurn(thread, contextMax, Attachment::body);
+  }
+
+  static List<Message> forNormalTurn(com.github.skanga.ajent.domain.Thread thread, int contextMax,
+      AttachmentText.BodyResolver resolver) {
     var result = new ArrayList<>(messages(thread));
-    if (contextMax <= 0 || result.size() <= 1) return expandAttachments(result);
+    if (contextMax <= 0 || result.size() <= 1) return expandAttachments(result, resolver);
     int ceiling = (int) (contextMax * 0.95);
-    if (ceiling <= 0) return expandAttachments(result);
-    int drop = frontDropCount(result, ceiling, 1);
+    if (ceiling <= 0) return expandAttachments(result, resolver);
+    int drop = frontDropCount(result, ceiling, 1, resolver);
     if (drop > 0) result.subList(1, 1 + drop).clear();
     removeLeadingAssistants(result);
-    return expandAttachments(result);
+    return expandAttachments(result, resolver);
   }
 
   public static List<Message> forCompaction(
       com.github.skanga.ajent.domain.Thread thread, int contextMax) {
+    return forCompaction(thread, contextMax, Attachment::body);
+  }
+
+  static List<Message> forCompaction(com.github.skanga.ajent.domain.Thread thread, int contextMax,
+      AttachmentText.BodyResolver resolver) {
     var result = new ArrayList<>(messages(thread));
     if (contextMax > 0) {
       int ceiling = (int) (contextMax * 0.65);
-      int drop = frontDropCount(result, ceiling, 0);
+      int drop = frontDropCount(result, ceiling, 0, resolver);
       if (drop > 0) result.subList(0, drop).clear();
       removeLeadingAssistants(result);
     }
     result.add(syntheticMessage(COMPACTION_SUMMARY_PROMPT, false));
-    return expandAttachments(result);
+    return expandAttachments(result, resolver);
   }
 
   public static int estimateTokens(List<Message> messages) {
+    return estimateTokens(messages, Attachment::body);
+  }
+
+  private static int estimateTokens(
+      List<Message> messages, AttachmentText.BodyResolver resolver) {
     long bytes = 0;
     int images = 0;
     for (Message message : messages) {
-      bytes += utf8Length(AttachmentText.expand(message.text(), message.attachments()));
+      bytes += utf8Length(AttachmentText.expand(message.text(), message.attachments(), resolver));
       images += message.images().size();
       for (var call : message.toolCalls()) {
         bytes += utf8Length(call.name().value());
@@ -101,19 +117,20 @@ public final class ConversationWire {
     return (int) (bytes / BYTES_PER_TOKEN) + images * TOKENS_PER_IMAGE;
   }
 
-  private static int frontDropCount(List<Message> messages, int ceiling, int keepHead) {
+  private static int frontDropCount(List<Message> messages, int ceiling, int keepHead,
+      AttachmentText.BodyResolver resolver) {
     if (messages.size() <= keepHead) return 0;
     long bytes = 0;
     int images = 0;
     for (Message message : messages) {
-      Weight weight = weight(message);
+      Weight weight = weight(message, resolver);
       bytes += weight.bytes();
       images += weight.images();
     }
     int drop = 0;
     while (tokensFrom(bytes, images) > ceiling && messages.size() - drop > 1
         && keepHead + drop < messages.size()) {
-      Weight weight = weight(messages.get(keepHead + drop));
+      Weight weight = weight(messages.get(keepHead + drop), resolver);
       bytes -= weight.bytes();
       images -= weight.images();
       drop++;
@@ -121,8 +138,9 @@ public final class ConversationWire {
     return drop;
   }
 
-  private static Weight weight(Message message) {
-    long bytes = utf8Length(AttachmentText.expand(message.text(), message.attachments()));
+  private static Weight weight(Message message, AttachmentText.BodyResolver resolver) {
+    long bytes = utf8Length(
+        AttachmentText.expand(message.text(), message.attachments(), resolver));
     for (var call : message.toolCalls()) {
       bytes += utf8Length(call.name().value());
       bytes += utf8Length(call.status().output());
@@ -157,10 +175,11 @@ public final class ConversationWire {
         Optional.empty(), Optional.empty(), compactSummary);
   }
 
-  private static List<Message> expandAttachments(List<Message> messages) {
+  private static List<Message> expandAttachments(
+      List<Message> messages, AttachmentText.BodyResolver resolver) {
     return messages.stream().map(message -> message.attachments().isEmpty() ? message
         : new Message(message.id(), message.role(),
-            AttachmentText.expand(message.text(), message.attachments()), message.images(),
+            AttachmentText.expand(message.text(), message.attachments(), resolver), message.images(),
             message.attachments(), message.thinking(), message.thinkingSignature(),
             message.toolCalls(), message.timestamp(), message.checkpointId(), message.error(),
             message.textBlockClosed(), message.isCompactSummary())).toList();
