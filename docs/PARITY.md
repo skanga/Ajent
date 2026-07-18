@@ -90,5 +90,11 @@ a wholesale transcript swap. Profile cycling follows Write → Ask → Minimal,
 updates future permission classification without cancelling an active turn,
 clears session-level always-allow grants, and atomically persists the setting.
 
+Anthropic model discovery now ports the native `/v1/models?limit=100` probe:
+10-second request timeout, 1 MiB response bound, API-key versus OAuth headers,
+upstream display-name parsing, and the exact Opus/Sonnet/Haiku 4.5 seed when
+credentials or a usable response are absent. Loopback tests pin both auth
+shapes and fallback behavior; this catalog is the live model picker's source.
+
 The construction plan in `plans/ajent-agentty-java-port.md` is the dependency
 and exit-gate authority for advancing these rows.

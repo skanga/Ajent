@@ -10,6 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,13 @@ public final class ProviderModelCatalog {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final int MODELS_BODY_MAX = 2 * 1024 * 1024;
   private static final int SHOW_BODY_MAX = 512 * 1024;
+  private static final int ANTHROPIC_MODELS_BODY_MAX = 1024 * 1024;
+  private static final URI ANTHROPIC_MODELS =
+      URI.create("https://api.anthropic.com/v1/models?limit=100");
+  private static final List<ProviderModel> ANTHROPIC_SEED = List.of(
+      anthropic("claude-opus-4-5", "Claude Opus 4.5"),
+      anthropic("claude-sonnet-4-5", "Claude Sonnet 4.5"),
+      anthropic("claude-haiku-4-5", "Claude Haiku 4.5"));
   private final HttpClient client;
 
   public ProviderModelCatalog(HttpClient client) {
@@ -47,6 +55,53 @@ public final class ProviderModelCatalog {
       java.lang.Thread.currentThread().interrupt();
       return List.of();
     }
+  }
+
+  /** Lists Anthropic models, with AgenTTY's stable offline seed as the floor. */
+  public List<ProviderModel> listAnthropicModels(ProviderAuth auth) {
+    return listAnthropicModels(auth, ANTHROPIC_MODELS);
+  }
+
+  List<ProviderModel> listAnthropicModels(ProviderAuth auth, URI endpoint) {
+    Objects.requireNonNull(auth, "auth");
+    Objects.requireNonNull(endpoint, "endpoint");
+    if (auth.isEmpty()) return ANTHROPIC_SEED;
+    try {
+      var builder = HttpRequest.newBuilder(endpoint)
+          .timeout(Duration.ofSeconds(10))
+          .header("accept", "application/json")
+          .header("user-agent", "ajent/0.2.8")
+          .header("anthropic-version", "2023-06-01")
+          .header("anthropic-dangerous-direct-browser-access", "true")
+          .header("x-app", "ajent")
+          .GET();
+      switch (auth) {
+        case ProviderAuth.ApiKey key -> builder.header("x-api-key", key.value());
+        case ProviderAuth.Bearer bearer -> builder
+            .header("authorization", "Bearer " + bearer.token())
+            .header("anthropic-beta", "oauth-2025-04-20");
+        case ProviderAuth.Empty ignored -> { }
+      }
+      JsonNode root = sendJson(builder.build(), ANTHROPIC_MODELS_BODY_MAX);
+      if (root == null) return ANTHROPIC_SEED;
+      var result = new ArrayList<ProviderModel>();
+      for (JsonNode value : root.path("data")) {
+        String id = value.path("id").asText();
+        if (id.isEmpty()) continue;
+        String displayName = value.path("display_name").asText(id);
+        result.add(anthropic(id, displayName));
+      }
+      return result.isEmpty() ? ANTHROPIC_SEED : List.copyOf(result);
+    } catch (IOException | RuntimeException exception) {
+      return ANTHROPIC_SEED;
+    } catch (InterruptedException exception) {
+      java.lang.Thread.currentThread().interrupt();
+      return ANTHROPIC_SEED;
+    }
+  }
+
+  private static ProviderModel anthropic(String id, String displayName) {
+    return new ProviderModel(id, displayName, "anthropic", Optional.empty(), 200_000);
   }
 
   private List<ProviderModel> openAiModels(JsonNode root, Endpoint endpoint) {

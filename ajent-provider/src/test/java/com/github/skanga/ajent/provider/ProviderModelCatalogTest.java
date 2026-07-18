@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -93,6 +94,62 @@ class ProviderModelCatalogTest {
     server.createContext("/malformed", exchange -> json(exchange, 200, "{bad}"));
     assertThat(catalog.listModels(new ProviderAuth.Empty(), endpoint("/failure", false))).isEmpty();
     assertThat(catalog.listModels(new ProviderAuth.Empty(), endpoint("/malformed", false))).isEmpty();
+  }
+
+  @Test void anthropicUsesOfflineSeedWithoutCredentials() {
+    List<ProviderModel> models = new ProviderModelCatalog(HttpClient.newHttpClient())
+        .listAnthropicModels(new ProviderAuth.Empty());
+
+    assertThat(models).extracting(ProviderModel::id).containsExactly(
+        "claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5");
+    assertThat(models).allSatisfy(model -> {
+      assertThat(model.provider()).isEqualTo("anthropic");
+      assertThat(model.contextWindow()).isEqualTo(200_000);
+    });
+  }
+
+  @Test void anthropicParsesUpstreamCatalogAndSendsTypedAuthHeaders() throws Exception {
+    start();
+    server.createContext("/v1/models", exchange -> {
+      assertThat(exchange.getRequestURI().getQuery()).isEqualTo("limit=100");
+      assertThat(exchange.getRequestHeaders().getFirst("x-api-key")).isEqualTo("secret");
+      assertThat(exchange.getRequestHeaders().getFirst("anthropic-version"))
+          .isEqualTo("2023-06-01");
+      json(exchange, 200, "{\"data\":[{\"id\":\"claude-new\","
+          + "\"display_name\":\"Claude New\"},{\"id\":\"claude-raw\"},{\"id\":\"\"}]}");
+    });
+    URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
+        + "/v1/models?limit=100");
+
+    List<ProviderModel> models = new ProviderModelCatalog(HttpClient.newHttpClient())
+        .listAnthropicModels(new ProviderAuth.ApiKey("secret"), endpoint);
+
+    assertThat(models).containsExactly(
+        new ProviderModel("claude-new", "Claude New", "anthropic",
+            java.util.Optional.empty(), 200_000),
+        new ProviderModel("claude-raw", "claude-raw", "anthropic",
+            java.util.Optional.empty(), 200_000));
+  }
+
+  @Test void anthropicBearerUsesOauthGateAndFailuresFallBackToSeed() throws Exception {
+    start();
+    server.createContext("/oauth", exchange -> {
+      assertThat(exchange.getRequestHeaders().getFirst("authorization"))
+          .isEqualTo("Bearer token");
+      assertThat(exchange.getRequestHeaders().getFirst("anthropic-beta"))
+          .isEqualTo("oauth-2025-04-20");
+      json(exchange, 200, "{\"data\":[]}");
+    });
+    server.createContext("/bad", exchange -> json(exchange, 503, "unavailable"));
+    var catalog = new ProviderModelCatalog(HttpClient.newHttpClient());
+    String base = "http://127.0.0.1:" + server.getAddress().getPort();
+
+    assertThat(catalog.listAnthropicModels(new ProviderAuth.Bearer("token"),
+        URI.create(base + "/oauth"))).extracting(ProviderModel::id)
+        .containsExactly("claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5");
+    assertThat(catalog.listAnthropicModels(new ProviderAuth.ApiKey("key"),
+        URI.create(base + "/bad"))).isEqualTo(
+            catalog.listAnthropicModels(new ProviderAuth.Empty()));
   }
 
   private void start() throws IOException {
