@@ -698,6 +698,26 @@ final class InteractiveCommandTest {
             List.of(secondAttachment)));
   }
 
+  @Test void queuedTurnsRenderAsUserPreviewsAndMarkThePeekedSlot() {
+    Attachment attachment = attachment("queued body");
+    RuntimeMessage.Submit first = new RuntimeMessage.Submit(
+        "inspect " + AttachmentText.placeholder(0), List.of(), List.of(attachment));
+    RuntimeMessage.Submit second = new RuntimeMessage.Submit("then test", List.of());
+    var state = new AtomicReference<>(withQueued(AgentState.initial(thread(List.of())),
+        List.of(first, second)));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.render();
+    assertThat(terminal.bytes.toString()).contains(
+        "queued #1 / 2", "inspect [Pasted: queued body]", "queued #2 / 2", "then test");
+
+    ui.key(special(TerminalKey.SpecialKey.UP, false, true, false), agent);
+    assertThat(terminal.bytes.toString()).contains("✎ editing — queued #2 / 2");
+  }
+
   @Test void modelPickerRendersLoadingBeforeDeferredCatalogArrives() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();

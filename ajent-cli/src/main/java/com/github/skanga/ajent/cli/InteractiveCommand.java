@@ -2668,7 +2668,8 @@ final class InteractiveCommand {
           profile, modelId, pendingPermission != null, state.phase().kind().ordinal(),
           visibleStatus, 0, active, active ? (int) (nowNanos / 100_000_000L) : 0,
           new InteractiveVisualHash.ComposerState(
-              composer, cursor, composerAttachments.size(), state.queued().size(), composerExpanded),
+              composer, cursor, composerAttachments.size(), state.queued().size(),
+              contentKey(state.queued()), queuePeekIndex, composerExpanded),
           surfaces, animationBucket, state.lastTickNanos(), state.tokensIn(), state.tokensOut()));
     }
 
@@ -2882,6 +2883,15 @@ final class InteractiveCommand {
         // The reveal can become settled while painting this frame. Request one final frame so
         // freezeLimit observes that transition and seals the whole assistant run exactly once.
         animating = true;
+      }
+      for (int index = 0; index < state.queued().size(); index++) {
+        RuntimeMessage.Submit queued = state.queued().get(index);
+        if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
+        String meta = "queued #" + (index + 1) + " / " + state.queued().size();
+        if (index == queuePeekIndex) meta = "\u270e editing \u2014 " + meta;
+        output.add(new StyledLine("you  " + meta, Style.ACCENT));
+        wrap(output, AttachmentText.display(queued.text(), queued.attachments()), width,
+            Style.NORMAL);
       }
       if (permission != null) {
         output.add(new StyledLine("", Style.NORMAL));

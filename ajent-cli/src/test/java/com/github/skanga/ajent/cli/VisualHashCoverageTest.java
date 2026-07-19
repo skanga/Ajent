@@ -109,6 +109,8 @@ final class VisualHashCoverageTest {
         }),
         new Axis("composer attachment count", model -> model.attachmentCount = 1),
         new Axis("composer queued count", model -> model.queuedCount = 1),
+        new Axis("composer queued content", model -> model.queuedKey = 7),
+        new Axis("composer queue peek", model -> model.queuePeekIndex = 1),
         new Axis("composer expanded toggle", model -> model.composerExpanded = true),
         new Axis("frozen prefix grows", model -> model.frozenBlocks = 1),
         new Axis("frozen_turn advances", model -> model.frozenTurn = 7),
@@ -183,7 +185,8 @@ final class VisualHashCoverageTest {
         model.profile, model.modelId, model.pendingPermission, model.phaseVariant,
         model.status, model.statusExpiryBucket, model.active, model.spinnerFrame,
         new InteractiveVisualHash.ComposerState(model.composerText, model.composerCursor,
-            model.attachmentCount, model.queuedCount, model.composerExpanded),
+            model.attachmentCount, model.queuedCount, model.queuedKey, model.queuePeekIndex,
+            model.composerExpanded),
         model.surfaces, 0, model.lastTickNanos, model.tokensIn, model.tokensOut));
   }
 
@@ -208,6 +211,8 @@ final class VisualHashCoverageTest {
     private int composerCursor;
     private int attachmentCount;
     private int queuedCount;
+    private long queuedKey;
+    private int queuePeekIndex = -1;
     private boolean composerExpanded;
     private long lastTickNanos;
     private int tokensIn;

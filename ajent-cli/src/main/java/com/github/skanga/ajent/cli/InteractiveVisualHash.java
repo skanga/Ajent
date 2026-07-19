@@ -31,7 +31,8 @@ final class InteractiveVisualHash {
   }
 
   record ComposerState(
-      String text, int cursor, int attachmentCount, int queuedCount, boolean expanded) {
+      String text, int cursor, int attachmentCount, int queuedCount, long queuedKey,
+      int queuePeekIndex, boolean expanded) {
     ComposerState {
       text = Objects.requireNonNull(text, "text");
       if (cursor < 0 || attachmentCount < 0 || queuedCount < 0) {
@@ -106,6 +107,8 @@ final class InteractiveVisualHash {
     mixer.mix(state.composer().cursor());
     mixer.mix(state.composer().attachmentCount());
     mixer.mix(state.composer().queuedCount());
+    mixer.mix(state.composer().queuedKey());
+    mixer.mix(state.composer().queuePeekIndex());
     mixer.mix(state.composer().expanded());
     for (Surface surface : Surface.values()) {
       SurfaceState value = state.surfaces().getOrDefault(surface, SurfaceState.closed());
