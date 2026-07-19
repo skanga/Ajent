@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.time.Duration;
 
 /** Incremental Markdown block parser mirroring AgenTTY's streaming block vocabulary. */
 public final class StreamingMarkdown {
@@ -120,6 +121,16 @@ public final class StreamingMarkdown {
     live = false;
     blocks = parse(source);
     committedSourceEnd = source.length();
+  }
+
+  /** Requests a bounded live-tail drain using the caller's protocol deadline. */
+  public void requestFinalize(Duration deadline) {
+    Objects.requireNonNull(deadline, "deadline");
+    if (deadline.isZero() || deadline.isNegative()) {
+      throw new IllegalArgumentException("finalize deadline must be positive");
+    }
+    reveal.setFinalizeSeconds(deadline.toNanos() / 1_000_000_000.0);
+    finish();
   }
 
   public String content() {

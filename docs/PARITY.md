@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 43 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 44 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -133,6 +133,11 @@ print-only manual aid. All eight native bodies replay at every UTF-8 byte bounda
 80-column, 16 ms live-reveal conditions, and each frame asserts that the rendered height never
 retreats. This directly covers link references, loose and nested lists, raw HTML, quoted fences,
 the long push summary, bold bullets, and the paragraph-to-list transition.
+
+`reveal_lag_probe.cpp` now drives its exact 800 cps prose-plus-60-line-fenced-code stream on the
+native 16 ms simulated frame cadence. Ajent exposes the corresponding duration-typed finalize
+request, uses the probe's 160 ms deadline at the production text/tool seam, and proves that the
+eager tail drains within the bound with both reveal progress and live scheduling disarmed.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The

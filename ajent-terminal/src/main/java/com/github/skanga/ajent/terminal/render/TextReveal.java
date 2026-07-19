@@ -7,7 +7,7 @@ public final class TextReveal {
   private static final double FRAME_GAP_CAP_SECONDS = 0.250;
 
   private final RateCursor cursor;
-  private final double finalizeSeconds;
+  private double finalizeSeconds;
   private String source = "";
   private long lastNanos;
   private long lastRevealNanos;
@@ -27,6 +27,14 @@ public final class TextReveal {
   /** Updates live reveal pacing without discarding the current cursor position. */
   public void setPacing(double floorRate, double drainSeconds) {
     cursor.setPacing(floorRate, drainSeconds);
+  }
+
+  /** Changes the deadline used by the next live-to-finalizing transition. */
+  public void setFinalizeSeconds(double seconds) {
+    if (!Double.isFinite(seconds) || seconds <= 0) {
+      throw new IllegalArgumentException("finalize seconds must be positive and finite");
+    }
+    finalizeSeconds = seconds;
   }
 
   /** Starts a new text block, revealing existing settled text immediately. */

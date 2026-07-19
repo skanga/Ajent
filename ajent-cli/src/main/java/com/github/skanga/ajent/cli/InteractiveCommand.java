@@ -2617,7 +2617,9 @@ final class InteractiveCommand {
         }
         reveal.setContent(text);
         if (streaming) reveal.setLive(true);
-        else reveal.finish();
+        else if (!message.toolCalls().isEmpty()) {
+          reveal.requestFinalize(Duration.ofMillis(160));
+        } else reveal.finish();
         revealFrame = reveal.render(width, nowNanos);
         animating = reveal.requiresAnimation();
         ToolPanelDeferral.Decision toolDecision = toolPanelDeferral.next(message.id(),

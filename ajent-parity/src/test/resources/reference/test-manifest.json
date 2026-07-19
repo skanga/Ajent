@@ -504,9 +504,17 @@
       "classification": "diagnostic",
       "surface": "terminal-rendering",
       "referenceRun": "cmake --build <build> --target reveal_lag_probe; <build>/reveal_lag_probe",
-      "javaCounterpart": "ajent-parity/src/testFixtures/java/com/github/skanga/ajent/parity/RevealLagProbeDiagnostic.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/RevealLagProbeTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/StreamingMarkdown.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/TextReveal.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q test",
+        "the exact 800 cps, 60-line eager fenced-code tail is driven at the native 16 ms frame cadence; a quiet-wire request drains within the 160 ms typed deadline and disarms liveness"
+      ]
     },
     {
       "id": "reveal_pacing_test",
