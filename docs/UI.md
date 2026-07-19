@@ -34,6 +34,28 @@ tool-specific previews. Queued turns look like user turns and carry
 `queued #N / total`; Alt-arrow editing marks the active slot with
 `✎ editing`.
 
+### Conversation turns
+
+Every settled or live conversation turn uses AgenTTY's left `┃` rail. The
+header identifies user turns as `❯ You` and assistant turns with `✦` plus the
+capability-aware model name, such as `Opus 4.6`, `Sonnet 4`, or a normalized
+local model label. User, Opus, Sonnet, Haiku, and fallback rails use the
+native magenta, bright-magenta, blue, bright-cyan, and cyan identity colors;
+header metadata remains muted. The right side shows local `HH:mm` time,
+elapsed response time from the preceding user message when it is at least
+100 ms, the logical turn number, and `↺ checkpoint` when the user message
+owns a workspace checkpoint.
+
+Consecutive assistant messages are one visual run: only the first subturn has
+a header, while prose, Markdown, tool panels, and errors remain inside the
+same rail. A blank railed row separates the header from its body. The body is
+laid out three columns narrower so the rail never steals content width, and
+narrow headers truncate by Unicode terminal-cell width. Body slots are
+separated by one blank railed row, and errors use the native red `⚠` inline
+row. Cold-history recovery may start inside a very large assistant run; in
+that case Ajent restores a real assistant header at the retained boundary
+rather than exposing an orphaned body.
+
 ### Welcome screen
 
 An empty thread uses AgenTTY's 6×7 half-block `» AGENTTY` wordmark, the

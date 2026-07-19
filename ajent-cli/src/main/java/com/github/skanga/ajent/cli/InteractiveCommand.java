@@ -69,6 +69,7 @@ import com.github.skanga.ajent.terminal.ui.SymbolPicker;
 import com.github.skanga.ajent.terminal.ui.ToolBodyPreview;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.terminal.ui.ThreadPicker;
+import com.github.skanga.ajent.terminal.ui.TurnChrome;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.process.ProcessRunner;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
@@ -90,6 +91,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -3155,9 +3157,18 @@ final class InteractiveCommand {
         int messageCount, int width, int terminalRows, long nowNanos, boolean allowReveal,
         boolean showHeader) {
       var output = new ArrayList<StyledLine>();
+      int bodyWidth = Math.max(1, width - 3);
+      TurnChrome.SpeakerTone speakerTone = TurnChrome.speakerTone(message.role(), modelId);
       if (showHeader) {
-        output.add(new StyledLine(message.role() == Role.USER ? "you" : "assistant", Style.ACCENT));
+        TurnChrome.header(new TurnChrome.Config(message.role(), modelId, message.timestamp(),
+            turnNumber(state, messageIndex, messageCount), elapsed(messages(state), messageIndex),
+            message.checkpointId().isPresent(), false, bodyWidth, ZoneId.systemDefault()))
+            .ifPresent(header -> {
+              output.add(turnHeader(header));
+              output.add(new StyledLine("", Style.NORMAL));
+            });
       }
+      int bodyStart = output.size();
       String text = AttachmentText.display(message.text(), message.attachments());
       List<MarkdownTerminalRenderer.Line> revealFrame = null;
       boolean animating = false;
@@ -3176,13 +3187,13 @@ final class InteractiveCommand {
         else if (!message.toolCalls().isEmpty()) {
           reveal.requestFinalize(Duration.ofMillis(160));
         } else reveal.finish();
-        revealFrame = reveal.render(width, nowNanos);
+        revealFrame = reveal.render(bodyWidth, nowNanos);
         animating = reveal.requiresAnimation();
         ToolPanelDeferral.Decision toolDecision = toolPanelDeferral.next(message.id(),
             !message.toolCalls().isEmpty(), reveal.revealInProgress(), nowNanos);
         if (toolDecision == ToolPanelDeferral.Decision.SNAP_AND_SHOW) {
           reveal.snapRevealToEdge(nowNanos);
-          revealFrame = reveal.render(width, nowNanos);
+          revealFrame = reveal.render(bodyWidth, nowNanos);
           animating = reveal.requiresAnimation();
         } else if (toolDecision == ToolPanelDeferral.Decision.HOLD) {
           showTools = false;
@@ -3190,10 +3201,13 @@ final class InteractiveCommand {
         }
       }
       if (revealFrame != null) appendMarkdown(output, revealFrame);
-      else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, width);
-      else wrap(output, text, width, Style.NORMAL);
+      else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, bodyWidth);
+      else wrap(output, text, bodyWidth, Style.NORMAL);
       Map<String, java.util.Set<Integer>> grepHits =
           ToolBodyPreview.collectGrepHits(message.toolCalls());
+      if (showTools && !message.toolCalls().isEmpty() && output.size() > bodyStart) {
+        output.add(new StyledLine("", Style.NORMAL));
+      }
       for (ToolUse call : showTools ? message.toolCalls() : List.<ToolUse>of()) {
         output.add(new StyledLine("  " + call.name().value() + " \u00b7 "
             + call.status().getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT),
@@ -3209,8 +3223,113 @@ final class InteractiveCommand {
           }));
         }
       }
-      message.error().ifPresent(error -> wrap(output, "error: " + error, width, Style.DANGER));
-      return new MessageRender(List.copyOf(output), animating);
+      message.error().ifPresent(error -> {
+        output.add(new StyledLine("", Style.NORMAL));
+        appendError(output, error, bodyWidth);
+      });
+      return new MessageRender(rail(output, speakerTone), animating);
+    }
+
+    private static List<Message> messages(AgentState state) {
+      return state.thread().messages();
+    }
+
+    private static int turnNumber(AgentState state, int messageIndex, int messageCount) {
+      List<Message> messages = messages(state);
+      int turns = 0;
+      for (int index = 0; index <= messageIndex && index < messages.size(); index++) {
+        if (messages.get(index).role() == Role.ASSISTANT
+            && (index == 0 || messages.get(index - 1).role() != Role.ASSISTANT
+                || hasCompactionBoundary(state, index, messageCount))) turns++;
+      }
+      return turns;
+    }
+
+    private static Optional<Duration> elapsed(List<Message> messages, int messageIndex) {
+      if (messageIndex < 0 || messageIndex >= messages.size()
+          || messages.get(messageIndex).role() != Role.ASSISTANT) return Optional.empty();
+      for (int index = messageIndex - 1; index >= 0; index--) {
+        if (messages.get(index).role() != Role.USER) continue;
+        Duration duration = Duration.between(
+            messages.get(index).timestamp(), messages.get(messageIndex).timestamp());
+        return duration.isPositive() && duration.compareTo(Duration.ofHours(1)) < 0
+            ? Optional.of(duration) : Optional.empty();
+      }
+      return Optional.empty();
+    }
+
+    private static StyledLine turnHeader(TurnChrome.Header header) {
+      TerminalStyle speaker = speakerStyle(header.tone());
+      String left = header.glyph() + " " + header.label();
+      if (!header.text().startsWith(left)) {
+        return new StyledLine(header.text(), Style.NORMAL,
+            List.of(new StyledSpan(header.text(), speaker.withBold())));
+      }
+      var spans = new ArrayList<StyledSpan>();
+      spans.add(new StyledSpan(header.glyph(), speaker));
+      spans.add(new StyledSpan(" ", TerminalStyle.EMPTY));
+      spans.add(new StyledSpan(header.label(), speaker.withBold()));
+      if (header.text().endsWith(header.meta())) {
+        int gapEnd = header.text().length() - header.meta().length();
+        spans.add(new StyledSpan(
+            header.text().substring(left.length(), gapEnd), TerminalStyle.EMPTY));
+        spans.add(new StyledSpan(header.meta(), terminalStyle(Style.MUTED)));
+      } else {
+        spans.add(new StyledSpan(
+            header.text().substring(left.length()), terminalStyle(Style.MUTED)));
+      }
+      return new StyledLine(header.text(), Style.NORMAL, spans);
+    }
+
+    private static void appendError(List<StyledLine> output, String error, int width) {
+      TerminalStyle red = TerminalStyle.EMPTY.withForeground(TerminalColor.red());
+      List<String> wrapped = ColumnTextWrapper.wrap(error, Math.max(1, width - 3));
+      for (int index = 0; index < wrapped.size(); index++) {
+        String content = wrapped.get(index);
+        if (index > 0 && content.startsWith(" ")) content = content.substring(1);
+        String prefix = index == 0 ? "\u26a0  " : "   ";
+        output.add(new StyledLine(prefix + content, Style.DANGER, List.of(
+            new StyledSpan(prefix, index == 0 ? red.withBold() : TerminalStyle.EMPTY),
+            new StyledSpan(content, red.withDim().withItalic()))));
+      }
+    }
+
+    private static List<StyledLine> rail(
+        List<StyledLine> lines, TurnChrome.SpeakerTone speakerTone) {
+      TerminalStyle accent = speakerStyle(speakerTone);
+      var output = new ArrayList<StyledLine>(lines.size());
+      for (StyledLine line : lines) {
+        var spans = new ArrayList<StyledSpan>();
+        spans.add(new StyledSpan("\u2503  ", accent));
+        if (line.spans().isEmpty()) {
+          spans.add(new StyledSpan(line.text(), terminalStyle(line.style())));
+        } else {
+          spans.addAll(line.spans());
+        }
+        output.add(new StyledLine(TurnChrome.rail(line.text()), Style.NORMAL, spans));
+      }
+      return List.copyOf(output);
+    }
+
+    private static TerminalStyle speakerStyle(TurnChrome.SpeakerTone tone) {
+      TerminalColor color = switch (tone) {
+        case USER -> TerminalColor.magenta();
+        case OPUS -> TerminalColor.named(13);
+        case SONNET -> TerminalColor.blue();
+        case HAIKU -> TerminalColor.named(14);
+        case FALLBACK -> TerminalColor.cyan();
+      };
+      return TerminalStyle.EMPTY.withForeground(color);
+    }
+
+    private static TerminalStyle terminalStyle(Style style) {
+      return switch (style) {
+        case NORMAL -> TerminalStyle.EMPTY;
+        case ACCENT -> TerminalStyle.EMPTY.withForeground(TerminalColor.cyan()).withBold();
+        case MUTED -> TerminalStyle.EMPTY.withForeground(TerminalColor.brightBlack());
+        case DANGER -> TerminalStyle.EMPTY.withForeground(TerminalColor.red()).withBold();
+        case SUCCESS -> TerminalStyle.EMPTY.withForeground(TerminalColor.green()).withBold();
+      };
     }
 
     private static void wrap(List<StyledLine> lines, String text, int width, Style style) {

@@ -1224,6 +1224,46 @@ final class InteractiveCommandTest {
         Optional.of(new CheckpointId(id)), Optional.empty(), false);
   }
 
+  @Test void messagesUseNativeTurnHeadersMetadataAndLeftRail() {
+    Instant userAt = Instant.parse("2026-07-19T12:34:00Z");
+    Message user = new Message(new com.github.skanga.ajent.domain.MessageId("user"),
+        Role.USER, "hello", List.of(), List.of(), "", "", List.of(), userAt,
+        Optional.of(new CheckpointId("checkpoint")), Optional.empty(), false);
+    Message assistant = new Message(new com.github.skanga.ajent.domain.MessageId("assistant"),
+        Role.ASSISTANT, "response", List.of(), List.of(), "", "", List.of(),
+        userAt.plusMillis(4_240), Optional.empty(), Optional.empty(), false);
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(user, assistant))));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(100, 40);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of(),
+        Profile.WRITE, "claude-opus-4-6");
+
+    ui.render();
+
+    assertThat(ui.renderedText()).contains(
+        "\u2503  \u276f You", "\u21ba checkpoint", "\u2503  hello",
+        "\u2503  \u2726 Opus 4.6", "4.2s  \u00b7  turn 1", "\u2503  response");
+  }
+
+  @Test void turnBodySeparatesSlotsAndUsesNativeInlineErrorShape() {
+    Message assistant = new Message(new com.github.skanga.ajent.domain.MessageId("assistant"),
+        Role.ASSISTANT, "response", List.of(), List.of(), "", "", List.of(tool("failed")),
+        Instant.now(), Optional.empty(), Optional.of("stream cut off unexpectedly"), false, false);
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(assistant))));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(20, 40);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of(),
+        Profile.WRITE, "claude-opus-4-6");
+
+    ui.render();
+
+    assertThat(ui.renderedText()).contains(
+        "\u2503  response\n\u2503  \n\u2503    bash \u00b7 failed",
+        "\u2503  \n\u2503  \u26a0  stream cut off\n\u2503     unexpectedly");
+  }
+
   @Test void savedThreadPickerLoadsAtCurrentNavigatesAndSwapsWholeView() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
@@ -1486,7 +1526,7 @@ final class InteractiveCommandTest {
     terminal.size = new JLineTerminalSession.Size(8, 5);
     new InteractiveCommand.Ui(terminal, new AtomicReference<>(withStatus),
         new InteractiveCommand.PermissionGate()).render();
-    assertThat(terminal.bytes.toString()).contains("assistan").contains("error:");
+    assertThat(terminal.bytes.toString()).contains("\u2726 Op", "erro");
   }
 
   @Test void renderingCoversSuccessfulToolNormalStatusEmptyTextAndResizeDiff() {
@@ -1835,7 +1875,7 @@ final class InteractiveCommandTest {
     assertThat(ui.frozenText()).contains("completed subturn 0", "completed subturn 19",
         "src/s0.java", "src/s19.java")
         .doesNotContain("earlier action");
-    assertThat(count(ui.frozenText(), "assistant")).isOne();
+    assertThat(count(ui.frozenText(), "\u2726 Opus 4.5")).isOne();
   }
 
   @Test void coldRehydrateCutsInsideAGiantRunButStartsOnARealHeader() {
@@ -1865,7 +1905,7 @@ final class InteractiveCommandTest {
     }
 
     assertThat(ui.frozenThrough()).isEqualTo(messages.size());
-    assertThat(firstNonblank(ui.frozenText())).isEqualTo("assistant");
+    assertThat(firstNonblank(ui.frozenText())).startsWith("\u2503  \u2726 Opus 4.5");
     assertThat(ui.frozenText()).contains("giant-59", "all done")
         .doesNotContain("giant-0");
   }
@@ -1884,7 +1924,8 @@ final class InteractiveCommandTest {
     ui.render();
     ui.render();
 
-    assertThat(firstNonblank(ui.frozenText())).isIn("you", "assistant");
+    assertThat(firstNonblank(ui.frozenText()))
+        .matches("\\u2503  [\\u276f\\u2726] .+");
   }
 
   @Test void frozenCollapseRemainsOptInAndKeepsTheTrailingEntryWhole() {
