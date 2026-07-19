@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpServer;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.InputStreamReader;
@@ -12,11 +13,13 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,6 +44,95 @@ final class NativeAcpParityIT {
       assertThat(normalize(nativeTranscript, true))
           .isEqualTo(normalize(javaTranscript, false));
     }
+  }
+
+  @Test
+  void livePromptPermissionToolAndContinuationMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-workspace"));
+    var target = new AtomicReference<Path>();
+    HttpServer provider = scriptedProvider(target);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      Transcript nativeTranscript;
+      target.set(nativeWorkspace.resolve("out.txt"));
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-prompt-home"), false)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace);
+      }
+      assertThat(target.get()).as(nativeTranscript.toString()).hasContent("hello from acp\n");
+
+      Transcript javaTranscript;
+      target.set(javaWorkspace.resolve("out.txt"));
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-prompt-home"), true)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace);
+      }
+      assertThat(target.get()).as(javaTranscript.toString()).hasContent("hello from acp\n");
+
+      Transcript normalizedNative = normalizePrompt(nativeTranscript, nativeWorkspace, true);
+      Transcript normalizedJava = normalizePrompt(javaTranscript, javaWorkspace, false);
+      assertThat(firstDifference(normalizedNative, normalizedJava)).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  private static Transcript exercisePrompt(AgentProcess agent, Path workspace) throws Exception {
+    agent.call("initialize", JSON.readTree(
+        "{\"protocolVersion\":1,\"clientCapabilities\":{}}"));
+    List<JsonNode> created = agent.call("session/new", JSON.createObjectNode()
+        .put("cwd", workspace.toString()).set("mcpServers", JSON.createArrayNode()));
+    String sessionId = response(created).path("result").path("sessionId").textValue();
+    ObjectNode params = session(sessionId);
+    var prompt = JSON.createArrayNode();
+    prompt.addObject().put("type", "text").put("text", "please write the file");
+    params.set("prompt", prompt);
+    return new Transcript(sessionId, List.of(agent.callWithPermission("session/prompt", params)));
+  }
+
+  private static HttpServer scriptedProvider(AtomicReference<Path> target) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        JsonNode request = JSON.readTree(exchange.getRequestBody());
+        boolean continuation = false;
+        for (JsonNode message : request.path("messages")) {
+          if ("tool".equals(message.path("role").asText())) continuation = true;
+        }
+        String body;
+        if (continuation) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":\"Done.\"}}]}\n\n"
+              + "data: {\"usage\":{\"prompt_tokens\":1300,\"completion_tokens\":10},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else {
+          String arguments = JSON.writeValueAsString(JSON.createObjectNode()
+              .put("path", target.get().toString()).put("content", "hello from acp\n"));
+          ObjectNode frame = JSON.createObjectNode();
+          ObjectNode choice = frame.putArray("choices").addObject();
+          ObjectNode delta = choice.putObject("delta");
+          delta.put("content", "Writing the file. ");
+          ObjectNode call = delta.putArray("tool_calls").addObject();
+          call.put("index", 0).put("id", "tc_write_0").put("type", "function");
+          call.putObject("function").put("name", "write").put("arguments", arguments);
+          body = "data: " + JSON.writeValueAsString(frame) + "\n\n"
+              + "data: {\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":40},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
   }
 
   private static Transcript exercise(AgentProcess agent, Path workspace) throws Exception {
@@ -85,6 +177,108 @@ final class NativeAcpParityIT {
     return new Transcript("<SESSION>", exchanges);
   }
 
+  private static Transcript normalizePrompt(
+      Transcript transcript, Path workspace, boolean nativeProgram) {
+    Transcript normalized = normalize(transcript, nativeProgram);
+    List<List<JsonNode>> exchanges = normalized.exchanges().stream()
+        .map(exchange -> exchange.stream()
+            .map(frame -> normalizePromptFrame(frame, workspace)).toList())
+        .toList();
+    return new Transcript(normalized.sessionId(), exchanges);
+  }
+
+  private static String firstDifference(Transcript actual, Transcript expected) {
+    if (!actual.sessionId().equals(expected.sessionId())) return "sessionId";
+    if (actual.exchanges().size() != expected.exchanges().size()) return "exchange count";
+    for (int exchange = 0; exchange < actual.exchanges().size(); exchange++) {
+      List<JsonNode> left = actual.exchanges().get(exchange);
+      List<JsonNode> right = expected.exchanges().get(exchange);
+      if (left.size() != right.size()) return "exchange[" + exchange + "] frame count";
+      for (int frame = 0; frame < left.size(); frame++) {
+        String difference = jsonDifference(left.get(frame), right.get(frame),
+            "exchange[" + exchange + "][" + frame + "]");
+        if (!difference.isEmpty()) return difference;
+      }
+    }
+    return "";
+  }
+
+  private static String jsonDifference(JsonNode actual, JsonNode expected, String path) {
+    if (actual.isNumber() && expected.isNumber()) {
+      return actual.decimalValue().compareTo(expected.decimalValue()) == 0 ? ""
+          : path + ": expected " + expected + " but was " + actual;
+    }
+    if (actual.isObject() && expected.isObject()) {
+      var actualNames = new java.util.TreeSet<String>();
+      var expectedNames = new java.util.TreeSet<String>();
+      actual.fieldNames().forEachRemaining(actualNames::add);
+      expected.fieldNames().forEachRemaining(expectedNames::add);
+      if (!actualNames.equals(expectedNames)) {
+        return path + ": expected fields " + expectedNames + " but was " + actualNames;
+      }
+      for (String name : actualNames) {
+        String difference = jsonDifference(actual.get(name), expected.get(name), path + "." + name);
+        if (!difference.isEmpty()) return difference;
+      }
+      return "";
+    }
+    if (actual.isArray() && expected.isArray()) {
+      if (actual.size() != expected.size()) {
+        return path + ": expected array size " + expected.size() + " but was " + actual.size();
+      }
+      for (int index = 0; index < actual.size(); index++) {
+        String difference = jsonDifference(
+            actual.get(index), expected.get(index), path + "[" + index + "]");
+        if (!difference.isEmpty()) return difference;
+      }
+      return "";
+    }
+    return actual.equals(expected) ? ""
+        : path + ": expected " + expected + " but was " + actual;
+  }
+
+  private static JsonNode normalizePromptFrame(JsonNode frame, Path workspace) {
+    JsonNode normalized = replaceText(frame, workspace.toString(), "<WORKSPACE>");
+    if ("session/request_permission".equals(normalized.path("method").asText())) {
+      ((ObjectNode) normalized).put("id", "<PERMISSION_REQUEST>");
+    }
+    var messageIds = new java.util.LinkedHashSet<String>();
+    collectFieldValues(normalized, "messageId", messageIds);
+    for (String id : messageIds) normalized = replaceText(normalized, id, "<MESSAGE>");
+    return normalized;
+  }
+
+  private static void collectFieldValues(JsonNode value, String field,
+                                         java.util.Set<String> result) {
+    if (value.isObject()) {
+      value.properties().forEach(entry -> {
+        if (entry.getKey().equals(field) && entry.getValue().isTextual()) {
+          result.add(entry.getValue().textValue());
+        }
+        collectFieldValues(entry.getValue(), field, result);
+      });
+    } else if (value.isArray()) {
+      value.forEach(item -> collectFieldValues(item, field, result));
+    }
+  }
+
+  private static JsonNode replaceText(JsonNode value, String before, String after) {
+    if (value.isObject()) {
+      ObjectNode result = JSON.createObjectNode();
+      value.properties().forEach(entry ->
+          result.set(entry.getKey(), replaceText(entry.getValue(), before, after)));
+      return result;
+    }
+    if (value.isArray()) {
+      var result = JSON.createArrayNode();
+      value.forEach(item -> result.add(replaceText(item, before, after)));
+      return result;
+    }
+    return value.isTextual()
+        ? JSON.getNodeFactory().textNode(value.textValue().replace(before, after))
+        : value.deepCopy();
+  }
+
   private static JsonNode normalize(JsonNode value, String sessionId, boolean nativeProgram) {
     if (value.isObject()) {
       ObjectNode result = JSON.createObjectNode();
@@ -97,6 +291,7 @@ final class NativeAcpParityIT {
       value.forEach(item -> result.add(normalize(item, sessionId, nativeProgram)));
       return result;
     }
+    if (value.isIntegralNumber()) return JSON.getNodeFactory().numberNode(value.longValue());
     if (!value.isTextual()) return value.deepCopy();
     String text = value.textValue().replace(sessionId, "<SESSION>");
     if (nativeProgram) text = text.replace("agentty", "ajent");
@@ -104,15 +299,23 @@ final class NativeAcpParityIT {
   }
 
   private static List<String> command(Path executable, Path workspace) {
+    return command(executable, workspace, "ollama");
+  }
+
+  private static List<String> command(Path executable, Path workspace, String provider) {
     return List.of(executable.toString(), "acp", "--workspace", workspace.toString(),
-        "--sandbox", "off", "--provider", "ollama", "--model", "qwen3:14b");
+        "--sandbox", "off", "--provider", provider, "--model", "qwen3:14b");
   }
 
   private static List<String> javaCommand(Path jar, Path workspace) {
+    return javaCommand(jar, workspace, "ollama");
+  }
+
+  private static List<String> javaCommand(Path jar, Path workspace, String provider) {
     String executable = Path.of(System.getProperty("java.home"), "bin",
         System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
     return List.of(executable, "-jar", jar.toString(), "acp", "--workspace",
-        workspace.toString(), "--sandbox", "off", "--provider", "ollama", "--model",
+        workspace.toString(), "--sandbox", "off", "--provider", provider, "--model",
         "qwen3:14b");
   }
 
@@ -169,6 +372,15 @@ final class NativeAcpParityIT {
     }
 
     List<JsonNode> call(String method, JsonNode params) throws Exception {
+      return call(method, params, false);
+    }
+
+    List<JsonNode> callWithPermission(String method, JsonNode params) throws Exception {
+      return call(method, params, true);
+    }
+
+    private List<JsonNode> call(String method, JsonNode params, boolean answerPermission)
+        throws Exception {
       int id = ++nextId;
       ObjectNode request = JSON.createObjectNode().put("jsonrpc", "2.0").put("id", id)
           .put("method", method);
@@ -183,6 +395,17 @@ final class NativeAcpParityIT {
         if (line == null) throw new AssertionError("ACP process exited: " + stderr());
         JsonNode frame = JSON.readTree(line);
         frames.add(frame);
+        if (answerPermission
+            && "session/request_permission".equals(frame.path("method").asText())) {
+          ObjectNode response = JSON.createObjectNode().put("jsonrpc", "2.0");
+          response.set("id", frame.path("id"));
+          response.putObject("result").putObject("outcome")
+              .put("outcome", "selected").put("optionId", "allow_once");
+          stdin.write(JSON.writeValueAsString(response));
+          stdin.newLine();
+          stdin.flush();
+          continue;
+        }
         if (frame.path("id").asInt(-1) == id) return List.copyOf(frames);
       }
     }

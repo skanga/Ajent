@@ -28,6 +28,7 @@ import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.PermissionVerdict;
 import com.github.skanga.ajent.runtime.ToolCompletion;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
+import com.github.skanga.ajent.tools.runtime.FileChange;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -390,7 +391,8 @@ final class AcpJsonRpcServerTest {
             }
           }, call -> {
             toolCalls.incrementAndGet();
-            return new ToolCompletion.Success("wrote file");
+            return new ToolCompletion.Success("wrote file", java.util.Optional.of(
+                new FileChange("C:/workspace/file.txt", 1, 0, "", "hello")));
           }, permissions, saved -> {}, observer);
     };
     var server = new AcpJsonRpcServer(directory, () -> new ThreadId("prompt-session"),
@@ -430,6 +432,9 @@ final class AcpJsonRpcServerTest {
     assertThat(projected).extracting(update -> update.path("sessionUpdate").textValue())
         .contains("agent_message_chunk", "tool_call", "tool_call_update", "usage_update");
     assertThat(projected.stream().filter(update ->
+        "tool_call".equals(update.path("sessionUpdate").textValue())).findFirst().orElseThrow()
+        .has("rawInput")).isFalse();
+    assertThat(projected.stream().filter(update ->
         "agent_message_chunk".equals(update.path("sessionUpdate").textValue()))
         .map(update -> update.path("content").path("text").textValue()).toList())
         .containsExactly("Writing the file.", "Done.");
@@ -439,7 +444,23 @@ final class AcpJsonRpcServerTest {
         .contains("in_progress", "completed");
     JsonNode completed = projected.stream().filter(update ->
         "completed".equals(update.path("status").textValue())).findFirst().orElseThrow();
+    assertThat(completed.path("content").get(0).path("type").textValue()).isEqualTo("diff");
+    assertThat(completed.path("content").get(0).path("path").textValue())
+        .isEqualTo("C:/workspace/file.txt");
+    assertThat(completed.path("content").get(0).path("newText").textValue())
+        .isEqualTo("hello");
+    assertThat(completed.path("content").get(0).has("oldText")).isFalse();
     assertThat(completed.path("rawOutput").path("text").textValue()).isEqualTo("wrote file");
+    int metadataIndex = java.util.stream.IntStream.range(0, projected.size())
+        .filter(index -> projected.get(index).has("title")
+            && "tool_call_update".equals(
+                projected.get(index).path("sessionUpdate").textValue()))
+        .findFirst().orElseThrow();
+    int usageIndex = java.util.stream.IntStream.range(0, projected.size())
+        .filter(index -> "usage_update".equals(
+            projected.get(index).path("sessionUpdate").textValue()))
+        .findFirst().orElseThrow();
+    assertThat(metadataIndex).isLessThan(usageIndex);
     assertThat(projected.stream().filter(update ->
         "usage_update".equals(update.path("sessionUpdate").textValue())))
         .hasSize(2).allSatisfy(update -> assertThat(update.path("size").intValue())

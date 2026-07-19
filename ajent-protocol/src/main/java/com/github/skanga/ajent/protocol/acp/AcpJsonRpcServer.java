@@ -21,6 +21,8 @@ import com.github.skanga.ajent.runtime.AgentLoop;
 import com.github.skanga.ajent.runtime.AgentState;
 import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.RuntimeMessage;
+import com.github.skanga.ajent.runtime.ToolCompletion;
+import com.github.skanga.ajent.tools.runtime.FileChange;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -548,11 +550,16 @@ public final class AcpJsonRpcServer {
     update.put("status", "pending");
     update.putArray("content");
     update.set("locations", toolLocations(tool));
-    update.set("rawInput", JSON.valueToTree(tool.arguments()));
+    if (!tool.arguments().isEmpty()) update.set("rawInput", JSON.valueToTree(tool.arguments()));
     return update;
   }
 
   private static ObjectNode toolCompletion(ToolUse tool) {
+    return toolCompletion(tool, java.util.Optional.empty());
+  }
+
+  private static ObjectNode toolCompletion(
+      ToolUse tool, java.util.Optional<FileChange> change) {
     ObjectNode update = JSON.createObjectNode();
     update.put("sessionUpdate", "tool_call_update");
     update.put("toolCallId", tool.id().value());
@@ -560,14 +567,23 @@ public final class AcpJsonRpcServer {
         || tool.status() instanceof ToolStatus.Rejected;
     update.put("status", failed ? "failed" : "completed");
     String output = tool.status().output();
-    if (!output.isEmpty()) {
+    if (change.isPresent() || !output.isEmpty()) {
       ArrayNode content = update.putArray("content");
-      ObjectNode item = content.addObject();
-      item.put("type", "content");
-      ObjectNode text = item.putObject("content");
-      text.put("type", "text");
-      text.put("text", output);
-      update.putObject("rawOutput").put("text", output);
+      change.ifPresent(file -> {
+        ObjectNode diff = content.addObject();
+        diff.put("type", "diff");
+        diff.put("path", file.path());
+        diff.put("newText", file.after());
+        if (!file.before().isEmpty()) diff.put("oldText", file.before());
+      });
+      if (!output.isEmpty()) {
+        ObjectNode item = content.addObject();
+        item.put("type", "content");
+        ObjectNode text = item.putObject("content");
+        text.put("type", "text");
+        text.put("text", output);
+        update.putObject("rawOutput").put("text", output);
+      }
     }
     return update;
   }
@@ -639,6 +655,7 @@ public final class AcpJsonRpcServer {
     private final Client client;
     private final CompletableFuture<JsonNode> result;
     private final Map<String, Class<?>> statuses = new LinkedHashMap<>();
+    private ObjectNode pendingUsage;
 
     private TurnProjection(
         Session session, Client client, CompletableFuture<JsonNode> result) {
@@ -694,7 +711,15 @@ public final class AcpJsonRpcServer {
         update.put("sessionUpdate", "usage_update");
         update.put("used", Math.max(0L, (long) state.tokensIn() + state.tokensOut()));
         update.put("size", contextMax);
-        send(update);
+        pendingUsage = update;
+      } else if (message instanceof RuntimeMessage.ProviderEvent(
+          long ignored, StreamEvent.Finished ignoredFinished) && pendingUsage != null) {
+        send(pendingUsage);
+        pendingUsage = null;
+      } else if (message instanceof RuntimeMessage.ProviderEvent(
+          long ignored, StreamEvent.Error ignoredError) && pendingUsage != null) {
+        send(pendingUsage);
+        pendingUsage = null;
       }
     }
 
@@ -721,7 +746,11 @@ public final class AcpJsonRpcServer {
           if (call.status() instanceof ToolStatus.Running) {
             send(statusUpdate(call, "in_progress"));
           } else if (call.status().isTerminal()) {
-            send(toolCompletion(call));
+            java.util.Optional<FileChange> change = message instanceof RuntimeMessage.ToolCompleted done
+                && done.callId().equals(call.id().value())
+                && done.result() instanceof ToolCompletion.Success success
+                ? success.change() : java.util.Optional.empty();
+            send(toolCompletion(call, change));
           }
         }
         statuses.put(call.id().value(), current);
