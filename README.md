@@ -76,6 +76,14 @@ On Windows, after packaging:
 .\ajent.cmd --workspace .
 ```
 
+On Linux or macOS:
+
+```sh
+./ajent --version
+./ajent --help
+./ajent --workspace .
+```
+
 Or invoke the JAR directly with JDK 25:
 
 ```powershell
@@ -141,7 +149,10 @@ include:
 - `Y` / `N` and `A` / `X` in change review: mark one hunk or all hunks
 
 Write, execution, and network tools are governed by the active permission
-profile. The default `ask` profile prompts before consequential operations.
+profile. The `ask` profile prompts before consequential operations; `minimal`
+also prompts for reads, while `write` is fully autonomous. A fresh interactive
+settings file starts in AgenTTY-compatible `write` mode, and later launches
+restore the saved profile.
 The `task` tool delegates a self-contained job to an isolated subagent using
 the currently selected provider and model. Explorer and reviewer delegates are
 read-only; tester, coder, and general delegates receive their native scoped
@@ -188,6 +199,23 @@ The authoritative construction sequence is
 provenance is recorded in [docs/PROVENANCE.md](docs/PROVENANCE.md), while
 [docs/PARITY.md](docs/PARITY.md) distinguishes implemented, verified, and
 remaining native behavior.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) and [design invariants](docs/DESIGN.md)
+- [Configuration and state](docs/CONFIGURATION.md)
+- [Environment variable reference](docs/ENVIRONMENT.md)
+- [Authentication](docs/AUTH.md) and [providers](docs/PROVIDERS.md)
+- [Terminal UI](docs/UI.md), [rendering](docs/RENDERING.md), and
+  [inline scrollback](docs/INLINE_SCROLLBACK.md)
+- [Tools, permissions, and subagents](docs/TOOLS.md)
+- [ACP and MCP protocols](docs/PROTOCOLS.md)
+- [Running assistant code blocks](docs/RUN_CODE_BLOCK.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Dependencies](docs/DEPENDENCIES.md), [source provenance](docs/PROVENANCE.md),
+  and the [parity ledger](docs/PARITY.md)
+- [Contributing](CONTRIBUTING.md), [release procedure](docs/RELEASE.md), and
+  [changelog](CHANGELOG.md)
 
 ## License and upstream attribution
 

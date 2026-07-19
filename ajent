@@ -1,0 +1,25 @@
+#!/bin/sh
+
+set -eu
+
+AJENT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -f "$AJENT_ROOT/ajent.jar" ]; then
+  AJENT_JAR="$AJENT_ROOT/ajent.jar"
+else
+  AJENT_JAR="$AJENT_ROOT/ajent-cli/target/ajent.jar"
+fi
+
+if [ -n "${AJENT_JAVA_HOME:-}" ]; then
+  AJENT_JAVA="$AJENT_JAVA_HOME/bin/java"
+elif [ -n "${JAVA_HOME:-}" ]; then
+  AJENT_JAVA="$JAVA_HOME/bin/java"
+else
+  AJENT_JAVA=java
+fi
+
+if [ ! -f "$AJENT_JAR" ]; then
+  printf '%s\n' 'Ajent has not been packaged. Run: mvn -q package' >&2
+  exit 1
+fi
+
+exec "$AJENT_JAVA" -jar "$AJENT_JAR" "$@"

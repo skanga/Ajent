@@ -95,6 +95,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -167,6 +168,7 @@ final class InteractiveCommand {
           threadStore.newId(), "", List.of(), Instant.now(), Instant.now(), List.of());
       BiConsumer<RuntimeMessage, AgentState> observe = (message, next) -> {
         recordChange(message, pendingChanges);
+        persistPermissionGrant(message, next, configured.settings());
         state.set(next);
         liveTodoItems(next).ifPresent(configured.todos()::set);
         Ui current = activeUi.get();
@@ -333,7 +335,7 @@ final class InteractiveCommand {
           };
           activeProfile.set(next);
           activeLoop.get().dispatch(new RuntimeMessage.ProfileChanged(next));
-          configured.settings().save(configured.settings().load().withProfile(next));
+          persistProfile(configured.settings(), next);
           return next;
         }
         @Override public String model() { return activeProvider.get().model(); }
@@ -531,16 +533,17 @@ final class InteractiveCommand {
           + sandbox.description() + "\n");
       return null;
     }
+    Path dataDirectory = home.resolve(".agentty");
+    var settingsStore = new SettingsStore(dataDirectory);
+    Settings settings = settingsStore.load();
     Profile profile;
     try {
-      profile = profile(arguments.profile());
+      profile = arguments.profile().isBlank()
+          ? settings.profile() : profile(arguments.profile());
     } catch (IllegalArgumentException exception) {
       error.print("ajent: " + exception.getMessage() + "\n");
       return null;
     }
-    Path dataDirectory = home.resolve(".agentty");
-    var settingsStore = new SettingsStore(dataDirectory);
-    Settings settings = settingsStore.load();
     boolean providerOverride = !arguments.provider().isBlank();
     boolean modelOverride = !arguments.model().isBlank();
     if (modelOverride) settings = settings.withModel(new ModelId(arguments.model()));
@@ -583,7 +586,8 @@ final class InteractiveCommand {
         @Override public boolean create(CheckpointId id) { return checkpoints.create(id); }
       };
       return new Configuration(new AgentSessionFactory(
-          tools, providers, client, dataDirectory, checkpointPort, workspaceIndex::attachmentBody),
+          tools, providers, client, dataDirectory, checkpointPort, workspaceIndex::attachmentBody,
+          () -> Set.copyOf(settingsStore.load().alwaysAllowTools())),
           dataDirectory, profile, model, settingsStore, providers,
           new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints,
           workspaceIndex, subagents, mcp);
@@ -604,6 +608,27 @@ final class InteractiveCommand {
         return List.copyOf(revised);
       });
     }
+  }
+
+  static void persistAlwaysAllowGrants(SettingsStore store, Set<String> grants) {
+    Settings current = store.load();
+    var merged = new java.util.LinkedHashSet<>(current.alwaysAllowTools());
+    grants.stream().sorted().forEach(merged::add);
+    if (!merged.equals(new java.util.LinkedHashSet<>(current.alwaysAllowTools()))) {
+      store.save(current.withAlwaysAllowTools(List.copyOf(merged)));
+    }
+  }
+
+  static void persistPermissionGrant(
+      RuntimeMessage message, AgentState state, SettingsStore store) {
+    if (message instanceof RuntimeMessage.PermissionResolved resolved
+        && resolved.approved() && resolved.always()) {
+      persistAlwaysAllowGrants(store, state.sessionGrants());
+    }
+  }
+
+  static void persistProfile(SettingsStore store, Profile profile) {
+    store.save(store.load().withProfile(profile).withAlwaysAllowTools(List.of()));
   }
 
   static Optional<List<HostServices.TodoItem>> liveTodoItems(AgentState state) {

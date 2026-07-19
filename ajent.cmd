@@ -2,7 +2,11 @@
 setlocal
 
 set "AJENT_ROOT=%~dp0"
-set "AJENT_JAR=%AJENT_ROOT%ajent-cli\target\ajent.jar"
+if exist "%AJENT_ROOT%ajent.jar" (
+  set "AJENT_JAR=%AJENT_ROOT%ajent.jar"
+) else (
+  set "AJENT_JAR=%AJENT_ROOT%ajent-cli\target\ajent.jar"
+)
 
 if defined AJENT_JAVA_HOME (
   set "AJENT_JAVA=%AJENT_JAVA_HOME%\bin\java.exe"

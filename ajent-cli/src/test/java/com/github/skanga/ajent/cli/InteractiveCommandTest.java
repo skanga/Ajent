@@ -17,6 +17,7 @@ import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.core.persistence.SettingsStore;
+import com.github.skanga.ajent.core.persistence.Settings;
 import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.runtime.AgentState;
@@ -36,6 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
@@ -85,7 +87,7 @@ final class InteractiveCommandTest {
     var defaults = command.configure(CliArguments.parse(new String[] {
         "--sandbox", "off", "--key", "secret"}), stream(error));
     assertThat(defaults).isNotNull();
-    assertThat(defaults.profile()).isEqualTo(Profile.ASK);
+    assertThat(defaults.profile()).isEqualTo(Profile.WRITE);
     assertThat(defaults.model()).isEqualTo("local");
     assertThat(defaults.providerConfiguration().provider()).isEqualTo("ollama");
 
@@ -102,6 +104,46 @@ final class InteractiveCommandTest {
             "access", "refresh", System.currentTimeMillis() + 60_000));
     assertThat(command(Map.of()).configure(CliArguments.parse(new String[] {
         "--sandbox", "off"}), stream(error))).isNotNull();
+  }
+
+  @Test void interactiveStartupRehydratesProfileAndAlwaysAllowedTools() {
+    var store = new SettingsStore(directory.resolve(".agentty"));
+    assertThat(store.save(new Settings(new ModelId("local"), Profile.MINIMAL, List.of(),
+        "ollama", Map.of(), Map.of("ollama", "local"), "", List.of("bash"))))
+        .isTrue();
+
+    var configured = command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off"}), stream(new ByteArrayOutputStream()));
+
+    assertThat(configured).isNotNull();
+    assertThat(configured.profile()).isEqualTo(Profile.MINIMAL);
+    var thread = new com.github.skanga.ajent.domain.Thread(
+        new ThreadId("saved-grants"), "", List.of());
+    try (var loop = configured.sessions().create(thread, configured.profile(), configured.model(),
+        call -> new PermissionPort.Decision(true, false), (message, state) -> {})) {
+      assertThat(loop.state().sessionGrants()).containsExactly("bash");
+    }
+
+    var granted = AgentState.initial(thread, Set.of("write", "bash"));
+    InteractiveCommand.persistPermissionGrant(
+        new RuntimeMessage.ProfileChanged(Profile.MINIMAL), granted, store);
+    InteractiveCommand.persistPermissionGrant(
+        new RuntimeMessage.PermissionResolved("call", false, true), granted, store);
+    InteractiveCommand.persistPermissionGrant(
+        new RuntimeMessage.PermissionResolved("call", true, false), granted, store);
+    assertThat(store.load().alwaysAllowTools()).containsExactly("bash");
+
+    InteractiveCommand.persistPermissionGrant(
+        new RuntimeMessage.PermissionResolved("call", true, true), granted, store);
+    assertThat(store.load().alwaysAllowTools()).containsExactly("bash", "write");
+    InteractiveCommand.persistAlwaysAllowGrants(store, Set.of("write", "bash"));
+    assertThat(store.load().alwaysAllowTools()).containsExactly("bash", "write");
+
+    InteractiveCommand.persistProfile(store, Profile.ASK);
+    assertThat(store.load()).satisfies(saved -> {
+      assertThat(saved.profile()).isEqualTo(Profile.ASK);
+      assertThat(saved.alwaysAllowTools()).isEmpty();
+    });
   }
 
   @Test void interactiveStartupPersistsCliModelAndProviderWithPerProviderRecall() {

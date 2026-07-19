@@ -68,7 +68,11 @@ public record AgentState(
   }
 
   public static AgentState initial(Thread thread) {
+    return initial(thread, Set.of());
+  }
+
+  public static AgentState initial(Thread thread, Set<String> sessionGrants) {
     return new AgentState(thread, new SessionPhase.Idle(), 0, 0, 0, 0, 0, "",
-        Optional.empty(), List.of(), Compaction.initial(), false, Set.of(), Set.of());
+        Optional.empty(), List.of(), Compaction.initial(), false, Set.of(), sessionGrants);
   }
 }

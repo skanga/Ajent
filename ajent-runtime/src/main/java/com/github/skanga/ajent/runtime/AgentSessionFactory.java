@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
@@ -29,6 +30,7 @@ public final class AgentSessionFactory {
   private final BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers;
   private final CheckpointPort checkpoints;
   private final AttachmentContentPort attachmentContent;
+  private final Supplier<Set<String>> initialGrants;
 
   public AgentSessionFactory(
       ToolRuntimeFactory.Components tools,
@@ -36,7 +38,7 @@ public final class AgentSessionFactory {
       HttpClient client,
       Path dataDirectory) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create,
-        CheckpointPort.disabled(), AttachmentContentPort.inline());
+        CheckpointPort.disabled(), AttachmentContentPort.inline(), Set::of);
   }
 
   public AgentSessionFactory(
@@ -46,7 +48,7 @@ public final class AgentSessionFactory {
       Path dataDirectory,
       CheckpointPort checkpoints) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
-        AttachmentContentPort.inline());
+        AttachmentContentPort.inline(), Set::of);
   }
 
   public AgentSessionFactory(
@@ -57,7 +59,19 @@ public final class AgentSessionFactory {
       CheckpointPort checkpoints,
       AttachmentContentPort attachmentContent) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
-        attachmentContent);
+        attachmentContent, Set::of);
+  }
+
+  public AgentSessionFactory(
+      ToolRuntimeFactory.Components tools,
+      LiveProviderFactory.Configuration baseProvider,
+      HttpClient client,
+      Path dataDirectory,
+      CheckpointPort checkpoints,
+      AttachmentContentPort attachmentContent,
+      Supplier<Set<String>> initialGrants) {
+    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
+        attachmentContent, initialGrants);
   }
 
   AgentSessionFactory(
@@ -67,7 +81,7 @@ public final class AgentSessionFactory {
       Path dataDirectory,
       BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers) {
     this(tools, baseProvider, client, dataDirectory, providers, CheckpointPort.disabled(),
-        AttachmentContentPort.inline());
+        AttachmentContentPort.inline(), Set::of);
   }
 
   private AgentSessionFactory(
@@ -77,7 +91,8 @@ public final class AgentSessionFactory {
       Path dataDirectory,
       BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers,
       CheckpointPort checkpoints,
-      AttachmentContentPort attachmentContent) {
+      AttachmentContentPort attachmentContent,
+      Supplier<Set<String>> initialGrants) {
     this.tools = Objects.requireNonNull(tools, "tools");
     this.baseProvider = Objects.requireNonNull(baseProvider, "baseProvider");
     this.client = Objects.requireNonNull(client, "client");
@@ -86,6 +101,7 @@ public final class AgentSessionFactory {
     this.providers = Objects.requireNonNull(providers, "providers");
     this.checkpoints = Objects.requireNonNull(checkpoints, "checkpoints");
     this.attachmentContent = Objects.requireNonNull(attachmentContent, "attachmentContent");
+    this.initialGrants = Objects.requireNonNull(initialGrants, "initialGrants");
   }
 
   public AgentLoop create(
@@ -144,7 +160,8 @@ public final class AgentSessionFactory {
         providers.apply(Objects.requireNonNull(configuration.get(), "provider configuration"), client)
             .stream(turnId, messages, cancellation, sink);
     return new AgentLoop(
-        AgentState.initial(thread), reducer, provider,
+        AgentState.initial(thread, Objects.requireNonNull(initialGrants.get(), "initial grants")),
+        reducer, provider,
         new DispatcherToolPort(tools.dispatcher()), permissions,
         new FilePersistencePort(dataDirectory), observer, checkpoints);
   }
