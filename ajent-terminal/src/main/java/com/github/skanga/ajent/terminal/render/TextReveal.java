@@ -72,6 +72,19 @@ public final class TextReveal {
     return frame(total, nowNanos);
   }
 
+  /** Reveals the complete source immediately and disables residual edge animation. */
+  public Frame snapToEdge(long nowNanos) {
+    int total = source.codePointCount(0, source.length());
+    cursor.setPosition(total);
+    cursor.clearDeadline();
+    lastNanos = nowNanos;
+    lastRevealNanos = nowNanos;
+    lastRevealed = total;
+    live = false;
+    effects = false;
+    return frame(total, nowNanos);
+  }
+
   private Frame frame(int total, long nowNanos) {
     int revealed = Math.min(total, Math.max(0, (int) cursor.position()));
     if (revealed != lastRevealed) {

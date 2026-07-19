@@ -51,6 +51,7 @@ import com.github.skanga.ajent.terminal.render.TerminalCanvas;
 import com.github.skanga.ajent.terminal.render.TerminalColor;
 import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
+import com.github.skanga.ajent.terminal.render.ToolPanelDeferral;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
 import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
@@ -905,6 +906,7 @@ final class InteractiveCommand {
     private long renderPasses;
     private com.github.skanga.ajent.domain.MessageId revealMessage;
     private StreamingMarkdown reveal;
+    private final ToolPanelDeferral toolPanelDeferral = new ToolPanelDeferral();
     private final ScrollbackLedger<List<StyledLine>> frozen = new ScrollbackLedger<>();
     private int frozenThrough;
     private int frozenWidth = -1;
@@ -1748,6 +1750,7 @@ final class InteractiveCommand {
         cursor = 0;
         revealMessage = null;
         reveal = null;
+        toolPanelDeferral.reset();
         frozen.clear();
         frozenThrough = 0;
         frozenWidth = -1;
@@ -2602,11 +2605,12 @@ final class InteractiveCommand {
       String text = AttachmentText.display(message.text(), message.attachments());
       List<MarkdownTerminalRenderer.Line> revealFrame = null;
       boolean animating = false;
+      boolean showTools = true;
       boolean revealable = allowReveal && message.role() == Role.ASSISTANT
           && messageIndex == messageCount - 1;
       if (revealable) {
         boolean streaming = !(state.phase() instanceof SessionPhase.Idle)
-            && !message.textBlockClosed();
+            && !message.textBlockClosed() && message.toolCalls().isEmpty();
         if (!message.id().equals(revealMessage)) {
           revealMessage = message.id();
           reveal = new StreamingMarkdown();
@@ -2616,13 +2620,23 @@ final class InteractiveCommand {
         else reveal.finish();
         revealFrame = reveal.render(width, nowNanos);
         animating = reveal.requiresAnimation();
+        ToolPanelDeferral.Decision toolDecision = toolPanelDeferral.next(message.id(),
+            !message.toolCalls().isEmpty(), reveal.revealInProgress(), nowNanos);
+        if (toolDecision == ToolPanelDeferral.Decision.SNAP_AND_SHOW) {
+          reveal.snapRevealToEdge(nowNanos);
+          revealFrame = reveal.render(width, nowNanos);
+          animating = reveal.requiresAnimation();
+        } else if (toolDecision == ToolPanelDeferral.Decision.HOLD) {
+          showTools = false;
+          animating = true;
+        }
       }
       if (revealFrame != null) appendMarkdown(output, revealFrame);
       else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, width);
       else wrap(output, text, width, Style.NORMAL);
       Map<String, java.util.Set<Integer>> grepHits =
           ToolBodyPreview.collectGrepHits(message.toolCalls());
-      for (ToolUse call : message.toolCalls()) {
+      for (ToolUse call : showTools ? message.toolCalls() : List.<ToolUse>of()) {
         output.add(new StyledLine("  " + call.name().value() + " \u00b7 "
             + call.status().getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT),
             call.status().isError() ? Style.DANGER : Style.MUTED));

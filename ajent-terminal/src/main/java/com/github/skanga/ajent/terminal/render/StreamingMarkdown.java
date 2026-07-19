@@ -168,6 +168,28 @@ public final class StreamingMarkdown {
     return live || revealFrame != null && revealFrame.requiresAnimation();
   }
 
+  /** True while content remains behind the reveal cursor, excluding cosmetic edge animation. */
+  public boolean revealInProgress() {
+    return revealFrame != null && revealFrame.animating();
+  }
+
+  /** Reveals all pending text immediately, for bounded-latency boundary recovery. */
+  public void snapRevealToEdge(long nowNanos) {
+    applyAsyncIfReady();
+    live = false;
+    blocks = parse(source);
+    committedSourceEnd = source.length();
+    revealFrame = revealFrame == null
+        ? reveal.begin(source, false, nowNanos)
+        : reveal.snapToEdge(nowNanos);
+    rowFloor = 0;
+  }
+
+  /** Uses the monotonic system clock when the caller does not own a render clock. */
+  public void snapRevealToEdge() {
+    snapRevealToEdge(System.nanoTime());
+  }
+
   public boolean settled() {
     return !live && (revealFrame == null || !revealFrame.requiresAnimation());
   }

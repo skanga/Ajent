@@ -1198,6 +1198,40 @@ final class InteractiveCommandTest {
     assertThat(animation.frame).isNull();
   }
 
+  @Test void toolPanelWaitsForThePrecedingRevealBoundary() {
+    String body = "A deliberately long assistant explanation keeps the reveal cursor behind "
+        .repeat(30);
+    Message assistant = new Message(Role.ASSISTANT, body, List.of(), List.of());
+    SessionPhase phase = new SessionPhase.Streaming(
+        ActiveTurn.start(new CancellationSignal(), 1));
+    var state = new AtomicReference<>(withPhase(
+        AgentState.initial(thread(List.of(assistant))), phase));
+    var terminal = new FakeTerminal();
+    var animation = new ManualAnimation();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), animation);
+
+    ui.render();
+    animation.now += 16_000_000;
+    animation.runFrame();
+    ToolUse boundary = new ToolUse(new ToolCallId("boundary"),
+        new ToolName("boundary-tool"), Map.of(), new ToolStatus.Pending());
+    state.set(withPhase(AgentState.initial(thread(List.of(
+        assistant.withToolCalls(List.of(boundary))))),
+        new SessionPhase.ExecutingTool(ActiveTurn.start(new CancellationSignal(), 1))));
+
+    animation.now += 16_000_000;
+    animation.runFrame();
+    assertThat(terminal.bytes.toString()).doesNotContain("boundary-tool");
+
+    for (int index = 0; index < 110
+        && !terminal.bytes.toString().contains("boundary-tool"); index++) {
+      animation.now += 16_000_000;
+      animation.runFrame();
+    }
+    assertThat(terminal.bytes.toString()).contains("boundary-tool");
+  }
+
   @Test void streamingAssistantMarkdownNeverExposesSourcePunctuation() {
     String markdown = """
         ## Live heading

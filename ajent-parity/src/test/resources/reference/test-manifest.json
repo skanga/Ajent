@@ -741,9 +741,17 @@
       "classification": "diagnostic",
       "surface": "tools-agent-loop",
       "referenceRun": "cmake --build <build> --target tool_boundary_burst_probe; <build>/tool_boundary_burst_probe",
-      "javaCounterpart": "ajent-parity/src/testFixtures/java/com/github/skanga/ajent/parity/ToolBoundaryBurstProbeDiagnostic.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/ToolBoundaryBurstProbeTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/ToolPanelDeferral.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java",
+        "ajent-cli/src/test/java/com/github/skanga/ajent/cli/InteractiveCommandTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q test",
+        "all 15 native simulated-time cases reproduce the unsafe snap burst, then prove bounded panel deferral removes it; the production UI hides real tool rows until reveal drain or the 1500 ms recovery cap"
+      ]
     },
     {
       "id": "tool_result_budget_test",
