@@ -55,6 +55,7 @@ import com.github.skanga.ajent.terminal.render.TerminalStyle;
 import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.ToolPanelDeferral;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
+import com.github.skanga.ajent.terminal.ui.AppChrome;
 import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
 import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
 import com.github.skanga.ajent.terminal.ui.DiffReview;
@@ -106,6 +107,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.Base64;
 import java.util.function.Consumer;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 /** Interactive terminal composition root. */
 final class InteractiveCommand {
@@ -159,7 +161,9 @@ final class InteractiveCommand {
       var ui = new Ui(new TerminalPort() {
         @Override public JLineTerminalSession.Size size() { return terminal.size(); }
         @Override public void write(String value) { terminal.write(value); }
-      }, state, permission, animations, environment, configured.profile(), configured.model());
+      }, state, permission, animations, environment, configured.profile(), configured.model(),
+          configured.providerConfiguration().provider(),
+          configured.providerConfiguration().contextWindow(), pendingChanges::get);
       activeUi.set(ui);
       configured.todos().onChange(ui::updatePlan);
       permission.onChange(ui::render);
@@ -484,6 +488,7 @@ final class InteractiveCommand {
       };
       try {
         terminal.onResize(ignored -> ui.render());
+        ui.refreshThreadHistory(control);
         ui.render();
         boolean running = true;
         while (running) {
@@ -969,6 +974,9 @@ final class InteractiveCommand {
     private int cursor;
     private Profile profile;
     private String modelId;
+    private String providerId;
+    private int contextMax;
+    private final Supplier<List<FileChange>> pendingChanges;
     private boolean visualHashInitialized;
     private long lastVisualHash;
     private long renderPasses;
@@ -1004,18 +1012,28 @@ final class InteractiveCommand {
         AnimationPort animations, Map<String, String> environment,
         Profile profile, String modelId) {
       this(terminal, agent, permission, animations, environment,
-          new SystemClipboardReader(environment), profile, modelId);
+          new SystemClipboardReader(environment), profile, modelId, "anthropic", 0, List::of);
+    }
+
+    Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
+        AnimationPort animations, Map<String, String> environment, Profile profile,
+        String modelId, String providerId, int contextMax,
+        Supplier<List<FileChange>> pendingChanges) {
+      this(terminal, agent, permission, animations, environment,
+          new SystemClipboardReader(environment), profile, modelId, providerId, contextMax,
+          pendingChanges);
     }
 
     Ui(TerminalPort terminal, AtomicReference<AgentState> agent, PermissionGate permission,
         AnimationPort animations, Map<String, String> environment, ClipboardReader clipboard) {
       this(terminal, agent, permission, animations, environment, clipboard,
-          Profile.ASK, "claude-opus-4-5");
+          Profile.ASK, "claude-opus-4-5", "anthropic", 0, List::of);
     }
 
     private Ui(TerminalPort terminal, AtomicReference<AgentState> agent,
         PermissionGate permission, AnimationPort animations, Map<String, String> environment,
-        ClipboardReader clipboard, Profile profile, String modelId) {
+        ClipboardReader clipboard, Profile profile, String modelId, String providerId,
+        int contextMax, Supplier<List<FileChange>> pendingChanges) {
       this.terminal = terminal;
       this.agent = agent;
       this.permission = permission;
@@ -1030,6 +1048,10 @@ final class InteractiveCommand {
       this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
       this.profile = Objects.requireNonNull(profile, "profile");
       this.modelId = Objects.requireNonNull(modelId, "modelId");
+      this.providerId = Objects.requireNonNull(providerId, "providerId");
+      if (contextMax < 0) throw new IllegalArgumentException("negative context maximum");
+      this.contextMax = contextMax;
+      this.pendingChanges = Objects.requireNonNull(pendingChanges, "pendingChanges");
     }
 
     boolean key(TerminalKey key, AgentControl loop) {
@@ -1670,6 +1692,17 @@ final class InteractiveCommand {
       });
     }
 
+    void refreshThreadHistory(AgentControl loop) {
+      threadsLoading = true;
+      loop.loadThreads(loaded -> {
+        synchronized (lock) {
+          threadRows = List.copyOf(loaded);
+          threadsLoading = false;
+        }
+        render();
+      });
+    }
+
     private boolean threadPickerKey(TerminalKey key, AgentControl loop) {
       if (key.key() instanceof TerminalKey.SpecialKey special) {
         switch (special) {
@@ -1819,6 +1852,7 @@ final class InteractiveCommand {
             selected.action().ifPresent(action -> {
               if (action instanceof ProviderPicker.SelectProvider choice) {
                 if (loop.selectProvider(choice.provider().id())) {
+                  providerId = loop.provider();
                   uiStatus = "provider: " + choice.provider().label();
                   models = List.of();
                   openModelPicker(loop);
@@ -1906,6 +1940,7 @@ final class InteractiveCommand {
             if (!loop.installProviderKey(key.provider(), key.key())) {
               login = new LoginModal.Failed("save failed");
             } else {
+              providerId = loop.provider();
               uiStatus = "provider: " + key.providerLabel();
               models = List.of();
               openModelPicker(loop);
@@ -1915,6 +1950,7 @@ final class InteractiveCommand {
             if (!loop.switchCustomHost(host.specification())) {
               login = new LoginModal.Failed("save failed");
             } else {
+              providerId = loop.provider();
               uiStatus = "provider: " + host.specification();
               models = List.of();
               openModelPicker(loop);
@@ -2700,7 +2736,8 @@ final class InteractiveCommand {
       surfaces.put(InteractiveVisualHash.Surface.CHECKPOINTS, checkpointSurface());
       surfaces.put(InteractiveVisualHash.Surface.VIEWPORT,
           new InteractiveVisualHash.SurfaceState(1, width, terminalRows, "", false, 0,
-              contentKey(state.thread().id())));
+              contentKey(state.thread().id(), threadsLoading, threadRows.isEmpty(), providerId,
+                  contextMax, pendingChanges.get())));
 
       String visibleStatus = state.status() + '\0' + uiStatus;
       return InteractiveVisualHash.hash(new InteractiveVisualHash.State(
@@ -2869,8 +2906,9 @@ final class InteractiveCommand {
       List<Message> messages = state.thread().messages();
       reconcileFrozenSurface(state, messages, width, terminalRows, nowNanos);
       if (messages.isEmpty()) {
-        output.add(new StyledLine("Ajent", Style.ACCENT));
-        output.add(new StyledLine("AI coding agent \u00b7 Ctrl-C to quit", Style.MUTED));
+        appendChrome(output, AppChrome.welcome(new AppChrome.Welcome(
+            modelId, profile, !threadsLoading && threadRows.isEmpty(), width,
+            Math.max(4, terminalRows - 11))));
       }
 
       int freezeLimit = freezeLimit(state, messages);
@@ -2938,17 +2976,70 @@ final class InteractiveCommand {
         output.add(new StyledLine("Allow tool: " + permission.name().value() + "?", Style.DANGER));
         output.add(new StyledLine("[y] allow  [a] always  [n/Esc] reject", Style.MUTED));
       }
-      if (!state.status().isEmpty()) wrap(output, state.status(), width,
-          state.status().startsWith("error:") ? Style.DANGER : Style.MUTED);
-      if (!uiStatus.isEmpty()) wrap(output, uiStatus, width,
-          uiStatus.startsWith("error:") ? Style.DANGER : Style.MUTED);
+      List<AppChrome.Change> changes = pendingChanges.get().stream()
+          .map(change -> new AppChrome.Change(change.path(), change.before().isEmpty(),
+              change.added(), change.removed()))
+          .toList();
+      if (!changes.isEmpty()) {
+        output.add(new StyledLine("", Style.NORMAL));
+        appendChrome(output, AppChrome.changes(changes, width));
+      }
       output.add(new StyledLine("", Style.NORMAL));
       wrap(output, "> " + AttachmentText.display(composer, composerAttachments), width,
           Style.NORMAL);
+      String banner = !uiStatus.isEmpty() ? uiStatus : state.status();
+      appendChrome(output, AppChrome.status(new AppChrome.Status(
+          state.thread().title(), providerLabel(providerId), chromePhase(state),
+          chromePhaseDetail(state, permission), state.tokensIn(), effectiveContextMax(),
+          state.queued().size(), banner, width)));
       var text = new StringBuilder();
       for (StyledLine line : output) text.append(line.text()).append('\n');
       renderedText = text.toString();
       return new RenderedLines(List.copyOf(output), animating, trim.debt());
+    }
+
+    private static void appendChrome(List<StyledLine> output, List<AppChrome.Row> rows) {
+      for (AppChrome.Row row : rows) output.add(new StyledLine(row.text(), switch (row.tone()) {
+        case NORMAL -> Style.NORMAL;
+        case MUTED -> Style.MUTED;
+        case BRAND, ACCENT, WARNING -> Style.ACCENT;
+        case SUCCESS -> Style.SUCCESS;
+        case DANGER -> Style.DANGER;
+      }));
+    }
+
+    private static AppChrome.Phase chromePhase(AgentState state) {
+      if (state.compaction().active().isPresent()) return AppChrome.Phase.COMPACTING;
+      if (state.oauthRefreshInFlight()) return AppChrome.Phase.AUTHENTICATING;
+      return switch (state.phase()) {
+        case SessionPhase.Idle ignored -> AppChrome.Phase.IDLE;
+        case SessionPhase.Streaming ignored -> AppChrome.Phase.STREAMING;
+        case SessionPhase.AwaitingPermission ignored -> AppChrome.Phase.AWAITING_PERMISSION;
+        case SessionPhase.ExecutingTool ignored -> AppChrome.Phase.EXECUTING_TOOL;
+      };
+    }
+
+    private static String chromePhaseDetail(AgentState state, ToolUse permission) {
+      if (permission != null) return permission.name().value();
+      List<Message> messages = state.thread().messages();
+      for (int messageIndex = messages.size() - 1; messageIndex >= 0; messageIndex--) {
+        List<ToolUse> calls = messages.get(messageIndex).toolCalls();
+        for (int callIndex = calls.size() - 1; callIndex >= 0; callIndex--) {
+          ToolUse call = calls.get(callIndex);
+          if (!call.status().isTerminal()) return call.name().value();
+        }
+      }
+      return "";
+    }
+
+    private int effectiveContextMax() {
+      if (contextMax > 0) return contextMax;
+      return ModelCapabilities.fromId(modelId).extendedContext1m() ? 1_000_000 : 200_000;
+    }
+
+    private static String providerLabel(String providerId) {
+      return ProviderRegistry.presetFor(providerId).map(ProviderRegistry.Preset::label)
+          .orElseGet(() -> providerId.isBlank() ? "OpenAI" : providerId);
     }
 
     private static boolean hasCompactionBoundary(AgentState state, int messageIndex,

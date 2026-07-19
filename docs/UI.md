@@ -20,17 +20,46 @@ protocol processes and do not render this interface.
 
 The live surface is ordered as:
 
-1. settled and streaming conversation turns;
-2. queued user-turn previews;
-3. permission, runtime, or UI status;
+1. the responsive welcome screen for an empty thread, or settled and
+   streaming conversation turns;
+2. queued user-turn previews and an inline permission decision when present;
+3. the pending-changes strip;
 4. the composer;
-5. an active modal/overlay when one owns input.
+5. the phase, provider, context, and status bar;
+6. an active modal/overlay when one owns input.
 
 User and assistant turns have stable message identities. Assistant markdown is
 rendered incrementally. Tool calls appear as typed compact panels with
 tool-specific previews. Queued turns look like user turns and carry
 `queued #N / total`; Alt-arrow editing marks the active slot with
 `✎ editing`.
+
+### Welcome screen
+
+An empty thread uses AgenTTY's 6×7 half-block `» AGENTTY` wordmark, the
+“a calm middleware between you and the model” tagline, model and profile
+chips, and the native shortcut inventory. The wordmark collapses to a
+one-row form on short or narrow terminals. Shortcut labels collapse before
+their keys, and the row wraps by measured Unicode cell width.
+
+The three starter prompts appear only after saved-thread discovery completes
+and proves this is a genuine first run. Returning users keep the quieter
+welcome even when the currently selected thread is empty.
+
+### Changes and status chrome
+
+Successful file-changing tools feed a bordered `Changes (N files)` strip
+above the composer. Each entry keeps its created/modified marker and added and
+removed line totals. Review, accept, and reject hints shed in that order when
+the terminal is too narrow; file facts remain visible.
+
+The bottom activity row prioritizes permission, compaction, streaming, tool
+execution, authentication, queued work, and idle state. It includes the
+thread title when space permits, the active provider, and a ten-cell context
+gauge derived from input tokens and the selected model's context limit.
+Runtime and UI notifications replace the activity detail with a full-width
+severity banner and truncate by terminal-cell width instead of wrapping the
+fixed chrome.
 
 ## Composer
 

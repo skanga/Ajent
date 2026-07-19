@@ -190,7 +190,8 @@ final class InteractiveCommandTest {
     var ui = new InteractiveCommand.Ui(terminal, state, gate);
     var agent = new FakeAgent(state);
     ui.render();
-    assertThat(terminal.bytes.toString()).contains("Ajent", "Ctrl-C to quit");
+    assertThat(terminal.bytes.toString()).contains(
+        "a calm middleware between you and the mo", "^C", "Ready", "Anthropic");
 
     assertThat(ui.key(character('a'), agent)).isTrue();
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
@@ -277,6 +278,27 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
     assertThat(agent.messages.getLast()).isInstanceOf(RuntimeMessage.Cancel.class);
     assertThat(ui.key(character('c', true), agent)).isFalse();
+  }
+
+  @Test void liveAppChromeShowsProviderContextAndPendingChanges() {
+    AgentState base = AgentState.initial(thread(List.of()));
+    AgentState state = new AgentState(base.thread(), base.phase(), base.activeTurnId(),
+        base.turnCounter(), 37_500, 900, base.lastTickNanos(), "", base.toolDraft(),
+        base.queued(), base.compaction(), base.oauthRefreshInFlight(), base.truncatedToolIds(),
+        base.sessionGrants());
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(100, 40);
+    var changes = List.of(new com.github.skanga.ajent.tools.runtime.FileChange(
+        "src/Main.java", 12, 3, "before", "after"));
+    var ui = new InteractiveCommand.Ui(terminal, new AtomicReference<>(state),
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of(), Profile.WRITE,
+        "claude-opus-4-6", "anthropic", 200_000, () -> changes);
+
+    ui.render();
+
+    assertThat(terminal.bytes.toString()).contains(
+        "NEW HERE? TRY ONE OF THESE", "Changes (1 files)", "M src/Main.java  +12 -3",
+        "Anthropic", "ctx", "19%");
   }
 
   @Test void bracketedTextPasteAlwaysBecomesOneNormalizedAttachment() {
@@ -1147,7 +1169,7 @@ final class InteractiveCommandTest {
     state.set(withPhase(AgentState.initial(thread(List.of(checkpointMessage("cp", "prompt")))),
         new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1))));
     selectCommand(ui, agent, "rewind");
-    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is working");
+    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is wor");
     state.set(AgentState.initial(thread(List.of(checkpointMessage("cp", "prompt")))));
     selectCommand(ui, agent, "rewind");
     ui.key(special(TerminalKey.SpecialKey.TAB), agent);
@@ -1175,7 +1197,7 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("no changes");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     selectCommand(ui, agent, "rewind");
-    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is working");
+    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is wor");
     agent.completeCheckpointRestore();
   }
 
@@ -1482,7 +1504,7 @@ final class InteractiveCommandTest {
     ui.render();
     terminal.size = new JLineTerminalSession.Size(20, 4);
     ui.render();
-    assertThat(terminal.bytes.toString()).contains("read").contains("ready");
+    assertThat(terminal.bytes.toString()).contains("read").contains("Ready");
   }
 
   @Test void settledAssistantBeforeUserIsNotTreatedAsLiveTail() {

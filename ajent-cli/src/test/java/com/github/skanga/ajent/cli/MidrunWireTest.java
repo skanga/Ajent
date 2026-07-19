@@ -137,9 +137,9 @@ final class MidrunWireTest {
       harness.ui.key(new TerminalKey(TerminalKey.SpecialKey.ESCAPE), loop);
       assertThat(harness.ui.frameSynced()).isTrue();
       harness.assertScrollbackStartsWith(committed);
-      assertThat(harness.terminal.count("Ajent")).isOne();
+      assertThat(harness.terminal.count("a calm middleware")).isOne();
     }
-    assertThat(harness.terminal.scrollback()).isEmpty();
+    assertThat(harness.terminal.scrollback()).containsExactlyElementsOf(committed);
   }
 
   private static InteractiveCommand.AgentControl pickerLoop(
