@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.tools.rag;
 
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpClient;
@@ -40,7 +41,7 @@ public final class RagCorpus {
   private Path root;
 
   public RagCorpus() {
-    this(new JdkOllamaEmbeddingClient(HttpClient.newBuilder()
+    this(new JdkOllamaEmbeddingClient(EnvironmentHttpClient.builder(System.getenv())
         .connectTimeout(Duration.ofSeconds(3)).build()));
   }
 

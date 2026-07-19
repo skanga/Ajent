@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.tools.web;
 
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -17,7 +18,7 @@ public final class JdkWebTransport implements WebTransport {
   private final HttpClient client;
 
   public JdkWebTransport() {
-    this(HttpClient.newBuilder()
+    this(EnvironmentHttpClient.builder(System.getenv())
         .connectTimeout(REQUEST_TIMEOUT)
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build());

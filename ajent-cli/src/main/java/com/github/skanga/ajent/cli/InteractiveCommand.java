@@ -19,6 +19,7 @@ import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.provider.auth.Credential;
 import com.github.skanga.ajent.provider.ProviderModelCatalog;
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.auth.CredentialResolver;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.AnthropicOAuthLogin;
@@ -129,7 +130,7 @@ final class InteractiveCommand {
   static InteractiveCommand systemDefault() {
     Path home = Path.of(System.getProperty("user.home", "."));
     return new InteractiveCommand(Path.of(""), home, System.getenv(),
-        CredentialStore.systemDefault(), HttpClient.newHttpClient());
+        CredentialStore.systemDefault(), EnvironmentHttpClient.create(System.getenv()));
   }
 
   int run(CliArguments arguments, PrintStream error) {
@@ -176,7 +177,7 @@ final class InteractiveCommand {
       activeLoop.set(initialLoop);
       state.set(initialLoop.state());
       AgentControl control = new AgentControl() {
-        private final AnthropicOAuthLogin oauth = new AnthropicOAuthLogin();
+        private final AnthropicOAuthLogin oauth = new AnthropicOAuthLogin(client);
         @Override public AgentState state() { return activeLoop.get().state(); }
         @Override public void dispatch(RuntimeMessage message) {
           activeLoop.get().dispatch(message);

@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.protocol.mcp;
 
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -48,7 +49,7 @@ public final class McpHttpTransport implements McpClientSession.Transport {
   private volatile BiConsumer<String, JsonNode> notifications = (method, parameters) -> {};
 
   public McpHttpTransport(McpConfigLoader.Server.Http configuration) {
-    this(configuration, HttpClient.newBuilder()
+    this(configuration, EnvironmentHttpClient.builder(System.getenv())
         .connectTimeout(Duration.ofSeconds(10))
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build());

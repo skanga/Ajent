@@ -3,6 +3,7 @@ package com.github.skanga.ajent.cli;
 import com.github.skanga.ajent.core.persistence.Settings;
 import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.provider.auth.Credential;
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.auth.CredentialResolver;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
@@ -40,7 +41,7 @@ final class McpServeCommand {
   McpServeCommand(Path currentDirectory, Path home, Map<String, String> environment) {
     this(currentDirectory, home, environment,
         new CredentialStore(home.resolve(".agentty/credentials.json"), "mcp-test"),
-        HttpClient.newHttpClient());
+        EnvironmentHttpClient.create(environment));
   }
 
   McpServeCommand(Path currentDirectory, Path home, Map<String, String> environment,
@@ -56,7 +57,7 @@ final class McpServeCommand {
   static McpServeCommand systemDefault() {
     String configuredHome = System.getProperty("user.home", ".");
     return new McpServeCommand(Path.of(""), Path.of(configuredHome), System.getenv(),
-        CredentialStore.systemDefault(), HttpClient.newHttpClient());
+        CredentialStore.systemDefault(), EnvironmentHttpClient.create(System.getenv()));
   }
 
   int run(CliArguments arguments, BufferedReader input, PrintStream output, PrintStream error) {

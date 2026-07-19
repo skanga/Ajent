@@ -1,6 +1,7 @@
 package com.github.skanga.ajent.cli;
 
 import com.github.skanga.ajent.provider.auth.AnthropicOAuthLogin;
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.auth.Credential;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.OAuthTokenClient;
@@ -29,7 +30,7 @@ public final class AuthCommands {
   private final LongSupplier clock;
 
   public static AuthCommands systemDefault() {
-    var oauth = new AnthropicOAuthLogin();
+    var oauth = new AnthropicOAuthLogin(EnvironmentHttpClient.create(System.getenv()));
     return new AuthCommands(CredentialStore.systemDefault(), System.getenv(), new LoginFlow() {
       @Override public AnthropicOAuthLogin.Attempt newAttempt() { return oauth.newAttempt(); }
       @Override public OAuthTokenClient.Result exchange(String code, String verifier, String state) {

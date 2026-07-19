@@ -5,6 +5,7 @@ import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.provider.auth.Credential;
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.auth.CredentialResolver;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
@@ -56,7 +57,7 @@ final class AcpCommand {
   static AcpCommand systemDefault() {
     Path home = Path.of(System.getProperty("user.home", "."));
     return new AcpCommand(Path.of(""), home, System.getenv(),
-        CredentialStore.systemDefault(), HttpClient.newHttpClient());
+        CredentialStore.systemDefault(), EnvironmentHttpClient.create(System.getenv()));
   }
 
   int run(CliArguments arguments, BufferedReader input, PrintStream output, PrintStream error) {

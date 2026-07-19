@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.domain.ModelCapabilities;
 import com.github.skanga.ajent.provider.ProviderHttpTransport;
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.anthropic.AnthropicRequest;
 import com.github.skanga.ajent.provider.auth.Credential;
 import com.github.skanga.ajent.provider.auth.CredentialResolver;
@@ -116,7 +117,8 @@ public final class AnthropicMarkdownStream {
     var streamError = new AtomicReference<String>();
     try (var writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8,
         StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-      new ProviderHttpTransport(HttpClient.newHttpClient()).streamAnthropic(request, event -> {
+      new ProviderHttpTransport(EnvironmentHttpClient.create(System.getenv()))
+          .streamAnthropic(request, event -> {
         if (event instanceof StreamEvent.TextDelta delta) {
           long now = System.nanoTime();
           firstNanos.compareAndSet(-1, now);

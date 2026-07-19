@@ -3,6 +3,7 @@ package com.github.skanga.ajent.provider.auth;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -28,7 +29,8 @@ public final class AnthropicOAuthClient implements OAuthTokenClient {
   }
 
   public AnthropicOAuthClient(URI tokenUri) {
-    this(tokenUri, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
+    this(tokenUri, EnvironmentHttpClient.builder(System.getenv())
+        .connectTimeout(Duration.ofSeconds(10)).build());
   }
 
   AnthropicOAuthClient(URI tokenUri, HttpClient http) {

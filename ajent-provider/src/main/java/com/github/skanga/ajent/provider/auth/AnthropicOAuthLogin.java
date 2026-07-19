@@ -3,6 +3,7 @@ package com.github.skanga.ajent.provider.auth;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -36,12 +37,17 @@ public final class AnthropicOAuthLogin {
   private final SecureRandom random;
 
   public AnthropicOAuthLogin() {
-    this(AnthropicOAuthClient.TOKEN_URI, HttpClient.newBuilder()
+    this(AnthropicOAuthClient.TOKEN_URI, EnvironmentHttpClient.builder(System.getenv())
         .connectTimeout(Duration.ofSeconds(10)).build(), new SecureRandom());
   }
 
+  public AnthropicOAuthLogin(HttpClient http) {
+    this(AnthropicOAuthClient.TOKEN_URI, http, new SecureRandom());
+  }
+
   public AnthropicOAuthLogin(URI tokenUri) {
-    this(tokenUri, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+    this(tokenUri, EnvironmentHttpClient.builder(System.getenv())
+            .connectTimeout(Duration.ofSeconds(10)).build(),
         new SecureRandom());
   }
 
