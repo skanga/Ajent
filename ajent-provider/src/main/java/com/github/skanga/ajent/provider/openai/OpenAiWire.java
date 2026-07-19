@@ -17,8 +17,11 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 
 public final class OpenAiWire {
   private static final ObjectMapper JSON = new ObjectMapper();
@@ -98,6 +101,38 @@ public final class OpenAiWire {
     }
   }
 
+  /** AgenTTY's concise prompt for OpenAI-compatible and other local-model endpoints. */
+  public static String localModelSystemPrompt(
+      Path workingDirectory, Path home, String operatingSystem) {
+    Path workspace = workingDirectory.toAbsolutePath().normalize();
+    String lowerOs = operatingSystem.toLowerCase(Locale.ROOT);
+    String osName = lowerOs.startsWith("win") || lowerOs.contains("windows") ? "Windows"
+        : lowerOs.contains("mac") || lowerOs.contains("darwin") ? "macOS" : "Linux";
+    String shell = "Windows".equals(osName) ? "cmd.exe" : "sh";
+    String prompt = """
+        You are ajent, a terminal coding assistant. You are helpful, direct, and act on requests instead of asking which option to pick. Keep replies concise.
+
+        CONVERSATION MEMORY
+        - The full conversation so far is provided in the messages. ALWAYS use earlier messages to answer follow-up questions (names, files, decisions the user already gave you).
+        - If the user told you a fact earlier (e.g. their name), recall it from the conversation; do not say you don't have it.
+
+        TOOLS
+        - Tools let you read/edit files and run commands. Call a tool ONLY when the task needs it (touch files, run a command, search the codebase). For greetings, chit-chat, or questions you can answer from the conversation, reply in plain text — do NOT call a tool.
+        - To edit an existing file use `edit` (targeted change). Use `write` only to create a new file.
+        - Make ONE tool call at a time and wait for its result before the next. Never invent a tool result.
+        - Never call remember/forget/wipe_memory unless the user asks you to remember or forget something.
+
+        OUTPUT
+        - Output is rendered as GitHub-flavoured markdown in a terminal. Use fenced code blocks for code. Keep tables small.
+
+        ENVIRONMENT
+        - os: %s
+        - shell: %s
+        - cwd: %s
+        """.formatted(osName, shell, workspace);
+    return prompt + authoredMemoryBlocks(home, workspace);
+  }
+
   public static URI endpointUri(Endpoint endpoint, String path) {
     try {
       int port = endpoint.useTls() && endpoint.port() == 443 ? -1
@@ -116,6 +151,36 @@ public final class OpenAiWire {
       case ProviderAuth.ApiKey apiKey -> apiKey.value();
     };
     if (!value.isEmpty()) builder.header("authorization", "Bearer " + value);
+  }
+
+  private static String authoredMemoryBlocks(Path home, Path project) {
+    String user = readBounded(home.resolve("CLAUDE.md"));
+    String workspace = readBounded(project.resolve("CLAUDE.md"));
+    String local = readBounded(project.resolve("CLAUDE.local.md"));
+    if (user.isEmpty() && workspace.isEmpty() && local.isEmpty()) return "";
+    StringBuilder result = new StringBuilder("\n\n<memory>\n"
+        + "Project-specific guidance the user has authored. Treat these as "
+        + "persistent context for THIS workspace and user.\n");
+    appendMemory(result, "user-memory", user);
+    appendMemory(result, "project-memory", workspace);
+    appendMemory(result, "local-memory", local);
+    return result.append("</memory>").toString();
+  }
+
+  private static void appendMemory(StringBuilder target, String tag, String content) {
+    if (!content.isEmpty()) {
+      target.append('<').append(tag).append(">\n").append(content)
+          .append("\n</").append(tag).append(">\n");
+    }
+  }
+
+  private static String readBounded(Path path) {
+    if (!Files.isRegularFile(path)) return "";
+    try (var input = Files.newInputStream(path)) {
+      return new String(input.readNBytes(64 * 1024), StandardCharsets.UTF_8);
+    } catch (java.io.IOException | SecurityException ignored) {
+      return "";
+    }
   }
 
   private static ObjectNode primaryMessage(Message message, boolean hasImages, boolean hasTools) {

@@ -934,6 +934,8 @@ final class InteractiveCommand {
     private String uiStatus = "";
     private String composer = "";
     private List<Attachment> composerAttachments = List.of();
+    private final List<ComposerSnapshot> composerUndo = new ArrayList<>();
+    private final List<ComposerSnapshot> composerRedo = new ArrayList<>();
     private int cursor;
     private Profile profile;
     private String modelId;
@@ -1039,15 +1041,61 @@ final class InteractiveCommand {
       if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
         int codePoint = Character.toLowerCase(character.codePoint());
         if (codePoint == 'c') return false;
+        if (codePoint == '/') { openModelPicker(loop); render(); return true; }
         if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
         if (codePoint == 'j') { openThreadPicker(loop); render(); return true; }
+        if (codePoint == 'p') {
+          providerRows = loop.providers();
+          providerPicker = ProviderPicker.open(providerRows, loop.provider());
+          render();
+          return true;
+        }
+        if (codePoint == 'l') {
+          frame = new InlineFrameRenderer.Empty();
+          visualHashInitialized = false;
+          terminal.write("\u001b[2J\u001b[3J\u001b[H");
+          render();
+          return true;
+        }
+        if (codePoint == 'r') {
+          DiffReview.Result opened = DiffReview.open(loop.pendingChanges());
+          diffReview = opened.state();
+          diffFiles = opened.files();
+          uiStatus = opened.status();
+          render();
+          return true;
+        }
+        if (codePoint == 'n') {
+          loop.newThread();
+          resetForThreadSwap();
+          return true;
+        }
         if (codePoint == 't') { plan = PlanModal.open(); render(); return true; }
         if (codePoint == 'g') { openCodeBlocks(loop); render(); return true; }
         if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
         if (codePoint == 'd' && composer.isEmpty()) return false;
-        if (codePoint == 'u') { composer = composer.substring(cursor); cursor = 0; render(); return true; }
+        if (codePoint == 'u') {
+          if (cursor > 0) {
+            checkpointComposer();
+            composer = composer.substring(cursor);
+            cursor = 0;
+            render();
+          }
+          return true;
+        }
+        if (codePoint == 'w') { deleteComposerRange(wordLeft(cursor), cursor); return true; }
+        if (codePoint == 'z') { undoComposer(); return true; }
+        if (codePoint == 'y') { redoComposer(); return true; }
       }
       if (key.key() instanceof TerminalKey.SpecialKey special) {
+        if (key.modifiers().shift()
+            && (special == TerminalKey.SpecialKey.TAB
+                || special == TerminalKey.SpecialKey.BACK_TAB)) {
+          profile = loop.cycleProfile();
+          uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
+          render();
+          return true;
+        }
         if (key.modifiers().alt()
             && (special == TerminalKey.SpecialKey.LEFT
                 || special == TerminalKey.SpecialKey.RIGHT)) {
@@ -1066,6 +1114,7 @@ final class InteractiveCommand {
           }
           case BACKSPACE -> {
             if (cursor > 0) {
+              checkpointComposer();
               int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
               int previous = chipLength > 0 ? cursor - chipLength
                   : composer.offsetByCodePoints(cursor, -1);
@@ -1075,6 +1124,11 @@ final class InteractiveCommand {
             }
           }
           case LEFT -> {
+            if (key.modifiers().ctrl()) {
+              cursor = wordLeft(cursor);
+              render();
+              break;
+            }
             if (cursor > 0) {
               int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
               cursor = chipLength > 0 ? cursor - chipLength
@@ -1083,6 +1137,11 @@ final class InteractiveCommand {
             render();
           }
           case RIGHT -> {
+            if (key.modifiers().ctrl()) {
+              cursor = wordRight(cursor);
+              render();
+              break;
+            }
             if (cursor < composer.length()) {
               int chipLength = AttachmentText.placeholderLengthAt(composer, cursor);
               cursor = chipLength > 0 ? cursor + chipLength
@@ -1097,6 +1156,12 @@ final class InteractiveCommand {
           }
           default -> { }
         }
+        return true;
+      }
+      if (key.key() instanceof TerminalKey.CharacterKey character
+          && key.modifiers().alt() && !key.modifiers().ctrl()
+          && Character.toLowerCase(character.codePoint()) == 'd') {
+        deleteComposerRange(cursor, wordRight(cursor));
         return true;
       }
       if (key.key() instanceof TerminalKey.CharacterKey character && !key.modifiers().alt()) {
@@ -1185,11 +1250,15 @@ final class InteractiveCommand {
     }
 
     private void insertAttachment(Attachment attachment) {
-      int index = composerAttachments.size();
-      var revised = new ArrayList<>(composerAttachments);
-      revised.add(attachment);
-      composerAttachments = List.copyOf(revised);
-      insert(AttachmentText.placeholder(index));
+      synchronized (lock) {
+        checkpointComposer();
+        int index = composerAttachments.size();
+        var revised = new ArrayList<>(composerAttachments);
+        revised.add(attachment);
+        composerAttachments = List.copyOf(revised);
+        insertComposer(AttachmentText.placeholder(index));
+      }
+      render();
     }
 
     private void openToolViewer(AgentState state) {
@@ -1789,6 +1858,8 @@ final class InteractiveCommand {
       synchronized (lock) {
         composer = "";
         composerAttachments = List.of();
+        composerUndo.clear();
+        composerRedo.clear();
         cursor = 0;
         revealMessage = null;
         reveal = null;
@@ -1822,8 +1893,10 @@ final class InteractiveCommand {
 
     void insert(String value) {
       synchronized (lock) {
-        composer = composer.substring(0, cursor) + value + composer.substring(cursor);
-        cursor += value.length();
+        if (!value.isEmpty()) {
+          checkpointComposer();
+          insertComposer(value);
+        }
       }
       render();
     }
@@ -1877,8 +1950,91 @@ final class InteractiveCommand {
     }
 
     private void clearComposer() {
-      synchronized (lock) { composer = ""; composerAttachments = List.of(); cursor = 0; }
+      synchronized (lock) {
+        composer = "";
+        composerAttachments = List.of();
+        composerUndo.clear();
+        composerRedo.clear();
+        cursor = 0;
+      }
       render();
+    }
+
+    private void insertComposer(String value) {
+      composer = composer.substring(0, cursor) + value + composer.substring(cursor);
+      cursor += value.length();
+    }
+
+    private void checkpointComposer() {
+      if (composerUndo.size() == 64) composerUndo.removeFirst();
+      composerUndo.add(snapshotComposer());
+      composerRedo.clear();
+    }
+
+    private ComposerSnapshot snapshotComposer() {
+      return new ComposerSnapshot(composer, cursor, composerAttachments);
+    }
+
+    private void undoComposer() {
+      if (!composerUndo.isEmpty()) {
+        if (composerRedo.size() == 64) composerRedo.removeFirst();
+        composerRedo.add(snapshotComposer());
+        restoreComposer(composerUndo.removeLast());
+      }
+      render();
+    }
+
+    private void redoComposer() {
+      if (!composerRedo.isEmpty()) {
+        if (composerUndo.size() == 64) composerUndo.removeFirst();
+        composerUndo.add(snapshotComposer());
+        restoreComposer(composerRedo.removeLast());
+      }
+      render();
+    }
+
+    private void restoreComposer(ComposerSnapshot snapshot) {
+      composer = snapshot.text();
+      cursor = snapshot.cursor();
+      composerAttachments = snapshot.attachments();
+    }
+
+    private void deleteComposerRange(int start, int end) {
+      if (start >= end) return;
+      checkpointComposer();
+      composer = composer.substring(0, start) + composer.substring(end);
+      cursor = start;
+      render();
+    }
+
+    private int wordLeft(int position) {
+      int chipLength = AttachmentText.placeholderLengthEndingAt(composer, position);
+      if (chipLength > 0) return position - chipLength;
+      int boundary = position;
+      while (boundary > 0 && Character.isWhitespace(composer.charAt(boundary - 1))) boundary--;
+      while (boundary > 0 && wordCharacter(composer.charAt(boundary - 1))) boundary--;
+      return boundary == position && boundary > 0 ? boundary - 1 : boundary;
+    }
+
+    private int wordRight(int position) {
+      int chipLength = AttachmentText.placeholderLengthAt(composer, position);
+      if (chipLength > 0) return position + chipLength;
+      int boundary = position;
+      while (boundary < composer.length() && wordCharacter(composer.charAt(boundary))) boundary++;
+      while (boundary < composer.length() && Character.isWhitespace(composer.charAt(boundary))) {
+        boundary++;
+      }
+      return boundary == position && boundary < composer.length() ? boundary + 1 : boundary;
+    }
+
+    private static boolean wordCharacter(char value) {
+      return Character.isLetterOrDigit(value) || value == '_';
+    }
+
+    private record ComposerSnapshot(String text, int cursor, List<Attachment> attachments) {
+      private ComposerSnapshot {
+        attachments = List.copyOf(attachments);
+      }
     }
 
     void render() {

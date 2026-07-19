@@ -111,6 +111,12 @@ public final class AgentSystemPrompt {
         workspace, home, operatingSystem);
   }
 
+  /** Concise prompt used by OpenAI-compatible endpoints, distinct from native Ollama. */
+  public String openAiLocal() {
+    return com.github.skanga.ajent.provider.openai.OpenAiWire.localModelSystemPrompt(
+        workspace, home, operatingSystem);
+  }
+
   private String collectMemory() {
     String user = readMemory(home.resolve("CLAUDE.md"));
     String project = readMemory(workspace.resolve("CLAUDE.md"));
@@ -177,7 +183,7 @@ public final class AgentSystemPrompt {
 
   private Environment environment() {
     String os = operatingSystem.toLowerCase(Locale.ROOT);
-    if (os.contains("win")) {
+    if (os.startsWith("win") || os.contains("windows")) {
       return new Environment("Windows", "cmd.exe (Windows Command Prompt)",
           "Prefer native Windows equivalents: `dir` / `where` / `systeminfo` / `type` / "
               + "`findstr` / `powershell -c`. Do NOT use POSIX-only tools like `uname`, "

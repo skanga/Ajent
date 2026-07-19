@@ -75,6 +75,9 @@ class LiveProviderFactoryTest {
           assertThat(value.value().endpoint().host()).isEqualTo("api.groq.com");
           assertThat(value.value().jsonProtocol()).isFalse();
           assertThat(value.value().tools()).hasSize(23);
+          assertThat(value.value().systemPrompt())
+              .contains("The full conversation so far is provided in the messages.")
+              .doesNotContain("When a task DOES need an action");
         });
     assertThat(LiveProviderFactory.request(ollama, List.of()))
         .isInstanceOfSatisfying(HttpProviderPort.Request.Ollama.class, value -> {
@@ -84,6 +87,9 @@ class LiveProviderFactoryTest {
           assertThat(value.value().tools()).extracting(tool -> tool.name())
               .doesNotContain("skill", "remember", "forget", "wipe_memory")
               .hasSize(19);
+          assertThat(value.value().systemPrompt())
+              .contains("When a task DOES need an action")
+              .doesNotContain("The full conversation so far is provided in the messages.");
         });
   }
 

@@ -84,7 +84,9 @@ public final class LiveProviderFactory {
     Endpoint endpoint = Endpoint.fromSpec(configuration.provider());
     boolean weak = ModelCapabilities.isWeakModel(configuration.model());
     var chat = new ChatRequest(
-        configuration.model(), configuration.systemPrompt().local(), history, tools, maximum,
+        configuration.model(), endpoint.nativeApi()
+            ? configuration.systemPrompt().local() : configuration.systemPrompt().openAiLocal(),
+        history, tools, maximum,
         configuration.auth(), endpoint, configuration.contextWindow(), weak && endpoint.nativeApi());
     return endpoint.nativeApi()
         ? new HttpProviderPort.Request.Ollama(chat) : new HttpProviderPort.Request.OpenAi(chat);

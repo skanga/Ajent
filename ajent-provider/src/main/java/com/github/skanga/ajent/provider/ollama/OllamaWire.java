@@ -149,8 +149,8 @@ public final class OllamaWire {
 
   public static String systemPrompt(Path workingDirectory, Path home, String operatingSystem) {
     String lowerOs = operatingSystem.toLowerCase(java.util.Locale.ROOT);
-    String osName = lowerOs.contains("win") ? "Windows"
-        : lowerOs.contains("mac") ? "macOS" : "Linux";
+    String osName = lowerOs.startsWith("win") || lowerOs.contains("windows") ? "Windows"
+        : lowerOs.contains("mac") || lowerOs.contains("darwin") ? "macOS" : "Linux";
     String shell = "Windows".equals(osName) ? "cmd.exe" : "sh";
     String prompt = """
         You are ajent, a terminal coding assistant. You are helpful, direct, and act on requests instead of asking which option to pick. Keep replies concise.

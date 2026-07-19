@@ -14,9 +14,12 @@ import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.provider.ToolSpecification;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class OpenAiWireBuildersTest {
   private static final ObjectMapper JSON = new ObjectMapper();
@@ -99,6 +102,41 @@ class OpenAiWireBuildersTest {
     assertThat(messages).hasSize(3);
     assertThat(messages.at("/1/content").textValue()).isEqualTo("(no output)");
     assertThat(messages.at("/2/content").textValue()).isEqualTo("no");
+  }
+
+  @Test
+  void buildsTheDistinctOpenAiLocalModelPromptWithAuthoredMemory(@TempDir Path root)
+      throws Exception {
+    Path workspace = Files.createDirectories(root.resolve("workspace"));
+    Path home = Files.createDirectories(root.resolve("home"));
+    Files.writeString(home.resolve("CLAUDE.md"), "user rule");
+    Files.writeString(workspace.resolve("CLAUDE.local.md"), "local rule");
+
+    String prompt = OpenAiWire.localModelSystemPrompt(workspace, home, "Windows 11");
+
+    assertThat(prompt)
+        .startsWith("You are ajent, a terminal coding assistant.")
+        .contains("The full conversation so far is provided in the messages.")
+        .contains("Make ONE tool call at a time and wait for its result before the next.")
+        .contains("- os: Windows\n- shell: cmd.exe\n- cwd: " + workspace)
+        .contains("<user-memory>\nuser rule\n</user-memory>")
+        .contains("<local-memory>\nlocal rule\n</local-memory>")
+        .doesNotContain("When a task DOES need an action")
+        .doesNotContain("search_docs FIRST");
+  }
+
+  @Test
+  void buildsPlatformLinesAndOmitsAnEmptyMemoryBlock(@TempDir Path root) throws Exception {
+    Path workspace = Files.createDirectories(root.resolve("workspace"));
+    Path home = Files.createDirectories(root.resolve("home"));
+
+    assertThat(OpenAiWire.localModelSystemPrompt(workspace, home, "Linux"))
+        .contains("- os: Linux\n- shell: sh")
+        .doesNotContain("<memory>");
+    assertThat(OpenAiWire.localModelSystemPrompt(workspace, home, "macOS"))
+        .contains("- os: macOS\n- shell: sh");
+    assertThat(OpenAiWire.localModelSystemPrompt(workspace, home, "Darwin"))
+        .contains("- os: macOS\n- shell: sh");
   }
 
   private static Thread thread(Message... messages) {

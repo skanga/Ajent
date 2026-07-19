@@ -134,6 +134,8 @@ class OllamaWireTest {
             "<user-memory>\nuser guidance", "<project-memory>\nproject guidance",
             "<local-memory>\nlocal guidance")
         .doesNotContain("agentty-compatible", "<learned-memory");
+    assertThat(OllamaWire.systemPrompt(project, home, "Darwin"))
+        .contains("- os: macOS", "- shell: sh");
   }
 
   private static Message message(Role role, String text) {

@@ -63,7 +63,7 @@ class AgentSystemPromptTest {
     Path home = Files.createDirectories(root.resolve("home"));
     Files.writeString(home.resolve("CLAUDE.md"), "x".repeat(64 * 1024 + 1));
 
-    String prompt = fixture(workspace, home, "Mac OS X").anthropic();
+    String prompt = fixture(workspace, home, "Darwin").anthropic();
 
     assertThat(prompt).contains("  os: macOS (Darwin)\n", "  shell: sh\n",
         "`sw_vers` gives macOS version").doesNotContain("x".repeat(100));

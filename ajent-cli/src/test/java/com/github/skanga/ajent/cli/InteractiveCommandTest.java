@@ -515,6 +515,59 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
 
+  @Test void nativeGlobalShortcutsOpenTheirProductionSurfaces() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(character('/', true), agent);
+    assertThat(terminal.bytes.toString()).contains("Models");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+
+    ui.key(character('p', true), agent);
+    assertThat(terminal.bytes.toString()).contains("Providers");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+
+    ui.key(character('r', true), agent);
+    assertThat(terminal.bytes.toString()).contains("no pending changes to review");
+
+    ui.key(character('n', true), agent);
+    assertThat(agent.newThreads).isEqualTo(1);
+
+    ui.key(special(TerminalKey.SpecialKey.BACK_TAB, false, false, true), agent);
+    assertThat(agent.profile).isEqualTo(Profile.MINIMAL);
+    assertThat(terminal.bytes.toString()).contains("profile: minimal");
+
+    ui.key(character('l', true), agent);
+    assertThat(terminal.bytes.toString()).contains("\u001b[2J\u001b[3J\u001b[H");
+  }
+
+  @Test void nativeComposerWordEditingAndUndoRedoAreLive() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.insert("one two three");
+
+    ui.key(character('w', true), agent);
+    ui.key(character('z', true), agent);
+    ui.key(character('y', true), agent);
+    ui.key(character('z', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.HOME), agent);
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('d'),
+        new TerminalKey.Modifiers(false, true, false)), agent);
+    ui.key(character('z', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    ui.key(special(TerminalKey.SpecialKey.LEFT, true, false, false), agent);
+    ui.key(character('w', true), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
+        .isEqualTo("one three");
+  }
+
   @Test void modelPickerRendersLoadingBeforeDeferredCatalogArrives() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
