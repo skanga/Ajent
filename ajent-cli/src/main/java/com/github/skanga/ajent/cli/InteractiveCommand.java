@@ -136,7 +136,7 @@ final class InteractiveCommand {
   int run(CliArguments arguments, PrintStream error) {
     Configuration configured = configure(arguments, error);
     if (configured == null) return USAGE_ERROR;
-    try (var terminal = JLineTerminalSession.open()) {
+    try (var mcp = configured.mcp(); var terminal = JLineTerminalSession.open()) {
       return runSession(configured, terminal);
     } catch (IOException | RuntimeException exception) {
       error.print("ajent: interactive mode failed: " + detail(exception) + "\n");
@@ -342,7 +342,8 @@ final class InteractiveCommand {
         @Override public void setEffort(Effort effort) {
           activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
               current.provider(), current.model(), current.auth(), effort.wire(),
-              current.systemPrompt(), current.contextWindow(), current.environment()));
+              current.systemPrompt(), current.contextWindow(), current.environment(),
+              current.additionalTools()));
           configured.settings().save(configured.settings().load().withEffort(effort.wire()));
         }
         @Override public void loadModels(Consumer<List<ModelPicker.Model>> receiver) {
@@ -369,7 +370,7 @@ final class InteractiveCommand {
                 ModelCapabilities.fromId(model));
             return new LiveProviderFactory.Configuration(
                 current.provider(), model, current.auth(), effort.wire(), current.systemPrompt(),
-                current.contextWindow(), current.environment());
+                current.contextWindow(), current.environment(), current.additionalTools());
           });
           LiveProviderFactory.Configuration selected = activeProvider.get();
           configured.settings().save(configured.settings().load().withProviderModel(
@@ -408,7 +409,7 @@ final class InteractiveCommand {
               provider, selectedModel, auth, Effort.fromWire(current.effort()).clamp(
                   ModelCapabilities.fromId(selectedModel)).wire(),
               current.systemPrompt(),
-              current.contextWindow(), current.environment()));
+              current.contextWindow(), current.environment(), current.additionalTools()));
           configured.settings().save(saved.withProviderModel(provider, new ModelId(selectedModel))
               .withEffort(activeProvider.get().effort()));
           return true;
@@ -428,7 +429,7 @@ final class InteractiveCommand {
           activeProvider.updateAndGet(current -> current.provider().equals("anthropic")
               ? new LiveProviderFactory.Configuration(current.provider(), current.model(),
                   new ProviderAuth.ApiKey(key), current.effort(), current.systemPrompt(),
-                  current.contextWindow(), current.environment()) : current);
+                  current.contextWindow(), current.environment(), current.additionalTools()) : current);
           return true;
         }
         @Override public boolean installProviderKey(String provider, String key) {
@@ -440,7 +441,8 @@ final class InteractiveCommand {
           String currentModel = activeProvider.get().model();
           activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
               specification, currentModel, new ProviderAuth.Empty(), current.effort(),
-              current.systemPrompt(), current.contextWindow(), current.environment()));
+              current.systemPrompt(), current.contextWindow(), current.environment(),
+              current.additionalTools()));
           return configured.settings().save(configured.settings().load()
               .withProviderModel(specification, new ModelId(currentModel)));
         }
@@ -462,7 +464,8 @@ final class InteractiveCommand {
               activeProvider.updateAndGet(current -> current.provider().equals("anthropic")
                   ? new LiveProviderFactory.Configuration(current.provider(), current.model(),
                       new ProviderAuth.Bearer(token.accessToken()), current.effort(),
-                      current.systemPrompt(), current.contextWindow(), current.environment())
+                      current.systemPrompt(), current.contextWindow(), current.environment(),
+                      current.additionalTools())
                   : current);
             }
             completed.accept(saved ? "" : "failed to save credentials");
@@ -564,22 +567,29 @@ final class InteractiveCommand {
     var checkpoints = new GitCheckpointStore(workspace, sandbox.runner());
     var workspaceIndex = new WorkspaceIndex(workspace);
     var subagents = new ProviderBackedSubagentRunner(client);
-    var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
-        workspace, workspace, home, docs, new JdkWebTransport(), todos, subagents,
-        sandbox.runner()));
-    subagents.bind(new DispatcherToolPort(tools.dispatcher()));
-    String effort = Effort.fromWire(settings.effort()).clamp(ModelCapabilities.fromId(model)).wire();
-    var providers = new LiveProviderFactory.Configuration(provider, model, auth, effort,
-        tools.systemPrompt(), 0, environment);
-    CheckpointPort checkpointPort = new CheckpointPort() {
-      @Override public boolean enabled() { return checkpoints.inGitRepo(); }
-      @Override public boolean create(CheckpointId id) { return checkpoints.create(id); }
-    };
-    return new Configuration(new AgentSessionFactory(
-        tools, providers, client, dataDirectory, checkpointPort, workspaceIndex::attachmentBody),
-        dataDirectory, profile, model, settingsStore, providers,
-        new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints,
-        workspaceIndex, subagents);
+    var mcp = McpRuntime.connect(workspace, home, environment, error);
+    try {
+      var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
+          workspace, workspace, home, docs, new JdkWebTransport(), todos, subagents,
+          sandbox.runner(), mcp.tools()));
+      subagents.bind(new DispatcherToolPort(tools.dispatcher()));
+      String effort = Effort.fromWire(settings.effort())
+          .clamp(ModelCapabilities.fromId(model)).wire();
+      var providers = new LiveProviderFactory.Configuration(provider, model, auth, effort,
+          tools.systemPrompt(), 0, environment, tools::additionalTools);
+      CheckpointPort checkpointPort = new CheckpointPort() {
+        @Override public boolean enabled() { return checkpoints.inGitRepo(); }
+        @Override public boolean create(CheckpointId id) { return checkpoints.create(id); }
+      };
+      return new Configuration(new AgentSessionFactory(
+          tools, providers, client, dataDirectory, checkpointPort, workspaceIndex::attachmentBody),
+          dataDirectory, profile, model, settingsStore, providers,
+          new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints,
+          workspaceIndex, subagents, mcp);
+    } catch (RuntimeException exception) {
+      mcp.close();
+      throw exception;
+    }
   }
 
   static void recordChange(
@@ -769,7 +779,7 @@ final class InteractiveCommand {
       SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
       ProviderModelCatalog models, TodoLedger todos, Path workspace, ProcessRunner codeRunner,
       GitCheckpointStore checkpoints, WorkspaceIndex workspaceIndex,
-      ProviderBackedSubagentRunner subagents) {}
+      ProviderBackedSubagentRunner subagents, McpRuntime mcp) {}
 
   static final class TodoLedger implements HostServices.TodoSink {
     private final AtomicReference<List<PlanModal.Item>> items =

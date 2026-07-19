@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Role;
+import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -18,9 +20,12 @@ class LiveProviderFactoryTest {
   void buildsHostedAnthropicRequestsWithFullPromptCatalogAndModelCeiling(@TempDir Path root)
       throws Exception {
     var components = components(root);
+    var remote = new ToolSpecification("remote_lookup", "remote lookup",
+        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+            .put("type", "object"), false);
     var configuration = new LiveProviderFactory.Configuration(
         "anthropic", "claude-opus-4-5", new ProviderAuth.Bearer("oauth"), "high",
-        components.systemPrompt(), 200_000, Map.of());
+        components.systemPrompt(), 200_000, Map.of(), List.of(remote));
 
     var request = LiveProviderFactory.request(configuration,
         List.of(new Message(Role.USER, "hello", List.of(), List.of())));
@@ -30,9 +35,28 @@ class LiveProviderFactoryTest {
       assertThat(value.value().maxTokens()).isEqualTo(64_000);
       assertThat(value.value().effort()).isEqualTo("high");
       assertThat(value.value().systemPrompt()).startsWith("You are ajent");
-      assertThat(value.value().tools()).hasSize(23);
+      assertThat(value.value().tools()).extracting(tool -> tool.name())
+          .hasSize(24).endsWith("remote_lookup");
       assertThat(value.value().auth()).isEqualTo(new ProviderAuth.Bearer("oauth"));
     });
+  }
+
+  @Test
+  void resolvesDynamicToolsForEveryProviderRequest(@TempDir Path root) throws Exception {
+    var components = components(root);
+    var current = new AtomicReference<List<ToolSpecification>>(List.of());
+    var configuration = new LiveProviderFactory.Configuration(
+        "anthropic", "claude-opus-4-5", new ProviderAuth.Empty(), "",
+        components.systemPrompt(), 200_000, Map.of(), current::get);
+
+    assertThat(((HttpProviderPort.Request.Anthropic)
+        LiveProviderFactory.request(configuration, List.of())).value().tools()).hasSize(23);
+    current.set(List.of(new ToolSpecification("late_tool", "added after startup",
+        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+            .put("type", "object"), false)));
+    assertThat(((HttpProviderPort.Request.Anthropic)
+        LiveProviderFactory.request(configuration, List.of())).value().tools())
+        .extracting(ToolSpecification::name).hasSize(24).endsWith("late_tool");
   }
 
   @Test

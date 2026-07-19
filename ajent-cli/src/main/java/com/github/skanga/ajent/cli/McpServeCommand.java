@@ -97,22 +97,27 @@ final class McpServeCommand {
     ProviderAuth auth = ProviderAuthResolver.resolve(provider,
         providerAuth(anthropic.credential()), arguments.key(),
         settings.providerKeys().getOrDefault(provider, ""), environment);
-    var subagents = new ProviderBackedSubagentRunner(client);
-    var configuration = new ToolRuntimeFactory.Configuration(
-        workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
-        processSandbox.runner());
-    var tools = ToolRuntimeFactory.compose(configuration);
-    var dispatcher = tools.dispatcher();
-    subagents.bind(new DispatcherToolPort(dispatcher));
-    var providerConfiguration = new LiveProviderFactory.Configuration(
-        provider, model, auth, settings.effort(), tools.systemPrompt(), 0, environment);
-    subagents.install(() -> providerConfiguration);
-    var published = NativeToolWireCatalog.all().stream()
-        .map(specification -> new McpJsonRpcServer.PublishedTool(
-            specification, NativeToolWireCatalog.wireEffects(specification.name())))
-        .toList();
-    var server = new McpJsonRpcServer(published, dispatcher::execute, AjentCli.VERSION);
-    try {
+    try (var mcp = McpRuntime.connect(workspace, home, environment, error)) {
+      var subagents = new ProviderBackedSubagentRunner(client);
+      var configuration = new ToolRuntimeFactory.Configuration(
+          workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
+          processSandbox.runner(), mcp.tools());
+      var tools = ToolRuntimeFactory.compose(configuration);
+      var dispatcher = tools.dispatcher();
+      subagents.bind(new DispatcherToolPort(dispatcher));
+      var providerConfiguration = new LiveProviderFactory.Configuration(
+          provider, model, auth, settings.effort(), tools.systemPrompt(), 0, environment,
+          tools::additionalTools);
+      subagents.install(() -> providerConfiguration);
+      var published = java.util.stream.Stream.concat(
+          NativeToolWireCatalog.all().stream().map(specification ->
+              new McpJsonRpcServer.PublishedTool(specification,
+                  NativeToolWireCatalog.wireEffects(specification.name()))),
+          tools.additionalTools().stream().map(specification ->
+              new McpJsonRpcServer.PublishedTool(specification,
+                  tools.effects(specification.name()).orElseThrow())))
+          .toList();
+      var server = new McpJsonRpcServer(published, dispatcher::execute, AjentCli.VERSION);
       server.serve(input, new PrintWriter(output, true, StandardCharsets.UTF_8));
       return 0;
     } catch (IOException exception) {

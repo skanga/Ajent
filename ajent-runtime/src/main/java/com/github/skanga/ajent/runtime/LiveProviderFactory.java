@@ -15,6 +15,7 @@ import java.net.http.HttpClient;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /** Builds call-time provider requests from one resolved application selection. */
 public final class LiveProviderFactory {
@@ -27,7 +28,22 @@ public final class LiveProviderFactory {
       String effort,
       AgentSystemPrompt systemPrompt,
       int contextWindow,
-      Map<String, String> environment) {
+      Map<String, String> environment,
+      Supplier<List<ToolSpecification>> additionalTools) {
+    public Configuration(String provider, String model, ProviderAuth auth, String effort,
+                         AgentSystemPrompt systemPrompt, int contextWindow,
+                         Map<String, String> environment) {
+      this(provider, model, auth, effort, systemPrompt, contextWindow, environment, List.of());
+    }
+
+    public Configuration(String provider, String model, ProviderAuth auth, String effort,
+                         AgentSystemPrompt systemPrompt, int contextWindow,
+                         Map<String, String> environment,
+                         List<ToolSpecification> additionalTools) {
+      this(provider, model, auth, effort, systemPrompt, contextWindow, environment,
+          () -> List.copyOf(additionalTools));
+    }
+
     public Configuration {
       provider = provider == null || provider.isBlank() ? "anthropic" : provider;
       model = model == null || model.isBlank() ? DEFAULT_MODEL : model;
@@ -38,6 +54,7 @@ public final class LiveProviderFactory {
         throw new IllegalArgumentException("contextWindow cannot be negative");
       }
       environment = Map.copyOf(environment);
+      additionalTools = Objects.requireNonNull(additionalTools, "additionalTools");
     }
   }
 
@@ -53,7 +70,8 @@ public final class LiveProviderFactory {
       Configuration configuration, List<Message> messages) {
     Objects.requireNonNull(configuration, "configuration");
     List<Message> history = List.copyOf(messages);
-    List<ToolSpecification> tools = toolsFor(configuration.model());
+    List<ToolSpecification> tools = toolsFor(
+        configuration.model(), configuration.additionalTools().get());
     int maximum = ModelCapabilities.maxOutputTokensFor(
         configuration.model(), configuration.environment().get("AGENTTY_MAX_OUTPUT_TOKENS"));
     if (configuration.provider().equals("anthropic")) {
@@ -96,13 +114,17 @@ public final class LiveProviderFactory {
         ? new HttpProviderPort.Request.Ollama(chat) : new HttpProviderPort.Request.OpenAi(chat);
   }
 
-  private static List<ToolSpecification> toolsFor(String model) {
-    if (!ModelCapabilities.isWeakModel(model)) {
-      return NativeToolWireCatalog.all();
-    }
-    return NativeToolWireCatalog.all().stream().filter(tool -> switch (tool.name()) {
+  private static List<ToolSpecification> toolsFor(
+      String model, List<ToolSpecification> additionalTools) {
+    var tools = new java.util.ArrayList<ToolSpecification>();
+    var nativeTools = !ModelCapabilities.isWeakModel(model)
+        ? NativeToolWireCatalog.all()
+        : NativeToolWireCatalog.all().stream().filter(tool -> switch (tool.name()) {
       case "skill", "remember", "forget", "wipe_memory" -> false;
       default -> true;
     }).toList();
+    tools.addAll(nativeTools);
+    tools.addAll(List.copyOf(Objects.requireNonNull(additionalTools, "additional tools")));
+    return List.copyOf(tools);
   }
 }

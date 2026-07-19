@@ -16,6 +16,7 @@ import com.github.skanga.ajent.tools.search.SearchTools;
 import com.github.skanga.ajent.tools.web.WebTools;
 import com.github.skanga.ajent.domain.CancellationSignal;
 import java.util.function.Consumer;
+import java.util.Objects;
 
 /** Single catalog-backed dispatch point for every built-in tool. */
 public final class ToolDispatcher {
@@ -27,9 +28,16 @@ public final class ToolDispatcher {
   private final HostTools host;
   private final MemoryTools memory;
   private final WebTools web;
+  private final ExternalToolRuntime external;
 
   public ToolDispatcher(FileTools files, ProcessTools processes, SearchTools search,
       RepoMapTools repoMap, GitTools git, HostTools host, MemoryTools memory, WebTools web) {
+    this(files, processes, search, repoMap, git, host, memory, web, ExternalToolRuntime.none());
+  }
+
+  public ToolDispatcher(FileTools files, ProcessTools processes, SearchTools search,
+      RepoMapTools repoMap, GitTools git, HostTools host, MemoryTools memory, WebTools web,
+      ExternalToolRuntime external) {
     this.files = files;
     this.processes = processes;
     this.search = search;
@@ -38,6 +46,7 @@ public final class ToolDispatcher {
     this.host = host;
     this.memory = memory;
     this.web = web;
+    this.external = Objects.requireNonNull(external, "external");
   }
 
   public ToolResult execute(String name, JsonNode arguments) {
@@ -51,7 +60,17 @@ public final class ToolDispatcher {
   public ToolResult execute(String name, JsonNode arguments, CancellationSignal cancellation,
                             Consumer<String> progress) {
     var specification = ToolCatalog.byName(name);
-    if (specification.isEmpty()) return failure(ToolErrorKind.NOT_FOUND, "unknown tool: " + name);
+    if (specification.isEmpty()) {
+      if (external.effects(name).isEmpty())
+        return failure(ToolErrorKind.NOT_FOUND, "unknown tool: " + name);
+      JsonNode safeArguments = arguments != null && arguments.isObject()
+          ? arguments : JsonNodeFactory.instance.objectNode();
+      try {
+        return external.execute(name, (com.fasterxml.jackson.databind.node.ObjectNode) safeArguments);
+      } catch (RuntimeException exception) {
+        return failure(ToolErrorKind.UNKNOWN, "tool crashed: " + exception.getMessage());
+      }
+    }
     ToolSpec spec = specification.orElseThrow();
     JsonNode safeArguments = arguments != null && arguments.isObject()
         ? arguments : JsonNodeFactory.instance.objectNode();

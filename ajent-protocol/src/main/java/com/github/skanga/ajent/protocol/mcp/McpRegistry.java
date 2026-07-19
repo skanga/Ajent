@@ -55,7 +55,7 @@ public final class McpRegistry implements AutoCloseable {
     Objects.requireNonNull(configuredName, "configuredName");
     Objects.requireNonNull(session, "session");
     session.onListChanged(generation::incrementAndGet);
-    entries.add(new Entry("mcp:" + configuredName, session));
+    entries.add(new Entry(configuredName, session));
     generation.incrementAndGet();
   }
 
@@ -97,7 +97,7 @@ public final class McpRegistry implements AutoCloseable {
     var result = new ArrayList<ResourceInfo>();
     for (Entry entry : entries) for (var resource : entry.session().resources()) {
       result.add(new ResourceInfo(resource.uri(), resource.name(), resource.title(),
-          resource.description(), resource.mimeType(), entry.origin()));
+          resource.description(), resource.mimeType(), "mcp:" + entry.origin()));
     }
     return List.copyOf(result);
   }
@@ -122,7 +122,7 @@ public final class McpRegistry implements AutoCloseable {
     var result = new ArrayList<PromptInfo>();
     promptRoutes().forEach((name, route) -> result.add(new PromptInfo(name,
         route.prompt().title(), route.prompt().description(), route.prompt().arguments(),
-        route.entry().origin())));
+        "mcp:" + route.entry().origin())));
     return List.copyOf(result);
   }
 

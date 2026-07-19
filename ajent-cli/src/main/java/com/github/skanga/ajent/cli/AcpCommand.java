@@ -109,31 +109,34 @@ final class AcpCommand {
         settings.providerKeys().getOrDefault(provider, ""), environment);
     var activeAuth = new AtomicReference<>(auth);
     Path docsRoot = resolveDocs(workspace);
-    var subagents = new ProviderBackedSubagentRunner(client);
-    var toolConfiguration = new ToolRuntimeFactory.Configuration(
-        workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
-        sandbox.runner());
-    var tools = ToolRuntimeFactory.compose(toolConfiguration);
-    subagents.bind(new DispatcherToolPort(tools.dispatcher()));
-    var providerConfiguration = new LiveProviderFactory.Configuration(
-        provider, model, auth, settings.effort(), tools.systemPrompt(), 0, environment);
-    subagents.install(() -> new LiveProviderFactory.Configuration(
-        providerConfiguration.provider(), providerConfiguration.model(), activeAuth.get(),
-        providerConfiguration.effort(), providerConfiguration.systemPrompt(),
-        providerConfiguration.contextWindow(), providerConfiguration.environment()));
-    var sessions = new AgentSessionFactory(
-        tools, providerConfiguration, client, dataDirectory);
-    boolean keylessLocal = !provider.equals("anthropic") && !Endpoint.fromSpec(provider).useTls();
-    var server = new AcpJsonRpcServer(
-        dataDirectory, AcpCommand::randomThreadId, profile, model,
-        () -> !activeAuth.get().isEmpty(), () -> {
-          activeAuth.set(new ProviderAuth.Empty());
-          credentials.clear();
-        }, AjentCli.VERSION, sessions::create, sessions.contextMax(),
-        () -> !activeAuth.get().isEmpty() || keylessLocal);
-    error.print("ajent: ACP agent ready on stdio (profile="
-        + profile.name().toLowerCase(java.util.Locale.ROOT) + ")\n");
-    try {
+    try (var mcp = McpRuntime.connect(workspace, home, environment, error)) {
+      var subagents = new ProviderBackedSubagentRunner(client);
+      var toolConfiguration = new ToolRuntimeFactory.Configuration(
+          workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
+          sandbox.runner(), mcp.tools());
+      var tools = ToolRuntimeFactory.compose(toolConfiguration);
+      subagents.bind(new DispatcherToolPort(tools.dispatcher()));
+      var providerConfiguration = new LiveProviderFactory.Configuration(
+          provider, model, auth, settings.effort(), tools.systemPrompt(), 0, environment,
+          tools::additionalTools);
+      subagents.install(() -> new LiveProviderFactory.Configuration(
+          providerConfiguration.provider(), providerConfiguration.model(), activeAuth.get(),
+          providerConfiguration.effort(), providerConfiguration.systemPrompt(),
+          providerConfiguration.contextWindow(), providerConfiguration.environment(),
+          providerConfiguration.additionalTools()));
+      var sessions = new AgentSessionFactory(
+          tools, providerConfiguration, client, dataDirectory);
+      boolean keylessLocal = !provider.equals("anthropic")
+          && !Endpoint.fromSpec(provider).useTls();
+      var server = new AcpJsonRpcServer(
+          dataDirectory, AcpCommand::randomThreadId, profile, model,
+          () -> !activeAuth.get().isEmpty(), () -> {
+            activeAuth.set(new ProviderAuth.Empty());
+            credentials.clear();
+          }, AjentCli.VERSION, sessions::create, sessions.contextMax(),
+          () -> !activeAuth.get().isEmpty() || keylessLocal);
+      error.print("ajent: ACP agent ready on stdio (profile="
+          + profile.name().toLowerCase(java.util.Locale.ROOT) + ")\n");
       String trace = environment.get("AGENTTY_ACP_TRACE");
       var wireTrace = trace != null && !trace.isEmpty() && !"0".equals(trace)
           ? (java.util.function.Consumer<String>) line -> error.print(line + "\n")

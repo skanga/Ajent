@@ -21,6 +21,7 @@ final class McpRegistryTest {
   @Test void namespacesOnlyCollisionsProjectsEffectsAndRendersRichCalls() {
     var alpha = new FakeTransport("alpha");
     alpha.tools.add(tool("ping", "alpha ping", true, false));
+    alpha.tools.add(tool("read", "same name as an agent tool", true, false));
     alpha.tools.add(tool("inspect", "", true, false));
     var beta = new FakeTransport("beta");
     beta.tools.add(tool("ping", "beta ping", true, false));
@@ -35,7 +36,7 @@ final class McpRegistryTest {
 
       assertThat(registry.providerCount()).isEqualTo(2);
       assertThat(registry.tools()).extracting(tool -> tool.specification().name())
-          .containsExactly("mcp:alpha__ping", "inspect", "mcp:beta__ping", "mutate",
+          .containsExactly("alpha__ping", "read", "inspect", "beta__ping", "mutate",
               "empty", "array", "fail-empty", "throw");
       var inspect = registry.tools().stream()
           .filter(tool -> tool.specification().name().equals("inspect")).findFirst().orElseThrow();
@@ -49,7 +50,7 @@ final class McpRegistryTest {
       assertThat(mutate.effects().has(Effect.EXEC)).isTrue();
       assertThat(mutate.effects().has(Effect.WRITE_FS)).isTrue();
 
-      ToolResult result = registry.execute("mcp:alpha__ping",
+      ToolResult result = registry.execute("alpha__ping",
           JSON.createObjectNode().put("message", "hi"));
       assertThat(result).isInstanceOf(ToolResult.Success.class);
       String text = ((ToolResult.Success) result).output().text();
@@ -76,6 +77,26 @@ final class McpRegistryTest {
     assertThat(beta.closed).isTrue();
   }
 
+  @Test void adaptsTheLiveRegistryToTheAgentToolRuntime() {
+    var remote = new FakeTransport("remote");
+    remote.tools.add(tool("lookup", "looks up values", true, false));
+    try (var registry = new McpRegistry()) {
+      registry.add("remote", connected("remote", remote));
+      var runtime = new McpExternalToolRuntime(registry);
+
+      assertThat(runtime.specifications()).extracting(tool -> tool.name())
+          .containsExactly("lookup");
+      assertThat(runtime.effects("lookup")).get().satisfies(effects -> {
+        assertThat(effects.has(Effect.READ_FS)).isTrue();
+        assertThat(effects.has(Effect.NET)).isTrue();
+      });
+      assertThat(runtime.effects("missing")).isEmpty();
+      assertThat(successText(runtime.execute(
+          "lookup", JSON.createObjectNode().put("message", "key"))))
+          .contains("remote:key");
+    }
+  }
+
   @Test void projectsResourcesPromptsAndTracksLiveListChanges() {
     var alpha = new FakeTransport("alpha");
     alpha.resources.add(object("uri", "mem://note", "name", "note", "title", "Note",
@@ -95,7 +116,7 @@ final class McpRegistryTest {
         assertThat(resource.server()).isEqualTo("mcp:alpha");
       });
       assertThat(registry.prompts()).extracting(McpRegistry.PromptInfo::name)
-          .containsExactly("mcp:alpha__summarize", "empty_prompt", "mcp:beta__summarize");
+          .containsExactly("alpha__summarize", "empty_prompt", "beta__summarize");
 
       ToolResult listing = registry.execute("mcp_read_resource", JSON.createObjectNode());
       assertThat(successText(listing)).contains("mem://note", "mem://{id}", "text/plain");
@@ -105,11 +126,11 @@ final class McpRegistryTest {
       assertThat(successText(registry.execute("mcp_read_resource",
           JSON.createObjectNode().put("uri", "mem://note")))).isEqualTo("remote note body\n");
       assertThat(successText(registry.execute("mcp_get_prompt", JSON.createObjectNode())))
-          .contains("mcp:alpha__summarize", "text (required)");
+          .contains("alpha__summarize", "text (required)");
       assertThat(successText(registry.execute("mcp_get_prompt",
           JSON.createObjectNode().put("name", "ignored").put("list", true))))
           .contains("Available MCP prompts");
-      ObjectNode promptArgs = JSON.createObjectNode().put("name", "mcp:alpha__summarize");
+      ObjectNode promptArgs = JSON.createObjectNode().put("name", "alpha__summarize");
       promptArgs.putObject("arguments").put("text", "hello").put("count", 2);
       assertThat(successText(registry.execute("mcp_get_prompt", promptArgs)))
           .contains("# Summarize text", "user: hello:2");

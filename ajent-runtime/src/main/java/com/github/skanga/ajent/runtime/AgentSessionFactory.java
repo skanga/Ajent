@@ -132,7 +132,7 @@ public final class AgentSessionFactory {
     Objects.requireNonNull(observer, "observer");
     var reducer = new AgentReducer(new AgentReducer.Context(
         System::nanoTime, Instant::now, MessageId::random,
-        call -> permission(call, Objects.requireNonNull(profile.get(), "profile value")),
+        call -> permission(call, Objects.requireNonNull(profile.get(), "profile value"), tools),
         () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble(0.80, 1.20),
         () -> contextMax(Objects.requireNonNull(configuration.get(), "provider configuration")),
         java.util.Optional::empty,
@@ -156,12 +156,21 @@ public final class AgentSessionFactory {
   private LiveProviderFactory.Configuration withModel(String model) {
     return new LiveProviderFactory.Configuration(
         baseProvider.provider(), model, baseProvider.auth(), baseProvider.effort(),
-        baseProvider.systemPrompt(), baseProvider.contextWindow(), baseProvider.environment());
+        baseProvider.systemPrompt(), baseProvider.contextWindow(), baseProvider.environment(),
+        baseProvider.additionalTools());
   }
 
   static PermissionVerdict permission(ToolUse call, Profile profile) {
-    return ToolCatalog.byName(call.name().value())
-        .map(spec -> PermissionPolicy.permission(spec.effects(), profile)
+    return ToolCatalog.byName(call.name().value()).map(com.github.skanga.ajent.tools.catalog.ToolSpec::effects)
+        .map(effects -> PermissionPolicy.permission(effects, profile)
+            == PermissionDecision.ALLOW ? PermissionVerdict.ALLOW : PermissionVerdict.PROMPT)
+        .orElse(PermissionVerdict.DENY);
+  }
+
+  static PermissionVerdict permission(
+      ToolUse call, Profile profile, ToolRuntimeFactory.Components tools) {
+    return tools.effects(call.name().value())
+        .map(effects -> PermissionPolicy.permission(effects, profile)
             == PermissionDecision.ALLOW ? PermissionVerdict.ALLOW : PermissionVerdict.PROMPT)
         .orElse(PermissionVerdict.DENY);
   }

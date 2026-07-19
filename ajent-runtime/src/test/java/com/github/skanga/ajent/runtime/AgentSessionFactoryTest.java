@@ -9,15 +9,21 @@ import com.github.skanga.ajent.domain.ToolCallId;
 import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
+import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
+import com.github.skanga.ajent.tools.policy.Effect;
+import com.github.skanga.ajent.tools.policy.EffectSet;
+import com.github.skanga.ajent.tools.runtime.ExternalToolRuntime;
+import com.github.skanga.ajent.tools.runtime.ToolResult;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
-import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -91,6 +97,40 @@ final class AgentSessionFactoryTest {
     assertThat(AgentSessionFactory.permission(call("bash"), Profile.WRITE))
         .isEqualTo(PermissionVerdict.ALLOW);
     assertThat(AgentSessionFactory.permission(call("not-a-tool"), Profile.WRITE))
+        .isEqualTo(PermissionVerdict.DENY);
+  }
+
+  @Test
+  void appliesTheSameProfilePolicyToDynamicTools(@TempDir Path root) throws Exception {
+    Path workspace = Files.createDirectories(root.resolve("workspace"));
+    Path home = Files.createDirectories(root.resolve("home"));
+    var external = new ExternalToolRuntime() {
+      @Override public List<ToolSpecification> specifications() { return List.of(); }
+      @Override public Optional<EffectSet> effects(String name) {
+        return switch (name) {
+          case "remote_read" -> Optional.of(EffectSet.of(Effect.READ_FS));
+          case "remote_net" -> Optional.of(EffectSet.of(Effect.NET));
+          default -> Optional.empty();
+        };
+      }
+      @Override public ToolResult execute(
+          String name, com.fasterxml.jackson.databind.node.ObjectNode arguments) {
+        throw new UnsupportedOperationException();
+      }
+    };
+    var configuration = new ToolRuntimeFactory.Configuration(
+        workspace, workspace, home, null, request -> {
+          throw new UnsupportedOperationException();
+        }, null, null, new com.github.skanga.ajent.tools.process.ProcessRunner(), external);
+    var tools = ToolRuntimeFactory.compose(configuration);
+
+    assertThat(AgentSessionFactory.permission(call("remote_read"), Profile.ASK, tools))
+        .isEqualTo(PermissionVerdict.ALLOW);
+    assertThat(AgentSessionFactory.permission(call("remote_read"), Profile.MINIMAL, tools))
+        .isEqualTo(PermissionVerdict.PROMPT);
+    assertThat(AgentSessionFactory.permission(call("remote_net"), Profile.ASK, tools))
+        .isEqualTo(PermissionVerdict.PROMPT);
+    assertThat(AgentSessionFactory.permission(call("missing"), Profile.WRITE, tools))
         .isEqualTo(PermissionVerdict.DENY);
   }
 

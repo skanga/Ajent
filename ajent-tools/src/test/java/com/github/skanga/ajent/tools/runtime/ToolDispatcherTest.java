@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.domain.CancellationSignal;
+import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.tools.catalog.ToolCatalog;
 import com.github.skanga.ajent.tools.catalog.ToolKind;
 import com.github.skanga.ajent.tools.fs.FileTools;
@@ -13,6 +14,8 @@ import com.github.skanga.ajent.tools.host.HostTools;
 import com.github.skanga.ajent.tools.memory.MemoryStore;
 import com.github.skanga.ajent.tools.memory.MemoryTools;
 import com.github.skanga.ajent.tools.process.ProcessTools;
+import com.github.skanga.ajent.tools.policy.Effect;
+import com.github.skanga.ajent.tools.policy.EffectSet;
 import com.github.skanga.ajent.tools.search.RepoMapTools;
 import com.github.skanga.ajent.tools.search.SearchTools;
 import com.github.skanga.ajent.tools.web.WebTools;
@@ -81,6 +84,41 @@ class ToolDispatcherTest {
   }
 
   @Test
+  void dispatchesDynamicToolsAndContainsTheirFailures(@TempDir Path root) {
+    var calls = new ArrayList<com.fasterxml.jackson.databind.node.ObjectNode>();
+    var external = new ExternalToolRuntime() {
+      @Override public List<ToolSpecification> specifications() {
+        return List.of(new ToolSpecification("remote", "remote tool",
+            JSON.createObjectNode().put("type", "object"), false));
+      }
+
+      @Override public Optional<EffectSet> effects(String name) {
+        return "remote".equals(name)
+            ? Optional.of(EffectSet.of(Effect.NET)) : Optional.empty();
+      }
+
+      @Override public ToolResult execute(
+          String name, com.fasterxml.jackson.databind.node.ObjectNode arguments) {
+        calls.add(arguments.deepCopy());
+        if (arguments.path("crash").asBoolean()) throw new IllegalStateException("remote broke");
+        return new ToolResult.Success(new ToolOutput(arguments.toString(), Optional.empty()));
+      }
+    };
+    var dispatcher = new ToolDispatcher(baseFiles(root), null, null, null, null, null, null, null,
+        external);
+
+    assertSuccess(dispatcher.execute("remote", JSON.createObjectNode().put("value", 7)));
+    assertSuccess(dispatcher.execute("remote", JSON.createArrayNode().add("ignored")));
+    assertThat(calls).extracting(Object::toString).containsExactly("{\"value\":7}", "{}");
+    assertThat(dispatcher.execute("remote", JSON.createObjectNode().put("crash", true)))
+        .isInstanceOfSatisfying(ToolResult.Failure.class,
+            failure -> assertThat(failure.error().detail()).isEqualTo("tool crashed: remote broke"));
+    assertThat(dispatcher.execute("absent", JSON.createObjectNode()))
+        .isInstanceOfSatisfying(ToolResult.Failure.class,
+            failure -> assertThat(failure.error().kind()).isEqualTo(ToolErrorKind.NOT_FOUND));
+  }
+
+  @Test
   void enforcesCatalogBudgetsAtTheRealDispatchBoundary(@TempDir Path root) throws Exception {
     String content = "HEAD_SENTINEL" + "x".repeat(85_000) + "TAIL_SENTINEL";
     Files.writeString(root.resolve("oversized.txt"), content);
@@ -130,6 +168,10 @@ class ToolDispatcherTest {
     return new ToolDispatcher(new FileTools(sandbox), new ProcessTools(sandbox),
         new SearchTools(sandbox), new RepoMapTools(sandbox), new GitTools(sandbox),
         new HostTools(null, null, null, null), new MemoryTools(store), new WebTools(transport));
+  }
+
+  private static FileTools baseFiles(Path root) {
+    return new FileTools(new WorkspaceSandbox(root, root, root));
   }
 
   private static void assertSuccess(ToolResult result) {
