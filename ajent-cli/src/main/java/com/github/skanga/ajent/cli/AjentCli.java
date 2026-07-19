@@ -2,7 +2,10 @@ package com.github.skanga.ajent.cli;
 
 import java.io.PrintStream;
 import java.io.BufferedReader;
+import java.io.FilterOutputStream;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /** Ajent process entry point and top-level command dispatcher. */
@@ -55,15 +58,20 @@ public final class AjentCli {
                             picker has a "Custom host…" entry too.)
         -V, --version       Print the ajent version and exit.
         -h, --help          Show this message.
+
       """;
 
   private AjentCli() {}
 
   public static void main(String[] arguments) {
-    int exitCode = run(arguments,
-        new PrintStream(System.out, true, StandardCharsets.UTF_8),
-        new PrintStream(System.err, true, StandardCharsets.UTF_8));
+    int exitCode = run(arguments, processStream(System.out), processStream(System.err));
     if (exitCode != 0) System.exit(exitCode);
+  }
+
+  static PrintStream processStream(OutputStream output) {
+    OutputStream translated = System.lineSeparator().equals("\r\n")
+        ? new WindowsNewlineOutputStream(output) : output;
+    return new PrintStream(translated, true, StandardCharsets.UTF_8);
   }
 
   public static int run(String[] arguments, PrintStream stdout, PrintStream stderr) {
@@ -147,5 +155,21 @@ public final class AjentCli {
             PrintStream output, PrintStream error);
     int airgap(CliArguments arguments, PrintStream output, PrintStream error);
     int interactive(CliArguments arguments, PrintStream error);
+  }
+
+  private static final class WindowsNewlineOutputStream extends FilterOutputStream {
+    private int previous = -1;
+
+    private WindowsNewlineOutputStream(OutputStream output) { super(output); }
+
+    @Override public void write(int value) throws IOException {
+      if (value == '\n' && previous != '\r') out.write('\r');
+      out.write(value);
+      previous = value;
+    }
+
+    @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+      for (int index = offset; index < offset + length; index++) write(bytes[index] & 0xff);
+    }
   }
 }

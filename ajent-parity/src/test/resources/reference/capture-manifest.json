@@ -35,14 +35,16 @@
   "fixtureClasses": [
     {
       "id": "cli",
-      "status": "partial-goldens-green",
+      "status": "partial-native-executable-green",
       "sources": ["agentty/src/runtime/main.cpp", "agentty/docs/website/cli.md"],
       "cases": ["help", "version", "invalid arguments", "all subcommand names", "top-level option parsing", "airgap tail forwarding", "option precedence", "environment precedence"],
       "evidence": [
         "reference/cli/help.stderr.txt",
         "reference/cli/version.stdout.txt",
         "reference/cli/invalid.stderr.txt",
-        "com.github.skanga.ajent.parity.CliParityTest"
+        "com.github.skanga.ajent.parity.CliParityTest",
+        "com.github.skanga.ajent.parity.NativeExecutableParityIT",
+        "mvn -q verify -Pcharacterization: pinned Windows binary hash plus exact process exit/stdout/stderr for version, help, invalid argument, isolated status, and isolated logout"
       ]
     },
     {

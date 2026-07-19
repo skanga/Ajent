@@ -11,6 +11,17 @@ import org.junit.jupiter.api.Test;
 
 class AjentCliTest {
   @Test
+  void processBoundaryUsesNativeWindowsTextNewlinesWithoutDoublingCrLf() {
+    var bytes = new ByteArrayOutputStream();
+    PrintStream stream = AjentCli.processStream(bytes);
+    stream.print("one\ntwo\r\n");
+    stream.flush();
+
+    assertThat(bytes.toString(StandardCharsets.UTF_8)).isEqualTo(
+        System.lineSeparator().equals("\r\n") ? "one\r\ntwo\r\n" : "one\ntwo\r\n");
+  }
+
+  @Test
   void versionAliasesWriteOnlyToStdoutAndShortCircuitRemainingArguments() {
     for (String[] arguments : new String[][] {
         {"--version"}, {"-V"}, {"version"}, {"--version", "-k", "unused"}}) {
@@ -28,7 +39,7 @@ class AjentCliTest {
       var result = run(arguments);
       assertThat(result.exitCode()).as(String.join(" ", arguments)).isZero();
       assertThat(result.stdout()).isEmpty();
-      assertThat(result.stderr()).isEqualTo(expected);
+      assertThat(result.stderr()).isEqualTo(expected + "\n");
     }
   }
 
@@ -38,7 +49,7 @@ class AjentCliTest {
     assertThat(result.exitCode()).isEqualTo(2);
     assertThat(result.stdout()).isEmpty();
     assertThat(result.stderr()).isEqualTo(
-        "unknown arg: --definitely-invalid\n\n" + resource("/cli/help.stderr.txt"));
+        "unknown arg: --definitely-invalid\n\n" + resource("/cli/help.stderr.txt") + "\n");
   }
 
   @Test

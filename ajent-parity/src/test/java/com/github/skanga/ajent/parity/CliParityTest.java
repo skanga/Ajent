@@ -26,7 +26,7 @@ class CliParityTest {
     assertThat(execution.exitCode()).isZero();
     assertThat(execution.stdout()).isEmpty();
     assertThat(execution.stderr()).isEqualTo(reference("/reference/cli/help.stderr.txt")
-        .replace("agentty", "ajent"));
+        .replace("agentty", "ajent") + "\n");
   }
 
   @Test
@@ -44,7 +44,7 @@ class CliParityTest {
     assertThat(execution.exitCode()).isEqualTo(2);
     assertThat(execution.stdout()).isEmpty();
     assertThat(execution.stderr()).isEqualTo(reference("/reference/cli/invalid.stderr.txt")
-        .replace("agentty", "ajent"));
+        .replace("agentty", "ajent") + "\n");
   }
 
   private static Execution run(String... arguments) {

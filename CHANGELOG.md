@@ -23,6 +23,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 
 - Ported native state machines to immutable records and sealed interfaces with
   virtual-thread effect execution.
+- Matched AgenTTY's Windows process CRLF behavior and terminal blank line in
+  CLI usage output; added a pinned executable characterization profile.
 
 ### Known limitations
 
