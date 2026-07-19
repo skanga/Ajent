@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 final class ReferenceManifestTest {
@@ -61,6 +62,28 @@ final class ReferenceManifestTest {
     assertThat(buildOnly).isEqualTo(manifest.path("summary").path("buildOnlyTargets").asInt());
     assertThat(sourceOnly).isEqualTo(manifest.path("summary").path("sourceOnly").asInt());
     assertThat(green).isEqualTo(53);
+  }
+
+  @Test
+  void productionJavaSourcesContainNoUtf8Mojibake() throws Exception {
+    Path root = repositoryRoot();
+    try (Stream<Path> files = Files.walk(root)) {
+      assertThat(files.filter(Files::isRegularFile)
+          .filter(path -> path.toString().endsWith(".java"))
+          .filter(path -> path.toString().contains("src" + java.io.File.separator
+              + "main" + java.io.File.separator + "java"))
+          .filter(path -> !path.startsWith(root.resolve("agentty")))
+          .filter(path -> {
+            try {
+              String source = Files.readString(path);
+              return source.contains("Ã") || source.contains("Â") || source.contains("â");
+            } catch (java.io.IOException exception) {
+              throw new java.io.UncheckedIOException(exception);
+            }
+          }).map(root::relativize).map(Path::toString).toList())
+          .as("production sources with corrupted UTF-8 text")
+          .isEmpty();
+    }
   }
 
   private static List<String> counterparts(JsonNode entry) {

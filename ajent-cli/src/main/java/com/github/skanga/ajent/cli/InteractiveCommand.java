@@ -1554,7 +1554,7 @@ final class InteractiveCommand {
       CheckpointPicker.selected(checkpoints).ifPresent(entry -> {
         checkpoints = CheckpointPicker.close(checkpoints);
         checkpointRestoring = true;
-        uiStatus = "rewinding to checkpointâ€¦";
+        uiStatus = "rewinding to checkpoint…";
         loop.restoreCheckpoint(entry.id(), result -> {
           synchronized (lock) { checkpointRestoring = false; }
           if (!result.restored()) {
@@ -1600,7 +1600,7 @@ final class InteractiveCommand {
         CodeBlockPicker.Shell shell = CodeBlockPicker.shell(block.language(), loop.windows());
         if (shell == CodeBlockPicker.Shell.NONE) {
           String tag = block.language().isEmpty() ? "this" : "'" + block.language() + "'";
-          uiStatus = tag + " block isn't runnable here â€” press e to edit or y to copy";
+          uiStatus = tag + " block isn't runnable here — press e to edit or y to copy";
           return;
         }
         codeBlocks = CodeBlockPicker.close(codeBlocks);
@@ -1704,7 +1704,7 @@ final class InteractiveCommand {
       selection.entry().ifPresent(entry -> {
         if (entry.id().equals(loop.threadId())) return;
         threadLoading = true;
-        uiStatus = "loading threadâ€¦";
+        uiStatus = "loading thread…";
         loop.loadThread(entry.id(), failure -> {
           synchronized (lock) {
             threadLoading = false;
@@ -1747,7 +1747,7 @@ final class InteractiveCommand {
       ThreadPicker.Entry entry = threadRows.get(target);
       threadPicker = new PickerState.OpenAt(target, "");
       uiStatus = "thread " + (target + 1) + "/" + threadRows.size()
-          + " Â· " + entry.displayTitle();
+          + " · " + entry.displayTitle();
       selectThread(loop, uiStatus);
     }
 
@@ -2409,13 +2409,13 @@ final class InteractiveCommand {
           lines.add(new StyledLine("Threads", Style.ACCENT));
           if (threadRows.isEmpty()) {
             lines.add(new StyledLine(threadsLoading
-                ? "  Loading conversationsâ€¦" : "  No threads yet.", Style.MUTED));
+                ? "  Loading conversations…" : "  No threads yet.", Style.MUTED));
           } else {
             ThreadId current = state.thread().id();
             for (int index = 0; index < threadRows.size(); index++) {
               ThreadPicker.Entry entry = threadRows.get(index);
-              String selected = index == open.index() ? "â€º " : "  ";
-              String active = entry.id().equals(current) ? "â— " : "  ";
+              String selected = index == open.index() ? "› " : "  ";
+              String active = entry.id().equals(current) ? "● " : "  ";
               lines.add(new StyledLine(selected + active + entry.displayTitle()
                   + "  " + entry.updatedAt(), index == open.index() || entry.id().equals(current)
                       ? Style.ACCENT : Style.MUTED));
@@ -2424,7 +2424,7 @@ final class InteractiveCommand {
                 Style.MUTED));
           }
           lines.add(new StyledLine(
-              "â†‘â†“ move  PgUp/PgDn page  Enter open  N new  Esc close", Style.MUTED));
+              "↑↓ move  PgUp/PgDn page  Enter open  N new  Esc close", Style.MUTED));
         }
         if (plan instanceof PickerState.OpenModal) {
           lines = new ArrayList<>(lines);
@@ -2457,13 +2457,13 @@ final class InteractiveCommand {
           for (int index = 0; index < open.blocks().size(); index++) {
             CodeBlockPicker.Block block = open.blocks().get(index);
             String language = block.language().isEmpty() ? "sh" : block.language();
-            lines.add(new StyledLine((index == open.index() ? "â€º " : "  ")
-                + (index + 1) + "  " + block.preview() + "  " + language + " Â· "
+            lines.add(new StyledLine((index == open.index() ? "› " : "  ")
+                + (index + 1) + "  " + block.preview() + "  " + language + " · "
                 + block.lineCount() + (block.lineCount() == 1 ? " line" : " lines"),
                 index == open.index() ? Style.ACCENT : Style.NORMAL));
           }
           lines.add(new StyledLine(
-              "â†‘â†“ move  Enter/1-9 run  e edit  y copy  Esc close", Style.MUTED));
+              "↑↓ move  Enter/1-9 run  e edit  y copy  Esc close", Style.MUTED));
         }
         if (codeBlocks instanceof CodeBlockPicker.Result result) {
           lines = new ArrayList<>(lines);
@@ -2471,12 +2471,12 @@ final class InteractiveCommand {
           lines.add(new StyledLine("Run Result", result.exitCode() == 0 && !result.timedOut()
               ? Style.ACCENT : Style.DANGER));
           String command = result.command().lines().findFirst().orElse("");
-          if (result.command().contains("\n")) command += " â€¦";
+          if (result.command().contains("\n")) command += " …";
           lines.add(new StyledLine("$ " + command, Style.NORMAL));
           int outputLines = result.output().isEmpty() ? 0
               : 1 + (int) result.output().chars().filter(value -> value == '\n').count();
           lines.add(new StyledLine((result.timedOut() ? "timed out" : "exit " + result.exitCode())
-              + " Â· " + outputLines + " lines Â· " + result.output().getBytes(
+              + " · " + outputLines + " lines · " + result.output().getBytes(
                   java.nio.charset.StandardCharsets.UTF_8).length + " B", Style.MUTED));
           List<String> output = result.output().lines().toList();
           if (output.isEmpty()) lines.add(new StyledLine("  (no output captured)", Style.MUTED));

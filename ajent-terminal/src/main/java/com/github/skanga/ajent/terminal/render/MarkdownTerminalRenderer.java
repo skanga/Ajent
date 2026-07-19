@@ -153,7 +153,7 @@ public final class MarkdownTerminalRenderer {
       String source = fenced.getContentChars().toString();
       int lines = codeLines(source);
       if (!fenced.getClosingMarker().isEmpty() && lines > CODE_FOLD_LINE_THRESHOLD) {
-        output.add(line("â–¸ " + lines + " lines hidden", MUTED));
+        output.add(line("▸ " + lines + " lines hidden", MUTED));
       } else {
         renderCode(source, width, output);
       }

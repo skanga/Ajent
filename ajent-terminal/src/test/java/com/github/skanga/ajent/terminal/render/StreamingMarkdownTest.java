@@ -96,16 +96,16 @@ final class StreamingMarkdownTest {
     assertThat(MarkdownTerminalRenderer.render(unterminated, 80))
         .extracting(MarkdownTerminalRenderer.Line::text)
         .contains("node-0", "node-40")
-        .doesNotContain("â–¸ 41 lines hidden");
+        .doesNotContain("▸ 41 lines hidden");
     assertThat(MarkdownTerminalRenderer.render(closed, 80))
         .extracting(MarkdownTerminalRenderer.Line::text)
-        .containsExactly("â–¸ 41 lines hidden");
+        .containsExactly("▸ 41 lines hidden");
 
     String fortyLines = closed.replace("node-40\n", "");
     assertThat(MarkdownTerminalRenderer.render(fortyLines, 80))
         .extracting(MarkdownTerminalRenderer.Line::text)
         .contains("node-0", "node-39")
-        .doesNotContain("â–¸ 40 lines hidden");
+        .doesNotContain("▸ 40 lines hidden");
   }
 
   @Test

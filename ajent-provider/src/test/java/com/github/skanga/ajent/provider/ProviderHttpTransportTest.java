@@ -176,7 +176,7 @@ class ProviderHttpTransportTest {
     transport.streamAnthropic(anthropicRequest(new ProviderAuth.Empty()),
         missing::add, () -> false);
     assertThat(missing).containsExactly(new StreamEvent.Error(
-        "not authenticated â€” run 'ajent login' or set ANTHROPIC_API_KEY"));
+        "not authenticated — run 'ajent login' or set ANTHROPIC_API_KEY"));
     assertThat(calls).hasValue(1);
   }
 

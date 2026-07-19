@@ -86,7 +86,7 @@ public final class ProviderHttpTransport {
     Objects.requireNonNull(request, "request");
     if (request.auth().isEmpty()) {
       sink.accept(new StreamEvent.Error(
-          "not authenticated â€” run 'ajent login' or set ANTHROPIC_API_KEY"));
+          "not authenticated — run 'ajent login' or set ANTHROPIC_API_KEY"));
       return;
     }
     if (debug != null) debug.write("==== request ====%n%s%n==== /request ====%n",

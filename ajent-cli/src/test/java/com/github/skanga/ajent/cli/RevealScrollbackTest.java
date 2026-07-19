@@ -150,7 +150,7 @@ final class RevealScrollbackTest {
     reply = withText(reply, reply.text() + "\n```\n\nThat is the full pipeline graph.");
     messages.set(1, reply);
     for (int frame = 0; frame < 6; frame++) harness.frame(active());
-    assertThat(harness.ui.renderedText()).contains("â–¸ 70 lines hidden")
+    assertThat(harness.ui.renderedText()).contains("▸ 70 lines hidden")
         .doesNotContain("node69 -->");
     harness.settle();
     harness.assertNoDuplicates();
@@ -159,7 +159,7 @@ final class RevealScrollbackTest {
   private static void exercisePriorWrite(int[] shape) {
     var messages = new ArrayList<Message>();
     messages.add(message(Role.USER, "Create random.txt."));
-    messages.add(assistant("Done â€” created random.txt.", write("prior", shape[1] + 20,
+    messages.add(assistant("Done — created random.txt.", write("prior", shape[1] + 20,
         new ToolStatus.Done("wrote file"))));
     var harness = new Harness(messages, shape[0], shape[1]);
     harness.frame(idle());

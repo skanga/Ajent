@@ -1022,10 +1022,11 @@ final class InteractiveCommandTest {
 
     ui.key(character('g', true), agent);
     assertThat(terminal.bytes.toString()).contains(
-        "Run Code Block", "1  echo one", "python Â· 1 line");
+        "Run Code Block", "1  echo one", "python · 1 line");
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("isn't runnable here");
+    assertThat(terminal.bytes.toString()).contains(
+        "isn't runnable here — press e to edit or y to copy");
     ui.key(character('y'), agent);
     assertThat(terminal.bytes.toString()).contains("cHJpbnQoMik=");
 
@@ -1189,9 +1190,9 @@ final class InteractiveCommandTest {
     agent.runOutput = "failed\n";
     agent.runExit = 1;
     ui.key(character('g', true), agent);
-    assertThat(terminal.bytes.toString()).contains("sh Â· 2 lines");
+    assertThat(terminal.bytes.toString()).contains("sh · 2 lines");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("echo a â€¦", "exit 1");
+    assertThat(terminal.bytes.toString()).contains("echo a …", "exit 1");
     ui.key(character('a'), agent);
   }
 
@@ -1211,7 +1212,7 @@ final class InteractiveCommandTest {
         threadEntry("new", "Newest"), threadEntry("thread", ""), threadEntry("old", "Oldest"));
 
     selectCommand(ui, agent, "open threads");
-    assertThat(terminal.bytes.toString()).contains("Threads", "â— (untitled)", "2/3");
+    assertThat(terminal.bytes.toString()).contains("Threads", "● (untitled)", "2/3");
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
     ui.key(special(TerminalKey.SpecialKey.HOME), agent);
     ui.key(special(TerminalKey.SpecialKey.END), agent);
@@ -1235,7 +1236,7 @@ final class InteractiveCommandTest {
     ui.insert("one two");
     ui.key(special(TerminalKey.SpecialKey.LEFT, true, false, false), agent);
     assertThat(agent.loadedThreads).hasSize(4);
-    assertThat(terminal.bytes.toString()).contains("thread 2/3 Â· (untitled)");
+    assertThat(terminal.bytes.toString()).contains("thread 2/3 · (untitled)");
   }
 
   @Test void threadPickerHandlesSameThreadNewEmptyFailureAndActiveCycle() {

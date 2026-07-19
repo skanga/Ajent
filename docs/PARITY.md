@@ -84,20 +84,20 @@ that preserves the base frame's height instead of appending rows; provider-switc
 inside that overlay.
 
 The reveal-on extension in `reveal_scrollback_test.cpp` is translated in
-`RevealScrollbackTest` as the same 52-case geometry matrix: four 12â€“24-row terminals, four
-32â€“60-row terminals, and the source's normal-only submit-mid-reveal cases. Long prose, six
+`RevealScrollbackTest` as the same 52-case geometry matrix: four 12–24-row terminals, four
+32–60-row terminals, and the source's normal-only submit-mid-reveal cases. Long prose, six
 text/tool subturns, repeated mid-reveal submits, a live closing-fence fold, prior tall writes,
 running-to-failed tool growth, and 14-turn front-trim storms all carry a verified `Synced` shadow
 while an ANSI emulator proves native scrollback is immutable and globally unique numbered oracle
 rows never duplicate. The shared Markdown renderer now also mirrors AgenTTY's fold boundary: a
-closed fenced-code body above 40 lines becomes one `â–¸ N lines hidden` row in both live and frozen
+closed fenced-code body above 40 lines becomes one `▸ N lines hidden` row in both live and frozen
 paths, while an open fence or exactly 40 body lines stays expanded.
 
 The broader `scrollback_oracle_test.cpp` program is translated in `ScrollbackOracleTest` over its
-exact `80Ã—30`, `60Ã—18`, `100Ã—50`, and `46Ã—76` shapes. Each run rotates six complete turns through
+exact `80×30`, `60×18`, `100×50`, and `46×76` shapes. Each run rotates six complete turns through
 long prose, bursty bash progress, a two-tool parallel committed-chrome seam, write
 tail-window-to-full expansion, and five incrementally arriving edit hunks that switch to the
-settled diff path. After repeated front trims it adds the source-sized `3 Ã— height + 10` deep edit
+settled diff path. After repeated front trims it adds the source-sized `3 × height + 10` deep edit
 run, a growing running-tool edge, and the immediate prose follow-up. Across all 32 turns, physical
 scrollback never shrinks or rewrites, the inline frame remains synchronized, and AgenTTY's
 committed-only `uniq-*` token rule finds no stranded card or prose copy.
@@ -304,7 +304,7 @@ cancels and drains its loop, reconstructs a session with the active profile
 and provider suppliers, clears thread-owned drafts/modals/reveal/diff state,
 and emits `ESC[2J ESC[3J ESC[H` for the sanctioned wholesale swap. Alt-Left/
 Right cycles the same deck from the current anchor, refuses active replies,
-and retains the native `thread k/N Â· title` status after the reset.
+and retains the native `thread k/N · title` status after the reset.
 
 The production todo tool now feeds a thread-safe live ledger instead of a
 discarding null sink. Its typed adapter normalizes `pending`, `in_progress`,

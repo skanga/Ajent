@@ -496,7 +496,7 @@ public final class AgentReducer {
       }
       String missing = missingRequiredField(call);
       if (missing.isEmpty()) continue;
-      String failure = "Tool call arguments look incomplete â€” `" + missing
+      String failure = "Tool call arguments look incomplete — `" + missing
           + "` is missing. This usually means the stream was truncated before the full tool "
           + "input arrived. Please emit a fresh tool call with every required field populated "
           + "(including `" + missing + "`).";
