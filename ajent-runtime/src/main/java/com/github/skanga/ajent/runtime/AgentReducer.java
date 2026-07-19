@@ -139,6 +139,7 @@ public final class AgentReducer {
   public Step update(AgentState state, RuntimeMessage message) {
     return switch (message) {
       case RuntimeMessage.Submit submit -> submit(state, submit);
+      case RuntimeMessage.ReplaceQueued replace -> replaceQueued(state, replace);
       case RuntimeMessage.ProviderEvent event -> providerEvent(state, event);
       case RuntimeMessage.ToolCompleted completed -> toolCompleted(state, completed);
       case RuntimeMessage.ToolProgress progress -> toolProgress(state, progress);
@@ -150,6 +151,13 @@ public final class AgentReducer {
       case RuntimeMessage.Tick ignored -> tick(state);
       case RuntimeMessage.Cancel ignored -> cancel(state);
     };
+  }
+
+  private static Step replaceQueued(AgentState state, RuntimeMessage.ReplaceQueued replace) {
+    return done(new AgentState(state.thread(), state.phase(), state.activeTurnId(),
+        state.turnCounter(), state.tokensIn(), state.tokensOut(), state.lastTickNanos(),
+        state.status(), state.toolDraft(), replace.queued(), state.compaction(),
+        state.oauthRefreshInFlight(), state.truncatedToolIds(), state.sessionGrants()));
   }
 
   private static Step profileChanged(AgentState state) {

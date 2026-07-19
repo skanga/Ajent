@@ -3,6 +3,8 @@ package com.github.skanga.ajent.cli;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.skanga.ajent.domain.ActiveTurn;
+import com.github.skanga.ajent.domain.Attachment;
+import com.github.skanga.ajent.domain.AttachmentText;
 import com.github.skanga.ajent.domain.CancellationSignal;
 import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.Message;
@@ -566,6 +568,134 @@ final class InteractiveCommandTest {
 
     assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
         .isEqualTo("one three");
+  }
+
+  @Test void upRecallsTheWholeQueuedTurnSetAndRemapsAttachmentChips() {
+    var firstAttachment = attachment("first body");
+    var secondAttachment = attachment("second body");
+    var first = new RuntimeMessage.Submit(AttachmentText.placeholder(0), List.of(),
+        List.of(firstAttachment));
+    var second = new RuntimeMessage.Submit("second " + AttachmentText.placeholder(0), List.of(),
+        List.of(secondAttachment));
+    AgentState initial = withQueued(AgentState.initial(thread(List.of())), List.of(first, second));
+    var state = new AtomicReference<>(withPhase(initial, new SessionPhase.Streaming(
+        ActiveTurn.start(new CancellationSignal(), 1))));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    assertThat(agent.messages.getFirst())
+        .isEqualTo(new RuntimeMessage.ReplaceQueued(List.of()));
+    assertThat(agent.messages.getLast()).isInstanceOfSatisfying(
+        RuntimeMessage.Submit.class, submit -> {
+          assertThat(submit.text()).isEqualTo(
+              AttachmentText.placeholder(0) + "\nsecond " + AttachmentText.placeholder(1));
+          assertThat(submit.attachments()).containsExactly(firstAttachment, secondAttachment);
+        });
+
+    var popState = new AtomicReference<>(withQueued(AgentState.initial(thread(List.of())),
+        List.of(first, second)));
+    var popUi = new InteractiveCommand.Ui(new FakeTerminal(), popState,
+        new InteractiveCommand.PermissionGate());
+    var popAgent = new FakeAgent(popState);
+    popUi.key(special(TerminalKey.SpecialKey.BACKSPACE, false, true, false), popAgent);
+    assertThat(popAgent.messages).containsExactly(
+        new RuntimeMessage.ReplaceQueued(List.of(first)));
+  }
+
+  @Test void arrowsWalkCurrentThreadUserHistoryWithAttachmentsAndEditingEndsTheWalk() {
+    Attachment oldAttachment = attachment("old body");
+    Attachment recentAttachment = attachment("recent body");
+    Message old = userMessage("old " + AttachmentText.placeholder(0), oldAttachment);
+    Message recent = userMessage("recent " + AttachmentText.placeholder(0), recentAttachment);
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(
+        old, new Message(Role.ASSISTANT, "reply", List.of(), List.of()), recent))));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP), agent); // clamps at the oldest turn
+    ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    assertThat(agent.messages.getLast()).isInstanceOfSatisfying(
+        RuntimeMessage.Submit.class, submit -> {
+          assertThat(submit.text()).isEqualTo(recent.text());
+          assertThat(submit.attachments()).containsExactly(recentAttachment);
+        });
+
+    var editingUi = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var editingAgent = new FakeAgent(state);
+    editingUi.key(special(TerminalKey.SpecialKey.UP), editingAgent);
+    editingUi.key(character('!'), editingAgent);
+    editingUi.key(special(TerminalKey.SpecialKey.DOWN), editingAgent);
+    editingUi.key(special(TerminalKey.SpecialKey.ENTER), editingAgent);
+    assertThat(editingAgent.messages.getLast()).isInstanceOfSatisfying(
+        RuntimeMessage.Submit.class, submit -> assertThat(submit.text())
+            .isEqualTo(recent.text() + "!"));
+
+    var roundTripUi = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var roundTripAgent = new FakeAgent(state);
+    roundTripUi.key(special(TerminalKey.SpecialKey.UP), roundTripAgent);
+    roundTripUi.key(special(TerminalKey.SpecialKey.DOWN), roundTripAgent);
+    roundTripUi.key(special(TerminalKey.SpecialKey.ENTER), roundTripAgent);
+    assertThat(roundTripAgent.messages).isEmpty();
+  }
+
+  @Test void altArrowsEditQueuedSlotsAndRestoreTheLiveDraft() {
+    RuntimeMessage.Submit first = new RuntimeMessage.Submit("first", List.of());
+    RuntimeMessage.Submit second = new RuntimeMessage.Submit("second", List.of());
+    var state = new AtomicReference<>(withQueued(AgentState.initial(thread(List.of())),
+        List.of(first, second)));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.insert("draft");
+
+    ui.key(special(TerminalKey.SpecialKey.UP, false, true, false), agent);
+    ui.key(character('!'), agent);
+    ui.key(special(TerminalKey.SpecialKey.UP, false, true, false), agent);
+    ui.key(character('?'), agent);
+    ui.key(special(TerminalKey.SpecialKey.DOWN, false, true, false), agent);
+    ui.key(special(TerminalKey.SpecialKey.DOWN, false, true, false), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    assertThat(agent.messages).contains(
+        new RuntimeMessage.ReplaceQueued(List.of(first,
+            new RuntimeMessage.Submit("second!", List.of()))),
+        new RuntimeMessage.ReplaceQueued(List.of(
+            new RuntimeMessage.Submit("first?", List.of()),
+            new RuntimeMessage.Submit("second!", List.of()))));
+    assertThat(agent.messages.getLast()).isEqualTo(
+        new RuntimeMessage.Submit("draft", List.of()));
+  }
+
+  @Test void submittingAQueuePeekRemovesItsOriginalSlot() {
+    RuntimeMessage.Submit first = new RuntimeMessage.Submit("first", List.of());
+    Attachment secondAttachment = attachment("second body");
+    RuntimeMessage.Submit second = new RuntimeMessage.Submit(
+        "second " + AttachmentText.placeholder(0), List.of(), List.of(secondAttachment));
+    var state = new AtomicReference<>(withQueued(AgentState.initial(thread(List.of())),
+        List.of(first, second)));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(special(TerminalKey.SpecialKey.UP, false, true, false), agent);
+    ui.key(character('!'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    assertThat(agent.messages).containsExactly(
+        new RuntimeMessage.ReplaceQueued(List.of(first)),
+        new RuntimeMessage.Submit("second " + AttachmentText.placeholder(0) + "!", List.of(),
+            List.of(secondAttachment)));
   }
 
   @Test void modelPickerRendersLoadingBeforeDeferredCatalogArrives() {
@@ -1715,6 +1845,25 @@ final class InteractiveCommandTest {
         state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
         state.toolDraft(), state.queued(), state.compaction(), state.oauthRefreshInFlight(),
         state.truncatedToolIds(), state.sessionGrants());
+  }
+
+  private static AgentState withQueued(
+      AgentState state, List<RuntimeMessage.Submit> queued) {
+    return new AgentState(state.thread(), state.phase(), state.activeTurnId(), state.turnCounter(),
+        state.tokensIn(), state.tokensOut(), state.lastTickNanos(), state.status(),
+        state.toolDraft(), queued, state.compaction(), state.oauthRefreshInFlight(),
+        state.truncatedToolIds(), state.sessionGrants());
+  }
+
+  private static Attachment attachment(String body) {
+    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+    return new Attachment(Attachment.Kind.PASTE, bytes, "", "", "", 0, 1, bytes.length);
+  }
+
+  private static Message userMessage(String text, Attachment attachment) {
+    return new Message(com.github.skanga.ajent.domain.MessageId.random(), Role.USER, text,
+        List.of(), List.of(attachment), "", "", List.of(), Instant.now(), Optional.empty(),
+        Optional.empty(), false, false);
   }
 
   private static ToolUse tool(String output) {

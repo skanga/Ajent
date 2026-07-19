@@ -28,6 +28,22 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 final class AgentReducerTest {
+  @Test void queuedTurnsCanBeAtomicallyReplacedByTheInteractiveEditor() {
+    var reducer = reducer(PermissionVerdict.ALLOW);
+    AgentState state = reducer.update(AgentState.initial(thread()),
+        new RuntimeMessage.Submit("active", List.of())).state();
+    var first = new RuntimeMessage.Submit("first", List.of());
+    var second = new RuntimeMessage.Submit("second", List.of());
+    state = reducer.update(state, first).state();
+    state = reducer.update(state, second).state();
+
+    AgentReducer.Step replaced = reducer.update(state,
+        new RuntimeMessage.ReplaceQueued(List.of(second)));
+
+    assertThat(replaced.state().queued()).containsExactly(second);
+    assertThat(replaced.effects()).isEmpty();
+  }
+
   @Test void submitPersistsCompactAttachmentsAndExpandsThemOnlyForProviderWire() {
     byte[] output = "captured".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var attachment = new Attachment(Attachment.Kind.OUTPUT, output, "", "", "echo one",

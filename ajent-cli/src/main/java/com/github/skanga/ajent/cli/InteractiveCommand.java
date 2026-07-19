@@ -936,6 +936,11 @@ final class InteractiveCommand {
     private List<Attachment> composerAttachments = List.of();
     private final List<ComposerSnapshot> composerUndo = new ArrayList<>();
     private final List<ComposerSnapshot> composerRedo = new ArrayList<>();
+    private boolean composerExpanded;
+    private int historyIndex = -1;
+    private ComposerSnapshot navigationDraft;
+    private int queuePeekIndex = -1;
+    private List<RuntimeMessage.Submit> queuePeekItems = List.of();
     private int cursor;
     private Profile profile;
     private String modelId;
@@ -1070,13 +1075,18 @@ final class InteractiveCommand {
           resetForThreadSwap();
           return true;
         }
+        if (codePoint == 'e') {
+          composerExpanded = !composerExpanded;
+          render();
+          return true;
+        }
         if (codePoint == 't') { plan = PlanModal.open(); render(); return true; }
         if (codePoint == 'g') { openCodeBlocks(loop); render(); return true; }
         if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
         if (codePoint == 'd' && composer.isEmpty()) return false;
         if (codePoint == 'u') {
           if (cursor > 0) {
-            checkpointComposer();
+            beginComposerEdit();
             composer = composer.substring(cursor);
             cursor = 0;
             render();
@@ -1104,17 +1114,33 @@ final class InteractiveCommand {
         }
         switch (special) {
           case ENTER -> {
-            if (key.modifiers().shift() || key.modifiers().alt()) insert("\n");
+            if (key.modifiers().shift() || key.modifiers().alt()) {
+              composerExpanded = true;
+              insert("\n");
+            }
             else if (!composer.isEmpty()) {
               String submitted = composer;
               List<Attachment> attachments = composerAttachments;
+              if (queuePeekIndex >= 0 && queuePeekIndex < queuePeekItems.size()) {
+                var queued = new ArrayList<>(queuePeekItems);
+                queued.remove(queuePeekIndex);
+                loop.dispatch(new RuntimeMessage.ReplaceQueued(queued));
+              }
               clearComposer();
               loop.dispatch(new RuntimeMessage.Submit(submitted, List.of(), attachments));
             }
           }
           case BACKSPACE -> {
+            if (key.modifiers().alt() && composer.isEmpty()
+                && queuePeekIndex < 0 && !loop.state().queued().isEmpty()) {
+              var queued = new ArrayList<>(loop.state().queued());
+              queued.removeLast();
+              loop.dispatch(new RuntimeMessage.ReplaceQueued(queued));
+              render();
+              break;
+            }
             if (cursor > 0) {
-              checkpointComposer();
+              beginComposerEdit();
               int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
               int previous = chipLength > 0 ? cursor - chipLength
                   : composer.offsetByCodePoints(cursor, -1);
@@ -1151,6 +1177,21 @@ final class InteractiveCommand {
           }
           case HOME -> { cursor = 0; render(); }
           case END -> { cursor = composer.length(); render(); }
+          case UP -> {
+            if (key.modifiers().alt()
+                && (!loop.state().queued().isEmpty() || queuePeekIndex >= 0)) {
+              queuePeekPrevious(loop);
+            } else if (composer.isEmpty() && !loop.state().queued().isEmpty()
+                && historyIndex < 0) {
+              recallQueued(loop);
+            } else if (historyIndex >= 0 || composer.isEmpty()) {
+              historyPrevious(loop.state());
+            }
+          }
+          case DOWN -> {
+            if (key.modifiers().alt() && queuePeekIndex >= 0) queuePeekNext(loop);
+            else if (historyIndex >= 0) historyNext(loop.state());
+          }
           case ESCAPE -> {
             if (!(loop.state().phase() instanceof SessionPhase.Idle)) loop.dispatch(new RuntimeMessage.Cancel());
           }
@@ -1251,12 +1292,13 @@ final class InteractiveCommand {
 
     private void insertAttachment(Attachment attachment) {
       synchronized (lock) {
-        checkpointComposer();
+        beginComposerEdit();
         int index = composerAttachments.size();
         var revised = new ArrayList<>(composerAttachments);
         revised.add(attachment);
         composerAttachments = List.copyOf(revised);
         insertComposer(AttachmentText.placeholder(index));
+        composerExpanded = true;
       }
       render();
     }
@@ -1860,6 +1902,9 @@ final class InteractiveCommand {
         composerAttachments = List.of();
         composerUndo.clear();
         composerRedo.clear();
+        composerExpanded = false;
+        resetComposerNavigation();
+        resetQueuePeek();
         cursor = 0;
         revealMessage = null;
         reveal = null;
@@ -1894,7 +1939,7 @@ final class InteractiveCommand {
     void insert(String value) {
       synchronized (lock) {
         if (!value.isEmpty()) {
-          checkpointComposer();
+          beginComposerEdit();
           insertComposer(value);
         }
       }
@@ -1955,6 +2000,9 @@ final class InteractiveCommand {
         composerAttachments = List.of();
         composerUndo.clear();
         composerRedo.clear();
+        composerExpanded = false;
+        resetComposerNavigation();
+        resetQueuePeek();
         cursor = 0;
       }
       render();
@@ -1965,10 +2013,153 @@ final class InteractiveCommand {
       cursor += value.length();
     }
 
+    private void recallQueued(AgentControl loop) {
+      List<RuntimeMessage.Submit> queued = loop.state().queued();
+      if (queued.isEmpty()) return;
+      beginComposerEdit();
+      var recalled = new StringBuilder();
+      var attachments = new ArrayList<Attachment>();
+      for (int index = 0; index < queued.size(); index++) {
+        if (index > 0) recalled.append('\n');
+        RuntimeMessage.Submit submit = queued.get(index);
+        appendRemapped(recalled, submit.text(), submit.attachments(), attachments.size());
+        attachments.addAll(submit.attachments());
+      }
+      composer = recalled.toString();
+      composerAttachments = List.copyOf(attachments);
+      cursor = composer.length();
+      composerExpanded = composer.indexOf('\n') >= 0;
+      loop.dispatch(new RuntimeMessage.ReplaceQueued(List.of()));
+      render();
+    }
+
+    private void historyPrevious(AgentState state) {
+      List<Message> history = previousUserMessages(state);
+      if (history.isEmpty()) return;
+      int next = Math.min(historyIndex + 1, history.size() - 1);
+      if (historyIndex < 0) navigationDraft = snapshotComposer();
+      historyIndex = next;
+      applyHistory(history.get(next));
+      render();
+    }
+
+    private void historyNext(AgentState state) {
+      if (historyIndex < 0) return;
+      int next = historyIndex - 1;
+      if (next < 0) {
+        ComposerSnapshot draft = navigationDraft;
+        resetComposerNavigation();
+        if (draft != null) restoreComposer(draft);
+      } else {
+        List<Message> history = previousUserMessages(state);
+        historyIndex = next;
+        if (next < history.size()) applyHistory(history.get(next));
+      }
+      render();
+    }
+
+    private static List<Message> previousUserMessages(AgentState state) {
+      var history = new ArrayList<Message>();
+      List<Message> messages = state.thread().messages();
+      for (int index = messages.size() - 1; index >= 0; index--) {
+        Message message = messages.get(index);
+        if (message.role() == Role.USER && !message.text().isEmpty()) history.add(message);
+      }
+      return List.copyOf(history);
+    }
+
+    private void applyHistory(Message message) {
+      composer = message.text();
+      composerAttachments = message.attachments();
+      cursor = composer.length();
+      if (composer.indexOf('\n') >= 0) composerExpanded = true;
+    }
+
+    private void queuePeekPrevious(AgentControl loop) {
+      if (queuePeekIndex < 0) {
+        if (loop.state().queued().isEmpty()) return;
+        navigationDraft = snapshotComposer();
+        historyIndex = -1;
+        queuePeekItems = List.copyOf(loop.state().queued());
+        queuePeekIndex = queuePeekItems.size() - 1;
+      } else {
+        commitQueuePeek(loop);
+        queuePeekIndex = Math.max(0, queuePeekIndex - 1);
+      }
+      applyQueuePeek();
+      render();
+    }
+
+    private void queuePeekNext(AgentControl loop) {
+      if (queuePeekIndex < 0) return;
+      commitQueuePeek(loop);
+      int next = queuePeekIndex + 1;
+      if (next >= queuePeekItems.size()) {
+        ComposerSnapshot draft = navigationDraft;
+        resetQueuePeek();
+        resetComposerNavigation();
+        if (draft != null) restoreComposer(draft);
+      } else {
+        queuePeekIndex = next;
+        applyQueuePeek();
+      }
+      render();
+    }
+
+    private void commitQueuePeek(AgentControl loop) {
+      if (queuePeekIndex < 0 || queuePeekIndex >= queuePeekItems.size()) return;
+      var revised = new ArrayList<>(queuePeekItems);
+      RuntimeMessage.Submit original = revised.get(queuePeekIndex);
+      revised.set(queuePeekIndex, new RuntimeMessage.Submit(
+          composer, original.images(), composerAttachments, original.checkpointId()));
+      queuePeekItems = List.copyOf(revised);
+      loop.dispatch(new RuntimeMessage.ReplaceQueued(queuePeekItems));
+    }
+
+    private void applyQueuePeek() {
+      RuntimeMessage.Submit queued = queuePeekItems.get(queuePeekIndex);
+      composer = queued.text();
+      composerAttachments = queued.attachments();
+      cursor = composer.length();
+      if (composer.indexOf('\n') >= 0) composerExpanded = true;
+    }
+
+    private static void appendRemapped(
+        StringBuilder target, String text, List<Attachment> attachments, int base) {
+      for (int position = 0; position < text.length();) {
+        int length = AttachmentText.placeholderLengthAt(text, position);
+        if (length > 0) {
+          int local = AttachmentText.placeholderIndex(text, position);
+          if (local >= 0 && local < attachments.size()) {
+            target.append(AttachmentText.placeholder(base + local));
+          }
+          position += length;
+        } else {
+          target.append(text.charAt(position++));
+        }
+      }
+    }
+
     private void checkpointComposer() {
       if (composerUndo.size() == 64) composerUndo.removeFirst();
       composerUndo.add(snapshotComposer());
       composerRedo.clear();
+    }
+
+    private void beginComposerEdit() {
+      checkpointComposer();
+      resetComposerNavigation();
+    }
+
+    private void resetComposerNavigation() {
+      historyIndex = -1;
+      if (queuePeekIndex < 0) navigationDraft = null;
+    }
+
+    private void resetQueuePeek() {
+      queuePeekIndex = -1;
+      queuePeekItems = List.of();
+      navigationDraft = null;
     }
 
     private ComposerSnapshot snapshotComposer() {
@@ -1980,6 +2171,7 @@ final class InteractiveCommand {
         if (composerRedo.size() == 64) composerRedo.removeFirst();
         composerRedo.add(snapshotComposer());
         restoreComposer(composerUndo.removeLast());
+        resetComposerNavigation();
       }
       render();
     }
@@ -1989,6 +2181,7 @@ final class InteractiveCommand {
         if (composerUndo.size() == 64) composerUndo.removeFirst();
         composerUndo.add(snapshotComposer());
         restoreComposer(composerRedo.removeLast());
+        resetComposerNavigation();
       }
       render();
     }
@@ -2001,7 +2194,7 @@ final class InteractiveCommand {
 
     private void deleteComposerRange(int start, int end) {
       if (start >= end) return;
-      checkpointComposer();
+      beginComposerEdit();
       composer = composer.substring(0, start) + composer.substring(end);
       cursor = start;
       render();
@@ -2475,7 +2668,7 @@ final class InteractiveCommand {
           profile, modelId, pendingPermission != null, state.phase().kind().ordinal(),
           visibleStatus, 0, active, active ? (int) (nowNanos / 100_000_000L) : 0,
           new InteractiveVisualHash.ComposerState(
-              composer, cursor, composerAttachments.size(), state.queued().size(), false),
+              composer, cursor, composerAttachments.size(), state.queued().size(), composerExpanded),
           surfaces, animationBucket, state.lastTickNanos(), state.tokensIn(), state.tokensOut()));
     }
 

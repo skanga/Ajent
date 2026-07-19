@@ -32,6 +32,9 @@ public sealed interface RuntimeMessage {
   record ProviderEvent(long turnId, StreamEvent event) implements RuntimeMessage {
     public ProviderEvent { event = Objects.requireNonNull(event, "event"); }
   }
+  record ReplaceQueued(List<Submit> queued) implements RuntimeMessage {
+    public ReplaceQueued { queued = List.copyOf(queued); }
+  }
   record ToolCompleted(long turnId, String callId, ToolCompletion result)
       implements RuntimeMessage {
     public ToolCompleted {
