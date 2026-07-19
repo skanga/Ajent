@@ -1083,18 +1083,22 @@ final class InteractiveCommand {
         if (codePoint == 't') { plan = PlanModal.open(); render(); return true; }
         if (codePoint == 'g') { openCodeBlocks(loop); render(); return true; }
         if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
-        if (codePoint == 'd' && composer.isEmpty()) return false;
         if (codePoint == 'u') {
-          if (cursor > 0) {
+          int lineStart = cursor > 0 ? composer.lastIndexOf('\n', cursor - 1) + 1 : 0;
+          if (lineStart < cursor) {
             beginComposerEdit();
-            composer = composer.substring(cursor);
-            cursor = 0;
+            composer = composer.substring(0, lineStart) + composer.substring(cursor);
+            cursor = lineStart;
             render();
           }
           return true;
         }
         if (codePoint == 'w') { deleteComposerRange(wordLeft(cursor), cursor); return true; }
-        if (codePoint == 'z') { undoComposer(); return true; }
+        if (codePoint == 'z') {
+          if (key.modifiers().shift()) redoComposer();
+          else undoComposer();
+          return true;
+        }
         if (codePoint == 'y') { redoComposer(); return true; }
       }
       if (key.key() instanceof TerminalKey.SpecialKey special) {
@@ -2841,7 +2845,7 @@ final class InteractiveCommand {
       reconcileFrozenSurface(state, messages, width, terminalRows, nowNanos);
       if (messages.isEmpty()) {
         output.add(new StyledLine("Ajent", Style.ACCENT));
-        output.add(new StyledLine("AI coding agent \u00b7 Ctrl-D to quit", Style.MUTED));
+        output.add(new StyledLine("AI coding agent \u00b7 Ctrl-C to quit", Style.MUTED));
       }
 
       int freezeLimit = freezeLimit(state, messages);

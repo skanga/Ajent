@@ -148,7 +148,7 @@ final class InteractiveCommandTest {
     var ui = new InteractiveCommand.Ui(terminal, state, gate);
     var agent = new FakeAgent(state);
     ui.render();
-    assertThat(terminal.bytes.toString()).contains("Ajent");
+    assertThat(terminal.bytes.toString()).contains("Ajent", "Ctrl-C to quit");
 
     assertThat(ui.key(character('a'), agent)).isTrue();
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
@@ -165,7 +165,7 @@ final class InteractiveCommandTest {
 
     ui.key(character('x'), agent);
     ui.key(character('u', true), agent);
-    assertThat(ui.key(character('d', true), agent)).isFalse();
+    assertThat(ui.key(character('d', true), agent)).isTrue();
 
     state.set(withPhase(state.get(), new SessionPhase.Streaming(
         ActiveTurn.start(new CancellationSignal(), 1))));
@@ -404,7 +404,7 @@ final class InteractiveCommandTest {
     ui.key(character('x'), agent);
     assertThat(ui.key(character('d', true), agent)).isTrue();
     ui.key(character('u', true), agent);
-    assertThat(ui.key(character('d', true), agent)).isFalse();
+    assertThat(ui.key(character('d', true), agent)).isTrue();
     ui.key(character('z'), agent);
     assertThat(ui.key(character('c', true), agent)).isFalse();
     var another = new InteractiveCommand.Ui(new FakeTerminal(), state,
@@ -587,6 +587,24 @@ final class InteractiveCommandTest {
 
     assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
         .isEqualTo("one three");
+  }
+
+  @Test void lineKillAndControlShiftZMatchNativeMultilineEditing() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    ui.insert("one\ntwo");
+
+    ui.key(character('u', true), agent);
+    ui.key(character('x'), agent);
+    ui.key(character('z', true), agent);
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('z'),
+        new TerminalKey.Modifiers(true, false, true)), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    assertThat(agent.messages.getLast()).isEqualTo(
+        new RuntimeMessage.Submit("one\nx", List.of()));
   }
 
   @Test void upRecallsTheWholeQueuedTurnSetAndRemapsAttachmentChips() {
