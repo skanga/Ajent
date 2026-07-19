@@ -56,6 +56,7 @@ import com.github.skanga.ajent.terminal.render.TerminalStylePool;
 import com.github.skanga.ajent.terminal.render.ToolPanelDeferral;
 import com.github.skanga.ajent.terminal.ui.CommandPalette;
 import com.github.skanga.ajent.terminal.ui.AppChrome;
+import com.github.skanga.ajent.terminal.ui.AgentTimeline;
 import com.github.skanga.ajent.terminal.ui.CodeBlockPicker;
 import com.github.skanga.ajent.terminal.ui.CheckpointPicker;
 import com.github.skanga.ajent.terminal.ui.DiffReview;
@@ -66,7 +67,6 @@ import com.github.skanga.ajent.terminal.ui.PickerState;
 import com.github.skanga.ajent.terminal.ui.PlanModal;
 import com.github.skanga.ajent.terminal.ui.ProviderPicker;
 import com.github.skanga.ajent.terminal.ui.SymbolPicker;
-import com.github.skanga.ajent.terminal.ui.ToolBodyPreview;
 import com.github.skanga.ajent.terminal.ui.ToolOutputViewer;
 import com.github.skanga.ajent.terminal.ui.ThreadPicker;
 import com.github.skanga.ajent.terminal.ui.TurnChrome;
@@ -3203,24 +3203,13 @@ final class InteractiveCommand {
       if (revealFrame != null) appendMarkdown(output, revealFrame);
       else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, bodyWidth);
       else wrap(output, text, bodyWidth, Style.NORMAL);
-      Map<String, java.util.Set<Integer>> grepHits =
-          ToolBodyPreview.collectGrepHits(message.toolCalls());
       if (showTools && !message.toolCalls().isEmpty() && output.size() > bodyStart) {
         output.add(new StyledLine("", Style.NORMAL));
       }
-      for (ToolUse call : showTools ? message.toolCalls() : List.<ToolUse>of()) {
-        output.add(new StyledLine("  " + call.name().value() + " \u00b7 "
-            + call.status().getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT),
-            call.status().isError() ? Style.DANGER : Style.MUTED));
-        ToolBodyPreview.Preview preview = ToolBodyPreview.describe(call, terminalRows, grepHits);
-        for (ToolBodyPreview.Row row : ToolBodyPreview.render(preview)) {
-          output.add(new StyledLine(row.text(), switch (row.tone()) {
-            case NORMAL -> Style.NORMAL;
-            case MUTED -> Style.MUTED;
-            case DANGER -> Style.DANGER;
-            case SUCCESS -> Style.SUCCESS;
-            case ACCENT -> Style.ACCENT;
-          }));
+      if (showTools && !message.toolCalls().isEmpty()) {
+        for (AgentTimeline.Row row : AgentTimeline.render(new AgentTimeline.Config(
+            message.toolCalls(), bodyWidth, terminalRows, nowNanos))) {
+          output.add(timelineLine(row));
         }
       }
       message.error().ifPresent(error -> {
@@ -3279,6 +3268,33 @@ final class InteractiveCommand {
             header.text().substring(left.length()), terminalStyle(Style.MUTED)));
       }
       return new StyledLine(header.text(), Style.NORMAL, spans);
+    }
+
+    private static StyledLine timelineLine(AgentTimeline.Row row) {
+      List<StyledSpan> spans = row.spans().stream().map(span -> {
+        TerminalStyle style = timelineStyle(span.tone());
+        if (span.bold()) style = style.withBold();
+        if (span.dim()) style = style.withDim();
+        if (span.italic()) style = style.withItalic();
+        return new StyledSpan(span.text(), style);
+      }).toList();
+      return new StyledLine(row.text(), Style.NORMAL, spans);
+    }
+
+    private static TerminalStyle timelineStyle(AgentTimeline.Tone tone) {
+      return switch (tone) {
+        case NORMAL -> TerminalStyle.EMPTY;
+        case MUTED -> terminalStyle(Style.MUTED);
+        case WHITE -> TerminalStyle.EMPTY.withForeground(TerminalColor.white());
+        case INSPECT -> TerminalStyle.EMPTY.withForeground(TerminalColor.named(14));
+        case EXECUTE -> TerminalStyle.EMPTY.withForeground(TerminalColor.cyan());
+        case MUTATE -> TerminalStyle.EMPTY.withForeground(TerminalColor.magenta());
+        case VCS -> TerminalStyle.EMPTY.withForeground(TerminalColor.blue());
+        case PLAN, WARNING -> TerminalStyle.EMPTY.withForeground(TerminalColor.named(11));
+        case AGENT -> TerminalStyle.EMPTY.withForeground(TerminalColor.named(13));
+        case SUCCESS -> TerminalStyle.EMPTY.withForeground(TerminalColor.named(10));
+        case DANGER -> TerminalStyle.EMPTY.withForeground(TerminalColor.named(9));
+      };
     }
 
     private static void appendError(List<StyledLine> output, String error, int width) {

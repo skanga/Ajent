@@ -223,6 +223,18 @@ prompts. Policy is enforced again in the dispatcher, not only by the modal.
 
 ## Plans and tool output
 
+Each assistant tool batch renders inside the native stable `A C T I O N S`
+card. Its header counts inspect, mutate, execute, VCS, plan, and agent actions;
+tree connectors retain batch order; pending/running rows use a static event dot
+while only the footer spinner animates. Settled rows use success, failure, or
+rejection glyphs and the footer reports completed actions and elapsed time.
+Tool names, categories, statuses, paths, summaries, and body stripes retain
+their distinct terminal styles. Tool-specific one-line details include paths,
+commands and exit codes, match/hit/entry/result counts, Git state, memory ids,
+todo progress, and subagent turn counts. Long content clips on Unicode display
+width, task prompt fallbacks truncate on UTF-8 boundaries, and even extremely
+narrow terminals remain render-safe.
+
 The plan modal mirrors live `todo` tool arguments, including partial streamed
 JSON updates. Items normalize to pending, in-progress, or completed and the
 footer reports completed/total. The modal is read-only.

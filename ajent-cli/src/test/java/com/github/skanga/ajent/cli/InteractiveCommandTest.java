@@ -1260,8 +1260,31 @@ final class InteractiveCommandTest {
     ui.render();
 
     assertThat(ui.renderedText()).contains(
-        "\u2503  response\n\u2503  \n\u2503    bash \u00b7 failed",
+        "\u2503  response\n\u2503  \n\u2503  \u256d A C T I O N S ",
         "\u2503  \n\u2503  \u26a0  stream cut off\n\u2503     unexpectedly");
+  }
+
+  @Test void toolBatchRendersAsNativeActionsTimelineInsideTurnRail() {
+    ToolUse bash = new ToolUse(new ToolCallId("bash"), new ToolName("bash"),
+        Map.of("command", "mvn test"),
+        new ToolStatus.Failed(1_000_000_000, 1_500_000_000,
+            "failed with exit code 1"));
+    Message assistant = new Message(Role.ASSISTANT, "", List.of(), List.of(bash));
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of(assistant))));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(60, 40);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of(),
+        Profile.WRITE, "claude-opus-4-6");
+
+    ui.render();
+
+    assertThat(ui.renderedText()).contains(
+        "\u2503  \u256d A C T I O N S ",
+        "\u2503  \u2502 E X E C U T E 1",
+        "\u2503  \u2502 \u2500\u2500 \u2717  Bash  mvn test",
+        "\u2503  \u2502    \u2717 1   F A I L E D   1/1 action   500ms",
+        "\u2503  \u2570");
   }
 
   @Test void savedThreadPickerLoadsAtCurrentNavigatesAndSwapsWholeView() {
@@ -1544,7 +1567,7 @@ final class InteractiveCommandTest {
     ui.render();
     terminal.size = new JLineTerminalSession.Size(20, 4);
     ui.render();
-    assertThat(terminal.bytes.toString()).contains("read").contains("Ready");
+    assertThat(terminal.bytes.toString()).contains("Read").contains("Ready");
   }
 
   @Test void settledAssistantBeforeUserIsNotTreatedAsLiveTail() {

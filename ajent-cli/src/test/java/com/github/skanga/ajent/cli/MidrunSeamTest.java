@@ -43,8 +43,11 @@ final class MidrunSeamTest {
         assertThat(firstCommittedDivergence(previous, current, 40)).isNegative();
       }
       for (int prior = 0; prior <= index; prior++) {
+        // Native edit panels intentionally show the path once in the event
+        // detail and once in the unified-diff body. More than two is a
+        // duplicated card.
         assertThat(count(harness.ui.renderedText(), "src/s" + prior + ".java"))
-            .as("settled card %s at depth %s", prior, index + 1).isOne();
+            .as("settled card %s at depth %s", prior, index + 1).isEqualTo(2);
       }
       previous = current;
       messages.removeLast();
@@ -55,7 +58,7 @@ final class MidrunSeamTest {
     assertThat(harness.ui.frozenThrough()).isEqualTo(messages.size());
     assertCommittedStable(previous, rows(harness.ui.renderedText()), 40);
     for (int index = 0; index < 30; index++) {
-      assertThat(count(harness.ui.frozenText(), "src/s" + index + ".java")).isOne();
+      assertThat(count(harness.ui.frozenText(), "src/s" + index + ".java")).isEqualTo(2);
     }
   }
 
@@ -277,7 +280,7 @@ final class MidrunSeamTest {
     List<String> runningRows = rows(harness.ui.renderedText());
     assertThat(harness.ui.renderedText()).contains("live-old-3");
     for (int index = 0; index < 24; index++) {
-      assertThat(count(harness.ui.renderedText(), "src/r" + index + ".java")).isOne();
+      assertThat(count(harness.ui.renderedText(), "src/r" + index + ".java")).isEqualTo(2);
     }
 
     messages.set(messages.size() - 1, assistant("finished", new ToolUse(
@@ -292,9 +295,9 @@ final class MidrunSeamTest {
 
     assertThat(firstCommittedDivergence(settledRows, rows(harness.ui.renderedText()), 40))
         .isNegative();
-    assertThat(count(harness.ui.renderedText(), "src/live.java")).isOne();
+    assertThat(count(harness.ui.renderedText(), "src/live.java")).isEqualTo(2);
     for (int index = 0; index < 24; index++) {
-      assertThat(count(harness.ui.renderedText(), "src/r" + index + ".java")).isOne();
+      assertThat(count(harness.ui.renderedText(), "src/r" + index + ".java")).isEqualTo(2);
     }
   }
 
