@@ -88,9 +88,16 @@
       "classification": "benchmark",
       "surface": "core-runtime",
       "referenceRun": "cmake --build <build> --target edit_turn_cpu_probe; <build>/edit_turn_cpu_probe",
-      "javaCounterpart": "ajent-parity/src/jmh/java/com/github/skanga/ajent/parity/EditTurnCpuProbeBenchmark.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/EditTurnCpuProbeBenchmark.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/BenchmarkUiSupport.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "JMH registry and JDK 25 single-shot smoke cover the native defaults of six edits, two 80-line hunks, settled/one-running/streaming-edit states, and the exact 40/60/100/200/400/1000/6000 height sweep"
+      ]
     },
     {
       "id": "frozen_invariant_fuzz",
@@ -752,9 +759,17 @@
       "classification": "benchmark",
       "surface": "terminal-rendering",
       "referenceRun": "cmake --build <build> --target tallcard_probe; <build>/tallcard_probe",
-      "javaCounterpart": "ajent-parity/src/jmh/java/com/github/skanga/ajent/parity/TallcardProbeBenchmark.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/TallcardProbeBenchmark.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/BenchmarkUiSupport.java",
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/ui/ToolBodyPreview.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "JMH registry and JDK 25 single-shot smoke expose cold, warm, and streaming-card measurements across the exact seven native line-count/canvas-height pairs"
+      ]
     },
     {
       "id": "tool_boundary_burst_probe",

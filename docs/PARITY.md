@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 45 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 47 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -144,6 +144,12 @@ standalone JMH 1.37 harness. `realthread_probe.cpp` is represented by separate p
 load, cold full-resume render, and warm cached-render measurements. Its portable default creates a
 240-message, 120-tool thread, while `-p threadFile=<path>` runs the same paths over real saved JSON.
 The generated benchmark registry and a one-iteration JDK 25 smoke run are verified locally.
+
+The same harness now executes `tallcard_probe` through cold, warm, and running-write frames for
+the exact seven native line/height pairs, and `edit_turn_cpu_probe` through settled, running-tail,
+and streaming-edit states with six two-hunk 80-line edits across the native seven-height sweep.
+Both use the production `InteractiveCommand.Ui` and tool-body renderer rather than synthetic string
+formatting, and both have generated-registry plus JDK 25 single-shot smoke evidence.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The
