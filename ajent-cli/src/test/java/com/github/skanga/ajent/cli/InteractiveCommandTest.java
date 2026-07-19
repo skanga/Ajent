@@ -546,6 +546,25 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("\u001b[2J\u001b[3J\u001b[H");
   }
 
+  @Test void slashOpensCommandsOnlyFromAnEmptyComposer() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.key(character('/'), agent);
+    assertThat(terminal.bytes.toString()).contains("Commands");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+
+    ui.insert("https:");
+    ui.key(character('/'), agent);
+    ui.key(character('/'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.messages.getLast()).isEqualTo(
+        new RuntimeMessage.Submit("https://", List.of()));
+  }
+
   @Test void nativeComposerWordEditingAndUndoRedoAreLive() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
@@ -1146,6 +1165,16 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
     ui.key(special(TerminalKey.SpecialKey.LEFT, false, true, false), agent);
     assertThat(agent.loadedThreads).containsExactly(new ThreadId("old"), new ThreadId("thread"));
+    ui.key(special(TerminalKey.SpecialKey.RIGHT, true, false, false), agent);
+    assertThat(agent.loadedThreads).containsExactly(
+        new ThreadId("old"), new ThreadId("thread"), new ThreadId("old"));
+    ui.key(special(TerminalKey.SpecialKey.LEFT, true, false, false), agent);
+    assertThat(agent.loadedThreads).containsExactly(
+        new ThreadId("old"), new ThreadId("thread"), new ThreadId("old"),
+        new ThreadId("thread"));
+    ui.insert("one two");
+    ui.key(special(TerminalKey.SpecialKey.LEFT, true, false, false), agent);
+    assertThat(agent.loadedThreads).hasSize(4);
     assertThat(terminal.bytes.toString()).contains("thread 2/3 Â· (untitled)");
   }
 

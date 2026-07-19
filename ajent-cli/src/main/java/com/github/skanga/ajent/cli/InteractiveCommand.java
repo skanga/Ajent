@@ -1106,6 +1106,13 @@ final class InteractiveCommand {
           render();
           return true;
         }
+        if (key.modifiers().ctrl() && !key.modifiers().alt() && composer.isEmpty()
+            && loop.state().phase() instanceof SessionPhase.Idle
+            && (special == TerminalKey.SpecialKey.LEFT
+                || special == TerminalKey.SpecialKey.RIGHT)) {
+          cycleThread(loop, special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
+          return true;
+        }
         if (key.modifiers().alt()
             && (special == TerminalKey.SpecialKey.LEFT
                 || special == TerminalKey.SpecialKey.RIGHT)) {
@@ -1207,7 +1214,11 @@ final class InteractiveCommand {
       }
       if (key.key() instanceof TerminalKey.CharacterKey character && !key.modifiers().alt()) {
         int codePoint = character.codePoint();
-        if ((codePoint == '@' || codePoint == '#') && atWordBoundary()) {
+        if (codePoint == '/' && composer.isEmpty() && composerAttachments.isEmpty()
+            && cursor == 0) {
+          palette = CommandPalette.open();
+          render();
+        } else if ((codePoint == '@' || codePoint == '#') && atWordBoundary()) {
           if (codePoint == '@') mentions = MentionPicker.open(loop.workspaceFiles());
           else symbols = SymbolPicker.open(loop.workspaceSymbols());
           render();
