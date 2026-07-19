@@ -36,6 +36,18 @@ final class AcpCommandTest {
   }
 
   @Test
+  void tracesEveryAcpFrameToStderrWhenEnabled(@TempDir Path root) throws Exception {
+    Path workspace = Files.createDirectories(root.resolve("workspace"));
+    Execution result = run(root, workspace, "", """
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+        """, Map.of("AGENTTY_ACP_TRACE", "1"), workspace.toString(), "off");
+
+    assertThat(result.exitCode()).isZero();
+    assertThat(result.stderr()).contains("acp ← {\"jsonrpc\":\"2.0\"",
+        "acp → {\"jsonrpc\":\"2.0\"");
+  }
+
+  @Test
   void rejectsInvalidProfileBeforeOpeningProtocol(@TempDir Path root) throws Exception {
     Path workspace = Files.createDirectories(root.resolve("workspace"));
     Execution result = run(root, workspace, "bogus", "");

@@ -43,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /** Newline-delimited ACP v1 JSON-RPC lifecycle server. */
@@ -200,11 +201,18 @@ public final class AcpJsonRpcServer {
   }
 
   public void serve(BufferedReader input, PrintWriter output) throws IOException {
+    serve(input, output, ignored -> { });
+  }
+
+  public void serve(BufferedReader input, PrintWriter output, Consumer<String> wireTrace)
+      throws IOException {
     Objects.requireNonNull(input, "input");
     Objects.requireNonNull(output, "output");
-    var client = new WireClient(output);
+    Objects.requireNonNull(wireTrace, "wireTrace");
+    var client = new WireClient(output, wireTrace);
     String line;
     while ((line = input.readLine()) != null) {
+      wireTrace.accept("acp ← " + line);
       if (client.acceptResponse(line)) continue;
       handleLineAsync(line, client).whenComplete((frames, exception) -> {
         if (exception != null) {
@@ -227,17 +235,20 @@ public final class AcpJsonRpcServer {
 
   private static final class WireClient implements Client {
     private final PrintWriter output;
+    private final Consumer<String> wireTrace;
     private final Object outputLock = new Object();
     private final AtomicLong requestIds = new AtomicLong();
     private final Map<String, CompletableFuture<PermissionPort.Decision>> pending =
         new ConcurrentHashMap<>();
 
-    private WireClient(PrintWriter output) {
+    private WireClient(PrintWriter output, Consumer<String> wireTrace) {
       this.output = output;
+      this.wireTrace = wireTrace;
     }
 
     @Override public void send(String frame) {
       synchronized (outputLock) {
+        wireTrace.accept("acp → " + frame);
         output.println(frame);
         output.flush();
       }

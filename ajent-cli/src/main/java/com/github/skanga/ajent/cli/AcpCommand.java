@@ -134,7 +134,11 @@ final class AcpCommand {
     error.print("ajent: ACP agent ready on stdio (profile="
         + profile.name().toLowerCase(java.util.Locale.ROOT) + ")\n");
     try {
-      server.serve(input, new PrintWriter(output, true, StandardCharsets.UTF_8));
+      String trace = environment.get("AGENTTY_ACP_TRACE");
+      var wireTrace = trace != null && !trace.isEmpty() && !"0".equals(trace)
+          ? (java.util.function.Consumer<String>) line -> error.print(line + "\n")
+          : (java.util.function.Consumer<String>) ignored -> { };
+      server.serve(input, new PrintWriter(output, true, StandardCharsets.UTF_8), wireTrace);
       return 0;
     } catch (IOException exception) {
       String detail = exception.getMessage();

@@ -218,8 +218,12 @@ final class AcpJsonRpcServerTest {
         "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"initialize\",\"params\":{}}\n"
             + "{\"jsonrpc\":\"2.0\",\"method\":\"session/cancel\",\"params\":{}}\n"));
     var output = new java.io.StringWriter();
-    server.serve(input, new java.io.PrintWriter(output));
+    var trace = new java.util.ArrayList<String>();
+    server.serve(input, new java.io.PrintWriter(output), trace::add);
     assertThat(output.toString().lines()).hasSize(1);
+    assertThat(trace).hasSize(3);
+    assertThat(trace).anyMatch(line -> line.startsWith("acp ← "))
+        .anyMatch(line -> line.startsWith("acp → "));
 
     Path blocked = directory.resolve("blocked");
     java.nio.file.Files.writeString(blocked, "file-not-directory");
