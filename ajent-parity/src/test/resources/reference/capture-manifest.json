@@ -44,7 +44,7 @@
         "reference/cli/invalid.stderr.txt",
         "com.github.skanga.ajent.parity.CliParityTest",
         "com.github.skanga.ajent.parity.NativeExecutableParityIT",
-        "mvn -q verify -Pcharacterization: pinned Windows binary hash plus exact process exit/stdout/stderr for version, help, invalid argument, isolated status, and isolated logout"
+        "mvn -q verify -Pcharacterization: pinned Windows binary hash plus exact process exit/stdout/stderr for version, help, invalid argument, isolated status/logout, installed-skills inventory, airgap help, and invalid-workspace ACP/MCP startup"
       ]
     },
     {

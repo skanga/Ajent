@@ -32,11 +32,17 @@ final class NativeExecutableParityIT {
 
     Map<String, String> isolated = Map.of(
         "HOME", home.toString(), "USERPROFILE", home.toString(), "APPDATA", home.toString());
+    Path missingWorkspace = home.resolve("missing-workspace");
     for (List<String> arguments : List.of(
         List.of("--version"), List.of("--help"), List.of("--definitely-invalid"),
-        List.of("status"), List.of("logout"))) {
-      Execution nativeRun = execute(command(nativeBinary, arguments), isolated);
-      Execution javaRun = execute(javaCommand(ajentJar, arguments), isolated);
+        List.of("status"), List.of("logout"), List.of("skills"),
+        List.of("airgap", "--help"),
+        List.of("acp", "--workspace", missingWorkspace.toString()),
+        List.of("mcp-serve", "--workspace", missingWorkspace.toString()))) {
+      Map<String, String> caseEnvironment = arguments.equals(List.of("skills"))
+          ? Map.of() : isolated;
+      Execution nativeRun = execute(command(nativeBinary, arguments), caseEnvironment);
+      Execution javaRun = execute(javaCommand(ajentJar, arguments), caseEnvironment);
 
       assertThat(normalize(nativeRun, home, true)).as("native %s", arguments)
           .isEqualTo(normalize(javaRun, home, false));
@@ -57,6 +63,7 @@ final class NativeExecutableParityIT {
   private static String normalizeProgramName(String value) {
     return value.replace(".config\\agentty", ".config\\<CONFIG_NAME>")
         .replace(".config/agentty", ".config/<CONFIG_NAME>")
+        .replace("--remote-agentty", "--remote-<CONFIG_NAME>")
         .replace("agentty", "ajent")
         .replace("<CONFIG_NAME>", "agentty");
   }
