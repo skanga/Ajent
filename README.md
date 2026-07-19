@@ -50,6 +50,8 @@ For example, the real-thread resume probe accepts either its synthetic default o
 ```powershell
 & "$env:AJENT_JAVA_HOME\bin\java.exe" -jar ajent-benchmarks\target\benchmarks.jar RealthreadProbeBenchmark
 & "$env:AJENT_JAVA_HOME\bin\java.exe" -jar ajent-benchmarks\target\benchmarks.jar RealthreadProbeBenchmark -p "threadFile=C:\path\thread.json"
+& "$env:AJENT_JAVA_HOME\bin\java.exe" -jar ajent-benchmarks\target\benchmarks.jar LongSessionProbeBenchmark
+& "$env:AJENT_JAVA_HOME\bin\java.exe" -jar ajent-benchmarks\target\benchmarks.jar O1ProbeBenchmark
 ```
 
 The JaCoCo skip on `package` only avoids running the verification-time coverage

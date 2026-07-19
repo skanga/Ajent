@@ -165,9 +165,16 @@
       "classification": "benchmark",
       "surface": "core-runtime",
       "referenceRun": "ctest --test-dir <build> -R \"^long_session_bench$\" --output-on-failure",
-      "javaCounterpart": "ajent-parity/src/jmh/java/com/github/skanga/ajent/parity/LongSessionBenchBenchmark.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/LongSessionProbeBenchmark.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/SessionBenchmarkSupport.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "all nine native session shapes and both six-size streaming sweeps translated to production UI JMH paths",
+        "mvn -q verify",
+        "JDK 25 JMH single-shot smoke"
+      ]
     },
     {
       "id": "loop_body_split_probe",
@@ -367,9 +374,16 @@
       "classification": "benchmark",
       "surface": "core-runtime",
       "referenceRun": "cmake --build <build> --target o1_probe; <build>/o1_probe",
-      "javaCounterpart": "ajent-parity/src/jmh/java/com/github/skanga/ajent/parity/O1ProbeBenchmark.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/O1ProbeBenchmark.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/SessionBenchmarkSupport.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "all native settled, active-edit, streaming-write, streaming-text, wire-byte, and bounded-resume matrices translated",
+        "mvn -q verify",
+        "JDK 25 JMH single-shot smoke"
+      ]
     },
     {
       "id": "ollama_transport_test",

@@ -101,7 +101,7 @@ final class BenchmarkUiSupport {
         state.oauthRefreshInFlight(), state.truncatedToolIds(), state.sessionGrants()));
   }
 
-  private static String code(int lines) {
+  static String code(int lines) {
     var result = new StringBuilder(lines * 64);
     for (int line = 0; line < lines; line++) {
       result.append("    auto x = compute(i) + offset; // line of plausible code\n");
@@ -120,6 +120,11 @@ final class BenchmarkUiSupport {
                  Clock clock, Terminal terminal) {
     void render() {
       clock.now += 16_000_000;
+      ui.render();
+    }
+
+    void renderAfter(long nanos) {
+      clock.now += nanos;
       ui.render();
     }
   }

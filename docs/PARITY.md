@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 49 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 51 deterministic suites ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -156,6 +156,19 @@ backdrop and live 16 ms growth shape. The first measures prose growth and the se
 bash path at 80x30. The second separates Ajent's actual immutable message-key projection,
 visual-hash/layout/wire gate, and rendered-frame projection at 120x50; it deliberately does not
 invent Maya's separate subscription phase because Ajent has no corresponding runtime operation.
+
+`long_session_bench` retains the native A-I scenario table: the 6/20/80/200-turn write shapes,
+ten-hunk edit shape, realistic Write+Edit+Bash+Read mix, 3000-line pathological write, and the
+off-screen 3000-line penultimate card. Its JMH methods measure construction, message render keys,
+cold bounded resume, warm visual-gate frames, and active mid-run frames. The separate streaming
+state preserves both native write and prose sweeps at 8, 100, 400, 800, 1500, and 3000 lines.
+
+`o1_probe` preserves all eight settled transcript pairs through the 500-turn stress shape, the
+1/5/10/20/40/80/160/320 accumulated-edit run, five write-card sizes through 8000 lines, five prose
+and wire sizes through 5000 lines, and the three 50/200-turn bounded-resume footprints. These
+measure Ajent's production frozen-scrollback ledger and terminal byte stream directly. Native-only
+Maya element-tree build/paint counters are represented by Ajent's combined production UI frame;
+the Java port does not report a synthetic phase that its renderer does not have.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The
