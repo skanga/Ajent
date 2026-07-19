@@ -27,7 +27,7 @@ are recorded in the machine-readable manifests under
 | Maya | `8c655268272b416faed1ba13ffb6d36c292415ed` | populated |
 | acp-cpp | `d8b80082f021fe15a081ddd9fe812667f9435ade` | populated |
 | mcp-cpp | `f87d78aa5e031cb80257692b3379805d54e54ca5` | populated |
-| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; 51 deterministic suites ported from source |
+| Reference tests/probes | all 53 rows in `test-manifest.json` | inventoried; all 53 ported from source |
 | Reference executable | Windows 0.2.8 binary SHA-256 in `capture-manifest.json` | verified |
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
@@ -169,6 +169,20 @@ and wire sizes through 5000 lines, and the three 50/200-turn bounded-resume foot
 measure Ajent's production frozen-scrollback ledger and terminal byte stream directly. Native-only
 Maya element-tree build/paint counters are represented by Ajent's combined production UI frame;
 the Java port does not report a synthetic phase that its renderer does not have.
+
+The standalone `AnthropicMarkdownStream` developer tool ports `anthropic_md_stream` end to end.
+Capture resolves the same environment/saved Anthropic credentials as Ajent, makes one request
+through the production streaming transport, and records monotonic `{t_ms,delta}` JSONL. Replay
+feeds that fixture through the production `StreamingMarkdown` renderer with native-equivalent
+realtime, codepoint feed-rate, reveal pacing, drain, width, no-effects, and frame-trace controls.
+Its deterministic tests exercise UTF-8 fixture parsing and every delta without requiring network.
+
+`ComposerFlickerProbe` drives the exact native long tight-list text shape through Ajent's real
+inline UI and a wcwidth-aware ANSI viewport emulator. It retains the 120-paragraph and 96-byte
+defaults and reports composer movement/up-bounces/in-place rewrites, hidden-to-reappearing rows,
+row churn, content-height shrink, out-of-order list visibility, and wire-byte percentiles. The
+only UI-specific adaptation is locating Ajent's `> ` composer row instead of AgenTTY's bordered
+Maya composer; the measured terminal phenomena and default stream cadence are unchanged.
 
 Captured subprocesses now project the complete accumulated stdout/stderr
 snapshot at AgenTTY's 80 ms cadence and perform a mandatory final flush. The

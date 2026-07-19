@@ -22,6 +22,11 @@ final class BenchmarkUiSupport {
   private BenchmarkUiSupport() {}
 
   static Fixture fixture(List<Message> messages, int width, int height, boolean active) {
+    return fixture(messages, width, height, active, false);
+  }
+
+  static Fixture fixture(
+      List<Message> messages, int width, int height, boolean active, boolean captureWire) {
     var thread = new com.github.skanga.ajent.domain.Thread(
         new ThreadId("benchmark"), "benchmark", messages);
     AgentState initial = AgentState.initial(thread);
@@ -31,7 +36,7 @@ final class BenchmarkUiSupport {
     }
     var state = new AtomicReference<>(initial);
     var clock = new Clock();
-    var terminal = new Terminal(width, height);
+    var terminal = new Terminal(width, height, captureWire);
     var ui = new InteractiveCommand.Ui(terminal, state,
         new InteractiveCommand.PermissionGate(), clock);
     return new Fixture(state, ui, clock, terminal);
@@ -137,10 +142,24 @@ final class BenchmarkUiSupport {
 
   static final class Terminal implements InteractiveCommand.TerminalPort {
     private final JLineTerminalSession.Size size;
+    private final boolean capture;
     private long bytes;
-    Terminal(int width, int height) { size = new JLineTerminalSession.Size(width, height); }
+    private final StringBuilder pending = new StringBuilder();
+    Terminal(int width, int height) { this(width, height, false); }
+    Terminal(int width, int height, boolean capture) {
+      size = new JLineTerminalSession.Size(width, height);
+      this.capture = capture;
+    }
     @Override public JLineTerminalSession.Size size() { return size; }
-    @Override public void write(String value) { bytes += value.length(); }
+    @Override public void write(String value) {
+      bytes += value.length();
+      if (capture) pending.append(value);
+    }
     long bytes() { return bytes; }
+    String drain() {
+      String result = pending.toString();
+      pending.setLength(0);
+      return result;
+    }
   }
 }

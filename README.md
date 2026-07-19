@@ -54,6 +54,14 @@ For example, the real-thread resume probe accepts either its synthetic default o
 & "$env:AJENT_JAVA_HOME\bin\java.exe" -jar ajent-benchmarks\target\benchmarks.jar O1ProbeBenchmark
 ```
 
+The standalone stream fixture and composer diagnostics live in the same shaded JAR:
+
+```powershell
+& "$env:AJENT_JAVA_HOME\bin\java.exe" -cp ajent-benchmarks\target\benchmarks.jar com.github.skanga.ajent.cli.AnthropicMarkdownStream capture stream.jsonl
+& "$env:AJENT_JAVA_HOME\bin\java.exe" -cp ajent-benchmarks\target\benchmarks.jar com.github.skanga.ajent.cli.AnthropicMarkdownStream replay stream.jsonl --trace
+& "$env:AJENT_JAVA_HOME\bin\java.exe" -cp ajent-benchmarks\target\benchmarks.jar com.github.skanga.ajent.cli.ComposerFlickerProbe 120 96
+```
+
 The JaCoCo skip on `package` only avoids running the verification-time coverage
 gate when producing a local executable. It does not skip tests. Use
 `mvn -q verify` for the complete quality gate.

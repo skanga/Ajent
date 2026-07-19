@@ -40,9 +40,17 @@
       "classification": "fixture-capture",
       "surface": "terminal-rendering",
       "referenceRun": "cmake --build <build> --target anthropic_md_stream; <build>/anthropic_md_stream",
-      "javaCounterpart": "ajent-parity/src/testFixtures/java/com/github/skanga/ajent/parity/AnthropicMdStreamFixture.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/AnthropicMarkdownStream.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/test/java/com/github/skanga/ajent/cli/AnthropicMarkdownStreamTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "live capture uses Ajent credential precedence and Anthropic streaming transport",
+        "offline JSONL replay covers realtime and codepoint pacing, reveal controls, width, and trace output",
+        "mvn -q verify",
+        "JDK 25 packaged replay smoke"
+      ]
     },
     {
       "id": "composer_edit_test",
@@ -64,9 +72,17 @@
       "classification": "diagnostic",
       "surface": "composer-terminal",
       "referenceRun": "cmake --build <build> --target composer_flicker_probe; <build>/composer_flicker_probe",
-      "javaCounterpart": "ajent-parity/src/testFixtures/java/com/github/skanga/ajent/parity/ComposerFlickerProbeDiagnostic.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/ComposerFlickerProbe.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/test/java/com/github/skanga/ajent/cli/ComposerFlickerProbeTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "native 120-paragraph/96-byte stream defaults and ANSI viewport metrics translated",
+        "production inline output measures composer movement/rewrite, hidden/reappear, height, ordering, and wire cost",
+        "mvn -q verify",
+        "JDK 25 packaged diagnostic smoke"
+      ]
     },
     {
       "id": "doom_loop_test",
