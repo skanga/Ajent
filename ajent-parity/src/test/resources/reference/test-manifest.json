@@ -177,9 +177,17 @@
       "classification": "benchmark",
       "surface": "core-runtime",
       "referenceRun": "cmake --build <build> --target loop_body_split_probe; <build>/loop_body_split_probe",
-      "javaCounterpart": "ajent-parity/src/jmh/java/com/github/skanga/ajent/parity/LoopBodySplitProbeBenchmark.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/LoopBodySplitProbeBenchmark.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/BenchmarkUiSupport.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveVisualHash.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "JMH and JDK 25 smoke split the exact eight-turn/400-line deep streaming shape into live message-key projection, the production visual-hash/layout/wire gate, and rendered-frame projection"
+      ]
     },
     {
       "id": "mcp_bridge_test",
@@ -698,9 +706,16 @@
       "classification": "benchmark",
       "surface": "terminal-rendering",
       "referenceRun": "cmake --build <build> --target stream_cpu_probe; <build>/stream_cpu_probe",
-      "javaCounterpart": "ajent-parity/src/jmh/java/com/github/skanga/ajent/parity/StreamCpuProbeBenchmark.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/StreamCpuProbeBenchmark.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/BenchmarkUiSupport.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "JMH and JDK 25 smoke drive the native eight-turn/400-line frozen backdrop at 80x30 with both one-paragraph-per-frame prose growth and a running bash tail accumulating settled two-hunk 120-line edits"
+      ]
     },
     {
       "id": "stream_liveness_test",

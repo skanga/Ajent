@@ -77,6 +77,30 @@ final class BenchmarkUiSupport {
         + "the CLI can report them instead of crashing at startup.";
   }
 
+  static Message withText(Message message, String text) {
+    return new Message(message.id(), message.role(), text, message.images(), message.attachments(),
+        message.thinking(), message.thinkingSignature(), message.toolCalls(), message.timestamp(),
+        message.checkpointId(), message.error(), message.textBlockClosed(),
+        message.isCompactSummary());
+  }
+
+  static Message withTools(Message message, List<ToolUse> tools) {
+    return message.withToolCalls(tools);
+  }
+
+  static void replaceLast(Fixture fixture, Message replacement) {
+    AgentState state = fixture.state().get();
+    var messages = new ArrayList<>(state.thread().messages());
+    messages.set(messages.size() - 1, replacement);
+    var thread = new com.github.skanga.ajent.domain.Thread(state.thread().id(),
+        state.thread().title(), messages, state.thread().createdAt(), state.thread().updatedAt(),
+        state.thread().compactions());
+    fixture.state().set(new AgentState(thread, state.phase(), state.activeTurnId(),
+        state.turnCounter(), state.tokensIn(), state.tokensOut(), state.lastTickNanos(),
+        state.status(), state.toolDraft(), state.queued(), state.compaction(),
+        state.oauthRefreshInFlight(), state.truncatedToolIds(), state.sessionGrants()));
+  }
+
   private static String code(int lines) {
     var result = new StringBuilder(lines * 64);
     for (int line = 0; line < lines; line++) {
