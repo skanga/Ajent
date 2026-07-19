@@ -11,7 +11,7 @@
   <modules>
     <module>ajent-domain</module><module>ajent-core</module><module>ajent-provider</module>
     <module>ajent-tools</module><module>ajent-runtime</module><module>ajent-protocol</module><module>ajent-terminal</module>
-    <module>ajent-cli</module><module>ajent-parity</module>
+    <module>ajent-cli</module><module>ajent-parity</module><module>ajent-benchmarks</module>
   </modules>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -25,6 +25,7 @@
     <maven.surefire.version>3.5.4</maven.surefire.version><maven.failsafe.version>3.5.4</maven.failsafe.version>
     <jacoco.version>0.8.15</jacoco.version>
     <maven.shade.version>3.6.2</maven.shade.version>
+    <jmh.version>1.37</jmh.version>
     <jacoco.line.minimum>0.80</jacoco.line.minimum>
     <jacoco.branch.minimum>0.80</jacoco.branch.minimum>
   </properties>
@@ -38,6 +39,8 @@
     <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark-ext-gfm-strikethrough</artifactId><version>${flexmark.version}</version></dependency>
     <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark-ext-tables</artifactId><version>${flexmark.version}</version></dependency>
     <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark-ext-gfm-tasklist</artifactId><version>${flexmark.version}</version></dependency>
+    <dependency><groupId>org.openjdk.jmh</groupId><artifactId>jmh-core</artifactId><version>${jmh.version}</version></dependency>
+    <dependency><groupId>org.openjdk.jmh</groupId><artifactId>jmh-generator-annprocess</artifactId><version>${jmh.version}</version></dependency>
   </dependencies></dependencyManagement>
   <build>
     <pluginManagement><plugins>

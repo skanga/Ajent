@@ -44,6 +44,14 @@ The complete executable, dependency-containing JAR is written to:
 ajent-cli\target\ajent.jar
 ```
 
+Performance probes are packaged separately as `ajent-benchmarks\target\benchmarks.jar`.
+For example, the real-thread resume probe accepts either its synthetic default or a saved thread:
+
+```powershell
+& "$env:AJENT_JAVA_HOME\bin\java.exe" -jar ajent-benchmarks\target\benchmarks.jar RealthreadProbeBenchmark
+& "$env:AJENT_JAVA_HOME\bin\java.exe" -jar ajent-benchmarks\target\benchmarks.jar RealthreadProbeBenchmark -p "threadFile=C:\path\thread.json"
+```
+
 The JaCoCo skip on `package` only avoids running the verification-time coverage
 gate when producing a local executable. It does not skip tests. Use
 `mvn -q verify` for the complete quality gate.
@@ -152,6 +160,7 @@ wrapping them with commands that write unrelated text to stdout.
 - `ajent-terminal`: terminal input, rendering, composer, and modal models
 - `ajent-cli`: process commands and the interactive composition root
 - `ajent-parity`: source/binary parity fixtures and manifests
+- `ajent-benchmarks`: standalone JMH ports of native performance probes
 - `agentty`: local upstream reference checkout; never included in Ajent releases
 
 ## Development and parity

@@ -477,9 +477,17 @@
       "classification": "benchmark",
       "surface": "core-runtime",
       "referenceRun": "cmake --build <build> --target realthread_probe; <build>/realthread_probe",
-      "javaCounterpart": "ajent-parity/src/jmh/java/com/github/skanga/ajent/parity/RealthreadProbeBenchmark.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-benchmarks/src/main/java/com/github/skanga/ajent/cli/RealthreadProbeBenchmark.java",
+      "supportingCounterparts": [
+        "ajent-benchmarks/pom.xml",
+        "ajent-core/src/main/java/com/github/skanga/ajent/core/persistence/ThreadStore.java",
+        "ajent-cli/src/main/java/com/github/skanga/ajent/cli/InteractiveCommand.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q verify",
+        "JDK 25 smoke: benchmarks.jar runs loadThreadFile, firstFullRender, and secondRenderWarm over a deterministic 240-message/120-tool thread; -p threadFile=<path> accepts a real persisted thread"
+      ]
     },
     {
       "id": "reveal_freeze_gate_probe",
