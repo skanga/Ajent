@@ -571,7 +571,7 @@ final class InteractiveCommand {
     try {
       var tools = ToolRuntimeFactory.compose(new ToolRuntimeFactory.Configuration(
           workspace, workspace, home, docs, new JdkWebTransport(), todos, subagents,
-          sandbox.runner(), mcp.tools()));
+          sandbox.runner(), mcp.tools(), environment));
       subagents.bind(new DispatcherToolPort(tools.dispatcher()));
       String effort = Effort.fromWire(settings.effort())
           .clamp(ModelCapabilities.fromId(model)).wire();

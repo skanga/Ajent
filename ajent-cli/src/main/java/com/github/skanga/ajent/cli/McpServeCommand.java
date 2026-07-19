@@ -101,7 +101,7 @@ final class McpServeCommand {
       var subagents = new ProviderBackedSubagentRunner(client);
       var configuration = new ToolRuntimeFactory.Configuration(
           workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
-          processSandbox.runner(), mcp.tools());
+          processSandbox.runner(), mcp.tools(), environment);
       var tools = ToolRuntimeFactory.compose(configuration);
       var dispatcher = tools.dispatcher();
       subagents.bind(new DispatcherToolPort(dispatcher));

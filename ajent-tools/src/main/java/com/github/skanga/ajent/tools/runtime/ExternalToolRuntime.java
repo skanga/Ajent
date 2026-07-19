@@ -3,6 +3,8 @@ package com.github.skanga.ajent.tools.runtime;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.tools.policy.EffectSet;
+import com.github.skanga.ajent.tools.rag.EmbeddingClient;
+import com.github.skanga.ajent.tools.rag.KnowledgeSource;
 import java.util.List;
 import java.util.Optional;
 
@@ -13,6 +15,11 @@ public interface ExternalToolRuntime {
   Optional<EffectSet> effects(String name);
 
   ToolResult execute(String name, ObjectNode arguments);
+
+  default Optional<KnowledgeSource> knowledgeSource(
+      EmbeddingClient.Config embedding, EmbeddingClient client) {
+    return Optional.empty();
+  }
 
   static ExternalToolRuntime none() {
     return Empty.INSTANCE;

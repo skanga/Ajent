@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import com.github.skanga.ajent.tools.fs.WorkspaceSandbox;
 import com.github.skanga.ajent.tools.memory.JsonlMemoryStore;
 import com.github.skanga.ajent.tools.memory.MemoryStore;
@@ -120,6 +121,23 @@ final class KnowledgePipelineTest {
     var empty = new McpResourceKnowledgeSource("mcp", null, null);
     assertThat(empty.retrieve("anything", 3)).isEmpty();
     assertThat(empty.indexedChunks()).isZero();
+  }
+
+  @Test void mcpResourceSourceReindexesOnGenerationChangesAndDropsRemovedResources() {
+    var generation = new AtomicLong();
+    var refs = new java.util.concurrent.atomic.AtomicReference<>(List.of(
+        new McpResourceKnowledgeSource.ResourceRef("mcp://one", "One")));
+    var source = new McpResourceKnowledgeSource("mcp", refs::get,
+        uri -> Optional.of("generation aware sentinel"),
+        new RagCorpus((config, texts) -> Optional.empty()),
+        EmbeddingClient.Config.disabled(), generation::get);
+
+    assertThat(source.retrieve("sentinel", 2)).singleElement()
+        .satisfies(hit -> assertThat(hit.chunk().path()).isEqualTo("mcp://one"));
+    refs.set(List.of());
+    generation.incrementAndGet();
+    assertThat(source.retrieve("sentinel", 2)).isEmpty();
+    assertThat(source.indexedChunks()).isZero();
   }
 
   @Test void metadataFiltersMatchOriginalCompositionRules() {

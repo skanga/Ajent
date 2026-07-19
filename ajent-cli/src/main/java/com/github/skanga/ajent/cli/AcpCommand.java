@@ -113,7 +113,7 @@ final class AcpCommand {
       var subagents = new ProviderBackedSubagentRunner(client);
       var toolConfiguration = new ToolRuntimeFactory.Configuration(
           workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
-          sandbox.runner(), mcp.tools());
+          sandbox.runner(), mcp.tools(), environment);
       var tools = ToolRuntimeFactory.compose(toolConfiguration);
       subagents.bind(new DispatcherToolPort(tools.dispatcher()));
       var providerConfiguration = new LiveProviderFactory.Configuration(

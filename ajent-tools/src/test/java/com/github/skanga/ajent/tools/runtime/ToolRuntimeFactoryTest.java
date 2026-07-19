@@ -4,14 +4,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpServer;
+import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.tools.catalog.NativeToolWireCatalog;
 import com.github.skanga.ajent.tools.catalog.ToolCatalog;
 import com.github.skanga.ajent.tools.host.HostServices;
+import com.github.skanga.ajent.tools.policy.EffectSet;
+import com.github.skanga.ajent.tools.rag.EmbeddingClient;
+import com.github.skanga.ajent.tools.rag.KnowledgeSource;
+import com.github.skanga.ajent.tools.rag.RagChunk;
+import com.github.skanga.ajent.tools.rag.RagCorpus;
 import com.github.skanga.ajent.tools.web.WebTransport;
+import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -73,6 +85,118 @@ class ToolRuntimeFactoryTest {
     assertThat(Files.readString(workspace.resolve("created.txt"))).isEqualTo("ok");
     assertThat(dispatcher.execute("task", JSON.createObjectNode().put("prompt", "x")))
         .isInstanceOf(ToolResult.Failure.class);
+  }
+
+  @Test
+  void wiresOptInMcpKnowledgeAndEnvironmentEmbeddingSettings(@TempDir Path root)
+      throws Exception {
+    Path workspace = Files.createDirectories(root.resolve("workspace"));
+    Path home = Files.createDirectories(root.resolve("home"));
+    var observed = new AtomicReference<EmbeddingClient.Config>();
+    var external = new ExternalToolRuntime() {
+      @Override public List<ToolSpecification> specifications() { return List.of(); }
+      @Override public Optional<EffectSet> effects(String name) { return Optional.empty(); }
+      @Override public ToolResult execute(String name, ObjectNode arguments) {
+        throw new UnsupportedOperationException();
+      }
+      @Override public Optional<KnowledgeSource> knowledgeSource(
+          EmbeddingClient.Config embedding, EmbeddingClient client) {
+        observed.set(embedding);
+        return Optional.of(new KnowledgeSource() {
+          @Override public String name() { return "mcp"; }
+          @Override public List<RagCorpus.Hit> retrieve(String query, int limit) {
+            return List.of(new RagCorpus.Hit(
+                new RagChunk("mcp://remote", 1, 1, "remote knowledge sentinel"), 1, this));
+          }
+        });
+      }
+    };
+    Map<String, String> environment = Map.of(
+        "AGENTTY_RAG_SKILLS", "0", "AGENTTY_RAG_MEMORY", "false",
+        "AGENTTY_RAG_MCP", "1", "AGENTTY_EMBED_MODEL", "custom-embed",
+        "AGENTTY_OLLAMA_HOST", "ollama.test:1234");
+    ToolDispatcher enabled = ToolRuntimeFactory.create(new ToolRuntimeFactory.Configuration(
+        workspace, workspace, home, null, request -> {
+          throw new AssertionError();
+        }, null, null, new com.github.skanga.ajent.tools.process.ProcessRunner(), external,
+        environment));
+
+    assertSuccess(enabled.execute("search_docs", object().put("query", "remote sentinel")),
+        "remote knowledge sentinel", "mcp");
+    assertThat(observed.get()).isEqualTo(
+        new EmbeddingClient.Config("ollama.test", 1234, "custom-embed"));
+
+    ToolDispatcher disabled = ToolRuntimeFactory.create(new ToolRuntimeFactory.Configuration(
+        workspace, workspace, home, null, request -> {
+          throw new AssertionError();
+        }, null, null, new com.github.skanga.ajent.tools.process.ProcessRunner(), external,
+        Map.of("AGENTTY_RAG_SKILLS", "0", "AGENTTY_RAG_MEMORY", "0")));
+    assertThat(disabled.execute("search_docs", object().put("query", "remote sentinel")))
+        .isInstanceOfSatisfying(ToolResult.Failure.class,
+            failure -> assertThat(failure.error().detail()).contains("no knowledge configured"));
+  }
+
+  @Test
+  void wiresEmbeddingExpansionAndNeuralRerankingFromEnvironment(@TempDir Path root)
+      throws Exception {
+    Path workspace = Files.createDirectories(root.resolve("workspace"));
+    Path home = Files.createDirectories(root.resolve("home"));
+    Path docs = Files.createDirectories(workspace.resolve("docs"));
+    Files.writeString(docs.resolve("guide.md"),
+        "# Retrieval guide\nThe obsidian sentinel configures distributed tracing.");
+    var models = new ConcurrentLinkedQueue<String>();
+    var expansionPrompts = new ConcurrentLinkedQueue<String>();
+    var embeddings = new AtomicInteger();
+    var scores = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/api/embed", exchange -> {
+      var request = JSON.readTree(exchange.getRequestBody());
+      models.add(request.path("model").asText());
+      embeddings.incrementAndGet();
+      var response = JSON.createObjectNode();
+      var rows = response.putArray("embeddings");
+      request.path("input").forEach(ignored -> rows.addArray().add(1).add(0));
+      respond(exchange, response.toString());
+    });
+    server.createContext("/api/generate", exchange -> {
+      var request = JSON.readTree(exchange.getRequestBody());
+      models.add(request.path("model").asText());
+      int prediction = request.path("options").path("num_predict").asInt();
+      String response;
+      if (prediction == 256) {
+        expansionPrompts.add(request.path("prompt").asText());
+        response = "{\"response\":\"distributed telemetry setup\\ntrace configuration\"}";
+      } else {
+        scores.incrementAndGet();
+        response = "{\"response\":\"9\"}";
+      }
+      respond(exchange, response);
+    });
+    server.start();
+    try {
+      Map<String, String> environment = Map.of(
+          "AGENTTY_RAG_SKILLS", "0", "AGENTTY_RAG_MEMORY", "0",
+          "AGENTTY_EMBED_MODEL", "embed-model", "AGENTTY_OLLAMA_HOST",
+          "127.0.0.1:" + server.getAddress().getPort(),
+          "AGENTTY_RAG_EXPAND", "1", "AGENTTY_RAG_EXPAND_MODEL", "expand-model",
+          "AGENTTY_RAG_EXPAND_N", "2", "AGENTTY_RAG_NEURAL", "true",
+          "AGENTTY_RAG_NEURAL_MODEL", "rank-model");
+      ToolDispatcher dispatcher = ToolRuntimeFactory.create(new ToolRuntimeFactory.Configuration(
+          workspace, workspace, home, docs, request -> {
+            throw new AssertionError();
+          }, null, null, new com.github.skanga.ajent.tools.process.ProcessRunner(),
+          ExternalToolRuntime.none(), environment));
+
+      assertSuccess(dispatcher.execute("search_docs", object().put("query", "obsidian sentinel")),
+          "obsidian sentinel", "hybrid+ctx", "neural-reranked", "+2 query variants");
+      assertThat(embeddings).hasPositiveValue();
+      assertThat(scores).hasPositiveValue();
+      assertThat(models).contains("embed-model", "expand-model", "rank-model");
+      assertThat(expansionPrompts).singleElement().asString()
+          .contains("output 2 DIFFERENT search queries");
+    } finally {
+      server.stop(0);
+    }
   }
 
   @Test
@@ -210,5 +334,15 @@ class ToolRuntimeFactoryTest {
     String output = new String(process.getInputStream().readAllBytes(),
         java.nio.charset.StandardCharsets.UTF_8);
     assertThat(process.waitFor()).as(output).isZero();
+  }
+
+  private static void respond(com.sun.net.httpserver.HttpExchange exchange, String body)
+      throws java.io.IOException {
+    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().set("content-type", "application/json");
+    exchange.sendResponseHeaders(200, bytes.length);
+    try (var output = exchange.getResponseBody()) {
+      output.write(bytes);
+    }
   }
 }

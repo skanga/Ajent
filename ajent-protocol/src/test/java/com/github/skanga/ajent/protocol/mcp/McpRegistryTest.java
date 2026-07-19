@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.tools.policy.Effect;
+import com.github.skanga.ajent.tools.rag.EmbeddingClient;
 import com.github.skanga.ajent.tools.runtime.ToolResult;
 import java.time.Duration;
 import java.util.Map;
@@ -80,12 +81,13 @@ final class McpRegistryTest {
   @Test void adaptsTheLiveRegistryToTheAgentToolRuntime() {
     var remote = new FakeTransport("remote");
     remote.tools.add(tool("lookup", "looks up values", true, false));
+    remote.resources.add(object("uri", "mem://adapter", "name", "adapter"));
     try (var registry = new McpRegistry()) {
       registry.add("remote", connected("remote", remote));
       var runtime = new McpExternalToolRuntime(registry);
 
       assertThat(runtime.specifications()).extracting(tool -> tool.name())
-          .containsExactly("lookup");
+          .containsExactly("lookup", "mcp_read_resource");
       assertThat(runtime.effects("lookup")).get().satisfies(effects -> {
         assertThat(effects.has(Effect.READ_FS)).isTrue();
         assertThat(effects.has(Effect.NET)).isTrue();
@@ -94,6 +96,10 @@ final class McpRegistryTest {
       assertThat(successText(runtime.execute(
           "lookup", JSON.createObjectNode().put("message", "key"))))
           .contains("remote:key");
+      var knowledge = runtime.knowledgeSource(EmbeddingClient.Config.disabled(),
+          (config, texts) -> java.util.Optional.empty()).orElseThrow();
+      assertThat(knowledge.retrieve("remote note body", 2)).singleElement()
+          .satisfies(hit -> assertThat(hit.chunk().path()).isEqualTo("mem://adapter"));
     }
   }
 
