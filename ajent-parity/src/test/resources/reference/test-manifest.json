@@ -248,9 +248,16 @@
       "classification": "fixture-capture",
       "surface": "terminal-rendering",
       "referenceRun": "manual harness required; source is not registered by CMake",
-      "javaCounterpart": "ajent-parity/src/testFixtures/java/com/github/skanga/ajent/parity/MdShrinkDebugFixture.java",
-      "status": "reference-not-run",
-      "evidence": []
+      "javaCounterpart": "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/MarkdownShrinkDebugTest.java",
+      "supportingCounterparts": [
+        "ajent-terminal/src/main/java/com/github/skanga/ajent/terminal/render/StreamingMarkdown.java",
+        "ajent-terminal/src/test/java/com/github/skanga/ajent/terminal/render/MarkdownShapeSweepTest.java"
+      ],
+      "status": "java-green-reference-source-reviewed",
+      "evidence": [
+        "mvn -q test",
+        "all eight selectable native debug bodies replay at every UTF-8 byte boundary and assert monotonic live rendered height"
+      ]
     },
     {
       "id": "midrun_freeze_test",
