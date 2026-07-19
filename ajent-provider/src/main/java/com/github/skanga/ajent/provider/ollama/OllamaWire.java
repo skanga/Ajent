@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.skanga.ajent.core.AgenttyDebugLog;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.ToolStatus;
@@ -222,10 +223,15 @@ public final class OllamaWire {
     if (value == null) return null;
     var matcher = java.util.regex.Pattern.compile(
         "^[\\s]*[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?").matcher(value);
-    if (!matcher.find()) return null;
+    if (!matcher.find()) {
+      if (!value.isEmpty()) AgenttyDebugLog.log(
+          "ollama.env_temperature.parse", "invalid floating-point value: " + value);
+      return null;
+    }
     try {
       return Double.parseDouble(matcher.group());
-    } catch (NumberFormatException ignored) {
+    } catch (NumberFormatException failure) {
+      AgenttyDebugLog.log("ollama.env_temperature.parse", failure);
       return null;
     }
   }

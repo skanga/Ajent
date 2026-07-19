@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.tools.rag;
 
+import com.github.skanga.ajent.core.AgenttyDebugLog;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,7 +37,8 @@ public interface EmbeddingClient {
           try {
             int candidate = Integer.parseInt(endpoint.substring(colon + 1));
             if (candidate > 0 && candidate <= 65_535) port = candidate;
-          } catch (NumberFormatException ignored) {
+          } catch (NumberFormatException failure) {
+            AgenttyDebugLog.log("rag.embed_endpoint.port", failure);
             // Keep the native default port.
           }
         } else host = endpoint;

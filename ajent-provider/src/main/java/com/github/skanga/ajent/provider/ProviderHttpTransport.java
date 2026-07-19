@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.provider;
 
+import com.github.skanga.ajent.core.AgenttyDebugLog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.provider.ollama.OllamaStreamDecoder;
@@ -265,7 +266,8 @@ public final class ProviderHttpTransport {
       try {
         long seconds = Long.parseLong(value);
         return seconds > 0 ? Optional.of(Duration.ofSeconds(seconds)) : Optional.empty();
-      } catch (NumberFormatException ignored) {
+      } catch (NumberFormatException failure) {
+        AgenttyDebugLog.log("openai.retry_after.parse", failure);
         return Optional.empty();
       }
     });

@@ -2,6 +2,7 @@ package com.github.skanga.ajent.provider;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.skanga.ajent.core.AgenttyDebugLog;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
 import com.github.skanga.ajent.provider.openai.Endpoint;
 import com.github.skanga.ajent.provider.openai.OpenAiWire;
@@ -50,6 +51,7 @@ public final class ProviderModelCatalog {
       return endpoint.nativeApi()
           ? ollamaModels(root, auth, endpoint) : openAiModels(root, endpoint);
     } catch (IOException | RuntimeException exception) {
+      AgenttyDebugLog.log("openai.list_models.parse", exception);
       return List.of();
     } catch (InterruptedException exception) {
       java.lang.Thread.currentThread().interrupt();
@@ -93,6 +95,7 @@ public final class ProviderModelCatalog {
       }
       return result.isEmpty() ? ANTHROPIC_SEED : List.copyOf(result);
     } catch (IOException | RuntimeException exception) {
+      AgenttyDebugLog.log("anthropic.list_models.parse", exception);
       return ANTHROPIC_SEED;
     } catch (InterruptedException exception) {
       java.lang.Thread.currentThread().interrupt();
@@ -163,7 +166,8 @@ public final class ProviderModelCatalog {
         }
       }
       return new Probe(supportsTools, contextWindow);
-    } catch (IOException | RuntimeException ignored) {
+    } catch (IOException | RuntimeException failure) {
+      AgenttyDebugLog.log("openai.probe_ollama_model.parse", failure);
       return Probe.UNKNOWN;
     }
   }

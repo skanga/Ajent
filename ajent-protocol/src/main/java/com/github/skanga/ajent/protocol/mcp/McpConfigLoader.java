@@ -3,6 +3,7 @@ package com.github.skanga.ajent.protocol.mcp;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.skanga.ajent.core.AgenttyDebugLog;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,9 +70,9 @@ public final class McpConfigLoader {
     Objects.requireNonNull(home, "home");
     environment = Map.copyOf(environment);
     Duration callTimeout = timeout(environment.get("AGENTTY_MCP_TIMEOUT_MS"),
-        DEFAULT_CALL_TIMEOUT);
+        DEFAULT_CALL_TIMEOUT, "mcp.call_timeout.env");
     Duration connectTimeout = timeout(environment.get("AGENTTY_MCP_CONNECT_TIMEOUT_MS"),
-        DEFAULT_CONNECT_TIMEOUT);
+        DEFAULT_CONNECT_TIMEOUT, "mcp.connect_timeout.env");
     Selection selected = resolve(workspace, home, environment);
     if (selected.path().isEmpty()) {
       return new LoadResult(Optional.empty(), false, true, List.of(), callTimeout,
@@ -174,12 +175,13 @@ public final class McpConfigLoader {
     return value.isObject() ? value : null;
   }
 
-  private static Duration timeout(String value, Duration fallback) {
+  private static Duration timeout(String value, Duration fallback, String debugLocation) {
     if (value == null || value.isEmpty()) return fallback;
     try {
       long milliseconds = Long.parseLong(value);
       return milliseconds > 0 ? Duration.ofMillis(milliseconds) : fallback;
     } catch (NumberFormatException exception) {
+      AgenttyDebugLog.log(debugLocation, exception);
       return fallback;
     }
   }

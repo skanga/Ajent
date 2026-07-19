@@ -1,5 +1,6 @@
 package com.github.skanga.ajent.tools.runtime;
 
+import com.github.skanga.ajent.core.AgenttyDebugLog;
 import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.tools.fs.FileTools;
@@ -192,6 +193,7 @@ public final class ToolRuntimeFactory {
     try {
       return Math.clamp(Integer.parseInt(value), 1, 8);
     } catch (NumberFormatException exception) {
+      AgenttyDebugLog.log("rag.expand_n.env", exception);
       return 4;
     }
   }

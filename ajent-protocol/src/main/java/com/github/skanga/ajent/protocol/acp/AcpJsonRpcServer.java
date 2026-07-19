@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.skanga.ajent.core.AgenttyDebugLog;
 import com.github.skanga.ajent.core.persistence.ThreadLoadResult;
 import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.domain.Message;
@@ -458,6 +459,7 @@ public final class AcpJsonRpcServer {
       }
       session.loop.dispatch(new RuntimeMessage.Submit(text, List.of()));
     } catch (RuntimeException exception) {
+      AgenttyDebugLog.log("acp.run_turn", exception);
       result.completeExceptionally(exception);
     }
     return result;
@@ -892,6 +894,7 @@ public final class AcpJsonRpcServer {
       JsonNode value = JSON.readTree(sessionIndex.toFile());
       return value instanceof ObjectNode object ? object : JSON.createObjectNode();
     } catch (IOException | RuntimeException exception) {
+      AgenttyDebugLog.log("acp.load_session_index", exception);
       return JSON.createObjectNode();
     }
   }
@@ -913,7 +916,8 @@ public final class AcpJsonRpcServer {
       } catch (AtomicMoveNotSupportedException exception) {
         Files.move(temporary, sessionIndex, StandardCopyOption.REPLACE_EXISTING);
       }
-    } catch (IOException | RuntimeException ignored) {
+    } catch (IOException | RuntimeException failure) {
+      AgenttyDebugLog.log("acp.index_session", failure);
       // AgenTTY's session sidecar is best effort; thread persistence is authoritative.
     } finally {
       try {
