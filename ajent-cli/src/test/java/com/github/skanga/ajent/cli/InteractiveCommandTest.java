@@ -425,6 +425,26 @@ final class InteractiveCommandTest {
       scheduler.request(second::countDown);
       assertThat(second.await(2, TimeUnit.SECONDS)).isTrue();
     }
+    try (var local = new InteractiveCommand.FrameScheduler(Map.of("MAYA_FORCE_SYNC", "1"));
+         var ssh = new InteractiveCommand.FrameScheduler(Map.of(
+             "MAYA_FORCE_SYNC", "1", "SSH_CONNECTION", "remote"))) {
+      assertThat(local.delayMillis()).isEqualTo(33);
+      assertThat(ssh.delayMillis()).isEqualTo(80);
+    }
+  }
+
+  @Test void synchronizedTerminalsReceiveAtomicInteractiveFrames() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate(), new InteractiveCommand.AnimationPort() {
+          @Override public long nowNanos() { return 1; }
+          @Override public void request(Runnable frame) { }
+        }, Map.of("MAYA_FORCE_SYNC", "1"));
+
+    ui.render();
+
+    assertThat(terminal.bytes.toString()).contains("\u001b[?2026h", "\u001b[?2026l");
   }
 
   @Test void commandPaletteOwnsKeysFiltersDispatchesCompactAndCanQuit() {
@@ -1550,6 +1570,31 @@ final class InteractiveCommandTest {
     ui.render();
 
     assertThat(firstNonblank(ui.frozenText())).isIn("you", "assistant");
+  }
+
+  @Test void frozenCollapseRemainsOptInAndKeepsTheTrailingEntryWhole() {
+    String giant = java.util.stream.IntStream.range(0, 100)
+        .mapToObj(index -> "giant-loaded-row-" + index).collect(
+            java.util.stream.Collectors.joining("\n"));
+    List<Message> messages = List.of(
+        new Message(Role.USER, giant, List.of(), List.of()),
+        new Message(Role.ASSISTANT, "older answer", List.of(), List.of()),
+        new Message(Role.USER, "recent question", List.of(), List.of()),
+        new Message(Role.ASSISTANT, "recent answer", List.of(), List.of()));
+    var state = new AtomicReference<>(AgentState.initial(thread(messages)));
+    var expanded = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of());
+    var collapsed = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate(), new ManualAnimation(),
+        Map.of("AGENTTY_FROZEN_COLLAPSE", "true"));
+
+    expanded.render();
+    collapsed.render();
+
+    assertThat(expanded.frozenText()).contains("giant-loaded-row-0", "recent question")
+        .doesNotContain("rows collapsed");
+    assertThat(collapsed.frozenText()).contains("rows collapsed", "recent question")
+        .doesNotContain("giant-loaded-row-0");
   }
 
   @Test void hugeSettledBashOutputUsesItsElidedPaintHeightInTheFrozenLedger() {

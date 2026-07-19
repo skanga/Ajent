@@ -38,6 +38,7 @@ import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.RuntimeMessage;
 import com.github.skanga.ajent.runtime.ToolCompletion;
 import com.github.skanga.ajent.terminal.JLineTerminalSession;
+import com.github.skanga.ajent.terminal.TerminalCapabilities;
 import com.github.skanga.ajent.terminal.input.TerminalEvent;
 import com.github.skanga.ajent.terminal.input.TerminalClipboardQuery;
 import com.github.skanga.ajent.terminal.input.TerminalKey;
@@ -153,7 +154,7 @@ final class InteractiveCommand {
     var activeUi = new AtomicReference<Ui>();
     var pendingChanges = new AtomicReference<List<FileChange>>(List.of());
     var permission = new PermissionGate();
-    try (var animations = new FrameScheduler()) {
+    try (var animations = new FrameScheduler(environment)) {
       var ui = new Ui(new TerminalPort() {
         @Override public JLineTerminalSession.Size size() { return terminal.size(); }
         @Override public void write(String value) { terminal.write(value); }
@@ -847,8 +848,16 @@ final class InteractiveCommand {
 
   static final class FrameScheduler implements AnimationPort, AutoCloseable {
     private final AtomicBoolean pending = new AtomicBoolean();
+    private final long delayMillis;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(
         runnable -> Thread.ofPlatform().daemon().name("ajent-frame").unstarted(runnable));
+
+    FrameScheduler() { this(System.getenv()); }
+    FrameScheduler(Map<String, String> environment) {
+      delayMillis = TerminalCapabilities.streamingTickPeriod(environment).toMillis();
+    }
+
+    long delayMillis() { return delayMillis; }
 
     @Override public long nowNanos() { return System.nanoTime(); }
 
@@ -857,7 +866,7 @@ final class InteractiveCommand {
       executor.schedule(() -> {
         pending.set(false);
         frame.run();
-      }, 16, TimeUnit.MILLISECONDS);
+      }, delayMillis, TimeUnit.MILLISECONDS);
     }
 
     @Override public void close() { executor.shutdownNow(); }
@@ -895,6 +904,8 @@ final class InteractiveCommand {
     private final PermissionGate permission;
     private final AnimationPort animations;
     private final Map<String, String> environment;
+    private final boolean synchronizedOutput;
+    private final boolean frozenCollapse;
     private final ClipboardReader clipboard;
     private final TerminalStylePool styles = new TerminalStylePool();
     private InlineFrameRenderer.Frame frame = new InlineFrameRenderer.Empty();
@@ -978,6 +989,12 @@ final class InteractiveCommand {
       this.permission = permission;
       this.animations = animations;
       this.environment = Map.copyOf(environment);
+      this.synchronizedOutput = TerminalCapabilities.synchronizedOutput(environment);
+      String collapse = environment.getOrDefault("AGENTTY_FROZEN_COLLAPSE", "");
+      this.frozenCollapse = !collapse.isEmpty() && switch (collapse.charAt(0)) {
+        case '1', 't', 'T', 'y', 'Y' -> true;
+        default -> false;
+      };
       this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
       this.profile = Objects.requireNonNull(profile, "profile");
       this.modelId = Objects.requireNonNull(modelId, "modelId");
@@ -2174,7 +2191,7 @@ final class InteractiveCommand {
               frame, rendered.scrollbackDebt().orElseThrow());
         }
         frame = render(frame, canvas, rows, terminalRows, styles,
-            value -> terminal.write(value));
+            value -> terminal.write(value), synchronizedOutput);
         lastVisualHash = visualHash(state, pendingPermission, width, terminalRows, nowNanos);
         // A scheduled frame is also an internal reveal/freeze transition. Keep that one-shot
         // chain ungated; once it drains, the settled fingerprint resumes suppressing no-op ticks.
@@ -2189,6 +2206,27 @@ final class InteractiveCommand {
       List<List<StyledLine>> blocks = frozen.elements();
       for (int index = 0; index < blocks.size(); index++) {
         frozen.recordPaint(index, blocks.get(index).size());
+      }
+    }
+
+    private void collapseOversizedOffscreenEntries(int terminalRows) {
+      if (!frozenCollapse || frozen.size() < 2) return;
+      long budget = Math.max(48L, terminalRows * 3L);
+      if (frozen.rowTotal() <= budget) return;
+      int lastReal = -1;
+      for (int index = frozen.size() - 1; index >= 0; index--) {
+        if (!frozen.separatorAt(index)) {
+          lastReal = index;
+          break;
+        }
+      }
+      for (int index = 0; index < frozen.size(); index++) {
+        if (index == lastReal || frozen.separatorAt(index)) continue;
+        long rows = frozen.blockRows(index);
+        if (rows <= budget) continue;
+        frozen.replace(index, List.of(new StyledLine(
+            "⋯ " + rows + " rows collapsed — scroll up in your terminal to view",
+            Style.MUTED)), 1);
       }
     }
 
@@ -2405,30 +2443,31 @@ final class InteractiveCommand {
 
     private static InlineFrameRenderer.Frame render(InlineFrameRenderer.Frame frame,
         TerminalCanvas canvas, CanvasSerializer.ContentRows rows, int terminalRows,
-        TerminalStylePool styles, InlineFrameRenderer.FrameWriter writer) {
+        TerminalStylePool styles, InlineFrameRenderer.FrameWriter writer,
+        boolean synchronizedOutput) {
       return switch (frame) {
         case InlineFrameRenderer.Empty empty -> empty.seed().render(
-            canvas, rows, terminalRows, styles, writer, false);
+            canvas, rows, terminalRows, styles, writer, synchronizedOutput);
         case InlineFrameRenderer.Fresh fresh -> fresh.render(
-            canvas, rows, terminalRows, styles, writer, false);
+            canvas, rows, terminalRows, styles, writer, synchronizedOutput);
         case InlineFrameRenderer.Synced synced -> {
           var witness = synced.verify();
           var proof = synced.checkScrollback(canvas, terminalRows);
           if (witness.isPresent() && proof.isPresent()) {
             yield synced.render(canvas, rows, terminalRows, styles, writer,
-                witness.orElseThrow(), proof.orElseThrow(), false);
+                witness.orElseThrow(), proof.orElseThrow(), synchronizedOutput);
           }
           if (witness.isPresent()) {
             yield synced.commitScrollbackOverflow(terminalRows).demoteToStale()
-                .render(canvas, rows, terminalRows, styles, writer, false);
+                .render(canvas, rows, terminalRows, styles, writer, synchronizedOutput);
           }
           yield synced.demoteToHardReset()
-              .render(canvas, rows, terminalRows, styles, writer, false);
+              .render(canvas, rows, terminalRows, styles, writer, synchronizedOutput);
         }
         case InlineFrameRenderer.Stale stale -> stale.render(
-            canvas, rows, terminalRows, styles, writer, false);
+            canvas, rows, terminalRows, styles, writer, synchronizedOutput);
         case InlineFrameRenderer.HardReset reset -> reset.render(
-            canvas, rows, terminalRows, styles, writer, false);
+            canvas, rows, terminalRows, styles, writer, synchronizedOutput);
         case InlineFrameRenderer.Sealed ignored -> throw new IllegalStateException("renderer sealed");
       };
     }
@@ -2470,6 +2509,8 @@ final class InteractiveCommand {
         frozen.seal(List.copyOf(sealed), Math.max(1, sealed.size()), false);
         frozenThrough = runEnd;
       }
+
+      collapseOversizedOffscreenEntries(terminalRows);
 
       FrozenScrollbackTrimPolicy.TrimResult trim =
           FrozenScrollbackTrimPolicy.trim(frozen, terminalRows);
