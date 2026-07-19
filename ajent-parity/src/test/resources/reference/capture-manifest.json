@@ -91,9 +91,15 @@
     },
     {
       "id": "acp",
-      "status": "planned",
+      "status": "partial-native-executable-green",
       "sources": ["agentty/include/agentty/acp/server.hpp", "agentty/src/acp/server.cpp", "agentty/tests/acp_integration_test.cpp", "agentty/scripts/acp_methods_test.py"],
-      "cases": ["initialize", "authenticate", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel", "session/update", "session/request_permission", "errors", "concurrency"]
+      "cases": ["initialize", "authenticate", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel", "session/update", "session/request_permission", "errors", "concurrency"],
+      "javaEvidence": [
+        "com.github.skanga.ajent.parity.NativeAcpParityIT",
+        "mvn -q verify -Pcharacterization: exact normalized JSON-RPC exchange sequence for the offline ACP lifecycle against the pinned Windows executable"
+      ],
+      "coveredExecutableCases": ["initialize", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "method-not-found error"],
+      "remainingExecutableCases": ["authenticate with installed credentials", "session/prompt", "session/cancel", "streamed session/update", "session/request_permission", "concurrent prompts", "client filesystem and terminal callbacks"]
     },
     {
       "id": "mcp-server-client",

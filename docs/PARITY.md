@@ -42,10 +42,17 @@ mvn -q verify -Pcharacterization
 It verifies the pinned SHA-256 first, then compares real Ajent and AgenTTY
 process exit codes and stdout/stderr bytes for version, help, invalid arguments,
 isolated credential status/logout, installed-skills inventory, air-gap help,
-and invalid-workspace ACP/MCP startup. Only the manifest-declared program name
-and temporary home prefix are normalized; compatibility identifiers such as
+invalid-workspace ACP/MCP startup, and the complete offline ACP session lifecycle
+over real stdio. Only the manifest-declared program name, generated ACP session
+id, and temporary home prefix are normalized; compatibility identifiers such as
 `.config/agentty` and `--remote-agentty` stay literal. This gate exposed and now
 regresses native Windows CRLF translation and the final blank usage line.
+
+`NativeAcpParityIT` keeps both real processes alive and compares the exact
+normalized JSON-RPC frame sequence for initialize, session creation, mode and
+config changes, list/filter/load/resume/close/delete, logout, and
+method-not-found handling. Live prompt, permission, cancellation, concurrency,
+and client filesystem/terminal callback differentials remain open.
 
 ## Feature ledger
 
