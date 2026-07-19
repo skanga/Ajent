@@ -57,7 +57,7 @@ final class AcpCommand {
   static AcpCommand systemDefault() {
     Path home = Path.of(System.getProperty("user.home", "."));
     return new AcpCommand(Path.of(""), home, System.getenv(),
-        CredentialStore.systemDefault(), EnvironmentHttpClient.create(System.getenv()));
+        CredentialStore.systemDefault(), EnvironmentHttpClient.createProvider(System.getenv()));
   }
 
   int run(CliArguments arguments, BufferedReader input, PrintStream output, PrintStream error) {

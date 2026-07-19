@@ -30,7 +30,7 @@ public final class AuthCommands {
   private final LongSupplier clock;
 
   public static AuthCommands systemDefault() {
-    var oauth = new AnthropicOAuthLogin(EnvironmentHttpClient.create(System.getenv()));
+    var oauth = new AnthropicOAuthLogin(EnvironmentHttpClient.createOAuth(System.getenv()));
     return new AuthCommands(CredentialStore.systemDefault(), System.getenv(), new LoginFlow() {
       @Override public AnthropicOAuthLogin.Attempt newAttempt() { return oauth.newAttempt(); }
       @Override public OAuthTokenClient.Result exchange(String code, String verifier, String state) {

@@ -3,6 +3,8 @@ package com.github.skanga.ajent.provider;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsServer;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -15,11 +17,16 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
 import org.junit.jupiter.api.Test;
 
 final class EnvironmentHttpClientTest {
@@ -54,21 +61,95 @@ final class EnvironmentHttpClientTest {
     }
   }
 
-  @Test void validatesNativeHostPortSyntax() {
-    assertThat(EnvironmentHttpClient.parseSocksAddress("proxy"))
-        .extracting(InetSocketAddress::getHostString, InetSocketAddress::getPort)
-        .containsExactly("proxy", 1080);
-    assertThat(EnvironmentHttpClient.parseSocksAddress("[::1]:9999"))
-        .extracting(InetSocketAddress::getHostString, InetSocketAddress::getPort)
-        .containsExactly("::1", 9999);
-    assertThat(EnvironmentHttpClient.parseSocksAddress("[::1]"))
-        .extracting(InetSocketAddress::getHostString, InetSocketAddress::getPort)
-        .containsExactly("::1", 1080);
-    for (String invalid : Arrays.asList("", "[]", "[::1]junk", "[::1]:", "proxy:nope",
-        "proxy:0", "proxy:70000", "/proxy", "proxy\\path")) {
-      assertThatThrownBy(() -> EnvironmentHttpClient.parseSocksAddress(invalid))
-          .as(invalid).isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("host[:port]");
+  @Test void matchesNativeDialOverrideParsingAndSilentlyIgnoresMalformedValues() {
+    assertThat(EnvironmentHttpClient.parseDialAddress("proxy")).contains(
+        new EnvironmentHttpClient.HostPort("proxy", 443));
+    assertThat(EnvironmentHttpClient.parseDialAddress("proxy:1080")).contains(
+        new EnvironmentHttpClient.HostPort("proxy", 1080));
+    for (String invalid : Arrays.asList(null, "", ":443", "proxy:", "proxy:nope",
+        "proxy:0", "proxy:70000", "host:1:2")) {
+      assertThat(EnvironmentHttpClient.parseDialAddress(invalid)).as(String.valueOf(invalid))
+          .isEmpty();
+    }
+  }
+
+  @Test void providerAndOauthOverridesChangeOnlyTheDialDestination() throws Exception {
+    var apiHost = new CompletableFuture<String>();
+    var oauthHost = new CompletableFuture<String>();
+    HttpServer api = origin("api", apiHost);
+    HttpServer oauth = origin("oauth", oauthHost);
+    try {
+      var client = EnvironmentHttpClient.createProvider(Map.of(
+          "AGENTTY_API_HOST", "127.0.0.1:" + api.getAddress().getPort(),
+          "AGENTTY_OAUTH_HOST", "127.0.0.1:" + oauth.getAddress().getPort()));
+
+      assertThat(client.send(HttpRequest.newBuilder(
+              URI.create("http://provider.invalid/v1/messages")).build(),
+          HttpResponse.BodyHandlers.ofString()).body()).isEqualTo("api");
+      assertThat(client.send(HttpRequest.newBuilder(
+              URI.create("http://platform.claude.com/v1/oauth/token")).build(),
+          HttpResponse.BodyHandlers.ofString()).body()).isEqualTo("oauth");
+      assertThat(apiHost.get(5, TimeUnit.SECONDS)).isEqualTo("provider.invalid");
+      assertThat(oauthHost.get(5, TimeUnit.SECONDS)).isEqualTo("platform.claude.com");
+    } finally {
+      api.stop(0);
+      oauth.stop(0);
+    }
+  }
+
+  @Test void oauthAndGeneralClientsApplyOnlyTheirOwnOverrideScope() throws Exception {
+    var seenHost = new CompletableFuture<String>();
+    HttpServer oauth = origin("oauth", seenHost);
+    try {
+      var oauthClient = EnvironmentHttpClient.createOAuth(Map.of(
+          "AGENTTY_API_HOST", "bad.invalid:1",
+          "AGENTTY_OAUTH_HOST", "127.0.0.1:" + oauth.getAddress().getPort()));
+      assertThat(oauthClient.send(HttpRequest.newBuilder(
+              URI.create("http://custom-oauth.invalid/token")).build(),
+          HttpResponse.BodyHandlers.ofString()).body()).isEqualTo("oauth");
+      assertThat(seenHost.get(5, TimeUnit.SECONDS)).isEqualTo("custom-oauth.invalid");
+
+      var generalSelector = EnvironmentHttpClient.create(Map.of(
+          "AGENTTY_API_HOST", "127.0.0.1:" + oauth.getAddress().getPort()))
+          .proxy().orElseThrow();
+      assertThat(generalSelector.select(URI.create("http://provider.invalid")))
+          .containsExactly(Proxy.NO_PROXY);
+    } finally {
+      oauth.stop(0);
+    }
+  }
+
+  @Test void insecureTlsIsEnabledOnlyByTheExactNativeFlag() {
+    var normal = EnvironmentHttpClient.create(Map.of());
+    var zero = EnvironmentHttpClient.create(Map.of("AGENTTY_INSECURE", "0"));
+    var insecure = EnvironmentHttpClient.create(Map.of("AGENTTY_INSECURE", "1"));
+
+    assertThat(zero.sslContext()).isSameAs(normal.sslContext());
+    assertThat(insecure.sslContext()).isNotSameAs(normal.sslContext());
+    assertThat(insecure.sslParameters().getEndpointIdentificationAlgorithm()).isEmpty();
+  }
+
+  @Test void insecureTlsAcceptsAnUntrustedCertificateWithTheWrongHostname() throws Exception {
+    HttpsServer server = tlsOrigin();
+    String override = "127.0.0.1:" + server.getAddress().getPort();
+    HttpRequest request = HttpRequest.newBuilder(
+        URI.create("https://certificate-name.invalid/")).build();
+    try {
+      assertThatThrownBy(() -> EnvironmentHttpClient.createProvider(Map.of(
+              "AGENTTY_API_HOST", override)).send(request,
+          HttpResponse.BodyHandlers.discarding())).isInstanceOf(IOException.class);
+
+      Process probe = new ProcessBuilder(
+          Path.of(System.getProperty("java.home"), "bin",
+              System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString(),
+          "-cp", System.getProperty("java.class.path"), InsecureTlsProbe.class.getName(), override)
+          .redirectErrorStream(true).start();
+      assertThat(probe.waitFor(10, TimeUnit.SECONDS)).isTrue();
+      assertThat(new String(probe.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+          .isEqualTo("tls");
+      assertThat(probe.exitValue()).isZero();
+    } finally {
+      server.stop(0);
     }
   }
 
@@ -110,7 +191,8 @@ final class EnvironmentHttpClientTest {
     assertThat(request.host()).isEqualTo("example.test");
     assertThat(request.port()).isEqualTo(8080);
     assertThat(new String(request.forwardHeader(), StandardCharsets.ISO_8859_1))
-        .isEqualTo("GET /path?q=x HTTP/1.1\r\nHost: example.test\r\nX-Test: yes\r\n\r\n");
+        .isEqualTo("GET /path?q=x HTTP/1.1\r\nHost: example.test\r\nX-Test: yes\r\n"
+            + "Connection: close\r\n\r\n");
 
     assertThat(EnvironmentHttpClient.RequestHead.parse(ascii(
         "GET https://example.test HTTP/1.1\r\n\r\n")).port()).isEqualTo(443);
@@ -153,6 +235,61 @@ final class EnvironmentHttpClientTest {
 
   private static byte[] ascii(String value) {
     return value.getBytes(StandardCharsets.US_ASCII);
+  }
+
+  private static HttpServer origin(String body, CompletableFuture<String> host) throws IOException {
+    HttpServer server = HttpServer.create(
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    server.createContext("/", exchange -> {
+      host.complete(exchange.getRequestHeaders().getFirst("Host"));
+      byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(200, bytes.length);
+      exchange.getResponseBody().write(bytes);
+      exchange.close();
+    });
+    server.start();
+    return server;
+  }
+
+  private static HttpsServer tlsOrigin() throws Exception {
+    byte[] encoded;
+    try (var resource = EnvironmentHttpClientTest.class.getResourceAsStream(
+        "/insecure-test.p12.b64")) {
+      encoded = Base64.getMimeDecoder().decode(resource.readAllBytes());
+    }
+    char[] password = "changeit".toCharArray();
+    KeyStore keys = KeyStore.getInstance("PKCS12");
+    keys.load(new ByteArrayInputStream(encoded), password);
+    KeyManagerFactory managers = KeyManagerFactory.getInstance(
+        KeyManagerFactory.getDefaultAlgorithm());
+    managers.init(keys, password);
+    SSLContext context = SSLContext.getInstance("TLS");
+    context.init(managers.getKeyManagers(), null, null);
+
+    HttpsServer server = HttpsServer.create(
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    server.setHttpsConfigurator(new HttpsConfigurator(context));
+    server.createContext("/", exchange -> {
+      byte[] body = "tls".getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(200, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    server.start();
+    return server;
+  }
+
+  public static final class InsecureTlsProbe {
+    private InsecureTlsProbe() { }
+
+    public static void main(String[] arguments) throws Exception {
+      HttpResponse<String> response = EnvironmentHttpClient.createProvider(Map.of(
+              "AGENTTY_API_HOST", arguments[0], "AGENTTY_INSECURE", "1"))
+          .send(HttpRequest.newBuilder(URI.create("https://certificate-name.invalid/")).build(),
+              HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) System.exit(2);
+      System.out.print(response.body());
+    }
   }
 
   private static final class FakeSocks implements AutoCloseable {

@@ -41,7 +41,7 @@ final class McpServeCommand {
   McpServeCommand(Path currentDirectory, Path home, Map<String, String> environment) {
     this(currentDirectory, home, environment,
         new CredentialStore(home.resolve(".agentty/credentials.json"), "mcp-test"),
-        EnvironmentHttpClient.create(environment));
+        EnvironmentHttpClient.createProvider(environment));
   }
 
   McpServeCommand(Path currentDirectory, Path home, Map<String, String> environment,
@@ -57,7 +57,7 @@ final class McpServeCommand {
   static McpServeCommand systemDefault() {
     String configuredHome = System.getProperty("user.home", ".");
     return new McpServeCommand(Path.of(""), Path.of(configuredHome), System.getenv(),
-        CredentialStore.systemDefault(), EnvironmentHttpClient.create(System.getenv()));
+        CredentialStore.systemDefault(), EnvironmentHttpClient.createProvider(System.getenv()));
   }
 
   int run(CliArguments arguments, BufferedReader input, PrintStream output, PrintStream error) {

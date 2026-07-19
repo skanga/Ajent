@@ -37,7 +37,7 @@ public final class AnthropicOAuthLogin {
   private final SecureRandom random;
 
   public AnthropicOAuthLogin() {
-    this(AnthropicOAuthClient.TOKEN_URI, EnvironmentHttpClient.builder(System.getenv())
+    this(AnthropicOAuthClient.TOKEN_URI, EnvironmentHttpClient.oauthBuilder(System.getenv())
         .connectTimeout(Duration.ofSeconds(10)).build(), new SecureRandom());
   }
 
@@ -46,7 +46,7 @@ public final class AnthropicOAuthLogin {
   }
 
   public AnthropicOAuthLogin(URI tokenUri) {
-    this(tokenUri, EnvironmentHttpClient.builder(System.getenv())
+    this(tokenUri, EnvironmentHttpClient.oauthBuilder(System.getenv())
             .connectTimeout(Duration.ofSeconds(10)).build(),
         new SecureRandom());
   }

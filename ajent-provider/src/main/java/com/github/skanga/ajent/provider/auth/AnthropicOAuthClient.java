@@ -29,7 +29,7 @@ public final class AnthropicOAuthClient implements OAuthTokenClient {
   }
 
   public AnthropicOAuthClient(URI tokenUri) {
-    this(tokenUri, EnvironmentHttpClient.builder(System.getenv())
+    this(tokenUri, EnvironmentHttpClient.oauthBuilder(System.getenv())
         .connectTimeout(Duration.ofSeconds(10)).build());
   }
 

@@ -14,17 +14,26 @@ import java.net.SocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.X509TrustManager;
 
 /** JDK HTTP clients honoring AgenTTY's process-wide SOCKS5 air-gap contract. */
 public final class EnvironmentHttpClient {
-  private static final int DEFAULT_SOCKS_PORT = 1080;
+  private static final int DEFAULT_DIAL_PORT = 443;
   private static final int MAX_PROXY_HEADER = 64 * 1024;
   private static final int CONNECT_TIMEOUT_MILLIS = 10_000;
-  private static final Map<InetSocketAddress, SocksBridge> BRIDGES = new ConcurrentHashMap<>();
+  private static final String DISABLE_HOSTNAME_VERIFICATION =
+      "jdk.internal.httpclient.disableHostnameVerification";
+  private static final Map<BridgeConfig, SocksBridge> BRIDGES = new ConcurrentHashMap<>();
   private static final ProxySelector DIRECT = new ProxySelector() {
     @Override public List<Proxy> select(URI uri) {
       Objects.requireNonNull(uri, "uri");
@@ -37,78 +46,97 @@ public final class EnvironmentHttpClient {
   private EnvironmentHttpClient() {}
 
   public static HttpClient create(Map<String, String> environment) {
-    return builder(environment).build();
+    return builder(environment, Route.GENERAL).build();
+  }
+
+  public static HttpClient createProvider(Map<String, String> environment) {
+    return builder(environment, Route.PROVIDER).build();
+  }
+
+  public static HttpClient createOAuth(Map<String, String> environment) {
+    return builder(environment, Route.OAUTH).build();
   }
 
   public static HttpClient.Builder builder(Map<String, String> environment) {
+    return builder(environment, Route.GENERAL);
+  }
+
+  public static HttpClient.Builder providerBuilder(Map<String, String> environment) {
+    return builder(environment, Route.PROVIDER);
+  }
+
+  public static HttpClient.Builder oauthBuilder(Map<String, String> environment) {
+    return builder(environment, Route.OAUTH);
+  }
+
+  private static HttpClient.Builder builder(Map<String, String> environment, Route route) {
     Objects.requireNonNull(environment, "environment");
+    boolean insecure = "1".equals(environment.get("AGENTTY_INSECURE"));
+    // JDK HttpClient otherwise re-enables endpoint identification internally. This property is
+    // intentionally process-wide, just like AgenTTY's one-shot AGENTTY_INSECURE TLS context.
+    if (insecure) System.setProperty(DISABLE_HOSTNAME_VERIFICATION, "true");
     HttpClient.Builder builder = HttpClient.newBuilder().proxy(DIRECT);
-    String specification = environment.getOrDefault("AGENTTY_SOCKS_PROXY", "").strip();
-    if (!specification.isEmpty()) {
-      InetSocketAddress socks = parseSocksAddress(specification);
-      SocksBridge bridge = BRIDGES.computeIfAbsent(socks, SocksBridge::open);
+    HostPort socks = parseDialAddress(environment.get("AGENTTY_SOCKS_PROXY")).orElse(null);
+    HostPort api = route == Route.PROVIDER
+        ? parseDialAddress(environment.get("AGENTTY_API_HOST")).orElse(null) : null;
+    HostPort oauth = route != Route.GENERAL
+        ? parseDialAddress(environment.get("AGENTTY_OAUTH_HOST")).orElse(null) : null;
+    var configuration = new BridgeConfig(socks, api, oauth, route);
+    if (configuration.active()) {
+      SocksBridge bridge = BRIDGES.computeIfAbsent(configuration, SocksBridge::open);
       builder.proxy(ProxySelector.of(bridge.address())).version(HttpClient.Version.HTTP_1_1);
     }
+    if (insecure) configureInsecureTls(builder);
     return builder;
   }
 
-  static InetSocketAddress parseSocksAddress(String specification) {
-    String value = Objects.requireNonNull(specification, "specification").strip();
-    if (value.isEmpty()) throw invalidProxy(value);
-    String host;
-    int port = DEFAULT_SOCKS_PORT;
-    if (value.startsWith("[")) {
-      int close = value.indexOf(']');
-      if (close <= 1) throw invalidProxy(value);
-      host = value.substring(1, close);
-      if (close + 1 < value.length()) {
-        if (value.charAt(close + 1) != ':') throw invalidProxy(value);
-        port = port(value.substring(close + 2), value);
-      }
-    } else {
-      int colon = value.lastIndexOf(':');
-      if (colon > 0 && value.indexOf(':') == colon) {
-        host = value.substring(0, colon);
-        port = port(value.substring(colon + 1), value);
-      } else {
-        host = value;
-      }
-    }
-    if (host.isBlank() || host.indexOf('/') >= 0 || host.indexOf('\\') >= 0) {
-      throw invalidProxy(value);
-    }
-    return InetSocketAddress.createUnresolved(host, port);
-  }
-
-  private static int port(String value, String specification) {
+  static Optional<HostPort> parseDialAddress(String specification) {
+    if (specification == null || specification.isEmpty()) return Optional.empty();
+    int colon = specification.indexOf(':');
+    if (colon < 0) return Optional.of(new HostPort(specification, DEFAULT_DIAL_PORT));
+    String host = specification.substring(0, colon);
+    String portText = specification.substring(colon + 1);
+    if (host.isEmpty() || portText.isEmpty()) return Optional.empty();
     try {
-      int port = Integer.parseInt(value);
-      if (port < 1 || port > 65_535) throw invalidProxy(specification);
-      return port;
+      int port = Integer.parseInt(portText);
+      return port > 0 && port <= 65_535
+          ? Optional.of(new HostPort(host, port)) : Optional.empty();
     } catch (NumberFormatException exception) {
-      throw invalidProxy(specification);
+      return Optional.empty();
     }
   }
 
-  private static IllegalArgumentException invalidProxy(String value) {
-    return new IllegalArgumentException(
-        "AGENTTY_SOCKS_PROXY must be host[:port] (got '" + value + "')");
+  private static void configureInsecureTls(HttpClient.Builder builder) {
+    try {
+      var trustAll = new X509TrustManager() {
+        @Override public void checkClientTrusted(X509Certificate[] chain, String authType) { }
+        @Override public void checkServerTrusted(X509Certificate[] chain, String authType) { }
+        @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+      };
+      SSLContext context = SSLContext.getInstance("TLS");
+      context.init(null, new X509TrustManager[] {trustAll}, new SecureRandom());
+      SSLParameters parameters = new SSLParameters();
+      parameters.setEndpointIdentificationAlgorithm("");
+      builder.sslContext(context).sslParameters(parameters);
+    } catch (GeneralSecurityException exception) {
+      throw new IllegalStateException("unable to configure insecure TLS", exception);
+    }
   }
 
   static final class SocksBridge {
-    private final InetSocketAddress socks;
+    private final BridgeConfig configuration;
     private final ServerSocket listener;
 
-    private SocksBridge(InetSocketAddress socks, ServerSocket listener) {
-      this.socks = socks;
+    private SocksBridge(BridgeConfig configuration, ServerSocket listener) {
+      this.configuration = configuration;
       this.listener = listener;
     }
 
-    static SocksBridge open(InetSocketAddress socks) {
+    static SocksBridge open(BridgeConfig configuration) {
       try {
         var listener = new ServerSocket();
         listener.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 32);
-        var bridge = new SocksBridge(socks, listener);
+        var bridge = new SocksBridge(configuration, listener);
         Thread.startVirtualThread(bridge::accept);
         return bridge;
       } catch (IOException exception) {
@@ -138,9 +166,9 @@ public final class EnvironmentHttpClient {
           client.setSoTimeout(CONNECT_TIMEOUT_MILLIS);
           byte[] header = readHeader(client.getInputStream());
           RequestHead request = RequestHead.parse(header);
-          try (Socket upstream = new Socket(new Proxy(Proxy.Type.SOCKS, socks))) {
-            upstream.connect(InetSocketAddress.createUnresolved(request.host(), request.port()),
-                CONNECT_TIMEOUT_MILLIS);
+          HostPort destination = configuration.destination(request);
+          try (Socket upstream = configuration.upstreamSocket()) {
+            upstream.connect(configuration.socketAddress(destination), CONNECT_TIMEOUT_MILLIS);
             upstream.setSoTimeout(0);
             client.setSoTimeout(0);
             if (request.connect()) {
@@ -229,7 +257,10 @@ public final class EnvironmentHttpClient {
       if (path == null || path.isEmpty()) path = "/";
       if (target.getRawQuery() != null) path += "?" + target.getRawQuery();
       String remaining = header.substring(lineEnd + 2)
-          .replaceAll("(?im)^Proxy-Connection:[^\r\n]*\r\n", "");
+          .replaceAll("(?im)^Proxy-Connection:[^\r\n]*\r\n", "")
+          .replaceAll("(?im)^Connection:[^\r\n]*\r\n", "");
+      remaining = remaining.substring(0, remaining.length() - 2)
+          + "Connection: close\r\n\r\n";
       byte[] forwarded = (request[0] + " " + path + " " + request[2] + "\r\n" + remaining)
           .getBytes(StandardCharsets.ISO_8859_1);
       return new RequestHead(false, target.getHost(), port, forwarded);
@@ -246,5 +277,33 @@ public final class EnvironmentHttpClient {
     }
   }
 
-  private record HostPort(String host, int port) {}
+  enum Route { GENERAL, PROVIDER, OAUTH }
+
+  record BridgeConfig(HostPort socks, HostPort api, HostPort oauth, Route route) {
+    boolean active() { return socks != null || api != null || oauth != null; }
+
+    HostPort destination(RequestHead request) {
+      var original = new HostPort(request.host(), request.port());
+      return switch (route) {
+        case GENERAL -> original;
+        case OAUTH -> oauth == null ? original : oauth;
+        case PROVIDER -> request.host().equalsIgnoreCase("platform.claude.com")
+            ? oauth == null ? original : oauth
+            : api == null ? original : api;
+      };
+    }
+
+    Socket upstreamSocket() {
+      return socks == null ? new Socket() : new Socket(new Proxy(Proxy.Type.SOCKS,
+          InetSocketAddress.createUnresolved(socks.host(), socks.port())));
+    }
+
+    InetSocketAddress socketAddress(HostPort destination) {
+      return socks == null
+          ? new InetSocketAddress(destination.host(), destination.port())
+          : InetSocketAddress.createUnresolved(destination.host(), destination.port());
+    }
+  }
+
+  record HostPort(String host, int port) {}
 }

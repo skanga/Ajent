@@ -130,7 +130,7 @@ final class InteractiveCommand {
   static InteractiveCommand systemDefault() {
     Path home = Path.of(System.getProperty("user.home", "."));
     return new InteractiveCommand(Path.of(""), home, System.getenv(),
-        CredentialStore.systemDefault(), EnvironmentHttpClient.create(System.getenv()));
+        CredentialStore.systemDefault(), EnvironmentHttpClient.createProvider(System.getenv()));
   }
 
   int run(CliArguments arguments, PrintStream error) {

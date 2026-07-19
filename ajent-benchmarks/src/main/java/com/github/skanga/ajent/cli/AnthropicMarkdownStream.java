@@ -117,7 +117,7 @@ public final class AnthropicMarkdownStream {
     var streamError = new AtomicReference<String>();
     try (var writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8,
         StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-      new ProviderHttpTransport(EnvironmentHttpClient.create(System.getenv()))
+      new ProviderHttpTransport(EnvironmentHttpClient.createProvider(System.getenv()))
           .streamAnthropic(request, event -> {
         if (event instanceof StreamEvent.TextDelta delta) {
           long now = System.nanoTime();
