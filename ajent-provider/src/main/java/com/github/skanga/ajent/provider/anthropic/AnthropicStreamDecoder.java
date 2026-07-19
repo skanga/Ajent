@@ -8,16 +8,27 @@ import com.github.skanga.ajent.provider.stream.StreamEvent;
 import com.github.skanga.ajent.provider.wire.SseFramer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /** Incremental Anthropic SSE decoder with exactly-once terminal semantics. */
 public final class AnthropicStreamDecoder {
   private static final ObjectMapper JSON = new ObjectMapper();
 
   private final SseFramer framer = new SseFramer();
+  private final Consumer<SseFramer.Event> observer;
   private boolean toolBlockOpen;
   private boolean textBlockOpen;
   private boolean terminal;
   private StopReason stopReason = StopReason.UNSPECIFIED;
+
+  public AnthropicStreamDecoder() {
+    this(ignored -> { });
+  }
+
+  public AnthropicStreamDecoder(Consumer<SseFramer.Event> observer) {
+    this.observer = Objects.requireNonNull(observer, "observer");
+  }
 
   public List<StreamEvent> feed(byte[] bytes) {
     if (terminal) return List.of();
@@ -36,6 +47,7 @@ public final class AnthropicStreamDecoder {
   }
 
   private void consume(SseFramer.Event event, List<StreamEvent> events) {
+    observer.accept(event);
     if (terminal || event.data().isEmpty() || "[DONE]".equals(event.data())) return;
     if ("ping".equals(event.name())) {
       events.add(new StreamEvent.Heartbeat());

@@ -16,23 +16,29 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ProviderHttpTransportTest {
   private static final ObjectMapper JSON = new ObjectMapper();
   private HttpServer server;
+  @TempDir Path temporaryDirectory;
 
   @AfterEach
   void stopServer() {
     if (server != null) server.stop(0);
+    ApiDebugLog.closeAllForTests();
   }
 
   @Test
@@ -105,6 +111,38 @@ class ProviderHttpTransportTest {
     assertThat(captured.get().path()).isEqualTo("/v1/messages?beta=true");
     assertThat(JSON.readTree(captured.get().body()).path("model").textValue())
         .isEqualTo("claude-opus-4-6");
+  }
+
+  @Test
+  void appendsOptInAnthropicWireDiagnosticsWithoutLoggingCredentials() throws Exception {
+    start(exchange -> {
+      capture(exchange);
+      byte[] response = ("event: message_start\n"
+          + "data: {\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n"
+          + "event: message_stop\ndata: {}\n\n").getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(200, 0);
+      exchange.getResponseBody().write(response);
+      exchange.close();
+    });
+    Path log = temporaryDirectory.resolve("raw-api.log");
+    var events = new ArrayList<StreamEvent>();
+
+    new ProviderHttpTransport(HttpClient.newHttpClient(), Map.of(
+        "AGENTTY_DEBUG_API", "1", "AGENTTY_DEBUG_FILE", log.toString()))
+        .streamAnthropic(anthropicRequest(new ProviderAuth.ApiKey("secret-api-key")),
+            events::add, () -> false);
+
+    String text = Files.readString(log);
+    assertThat(text).contains(
+        "==== request ====",
+        "\"model\":\"claude-opus-4-6\"",
+        "==== http status=200 ====",
+        "-- chunk len=",
+        "<< event=message_start data={\"message\"",
+        "<< event=message_stop data={}");
+    assertThat(text).doesNotContain("secret-api-key");
+    assertThat(events).contains(new StreamEvent.Started(),
+        new StreamEvent.Finished(StopReason.UNSPECIFIED));
   }
 
   @Test

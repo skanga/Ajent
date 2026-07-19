@@ -17,6 +17,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -38,16 +39,29 @@ public final class ProviderHttpTransport {
   private final HttpClient client;
   private final Duration streamIdleTimeout;
   private final Duration cancelPollInterval;
+  private final ApiDebugLog debug;
 
   public ProviderHttpTransport(HttpClient client) {
-    this(client, DEFAULT_STREAM_IDLE_TIMEOUT, DEFAULT_CANCEL_POLL_INTERVAL);
+    this(client, System.getenv());
+  }
+
+  public ProviderHttpTransport(HttpClient client, Map<String, String> environment) {
+    this(client, DEFAULT_STREAM_IDLE_TIMEOUT, DEFAULT_CANCEL_POLL_INTERVAL,
+        ApiDebugLog.open(Map.copyOf(environment)));
   }
 
   ProviderHttpTransport(
       HttpClient client, Duration streamIdleTimeout, Duration cancelPollInterval) {
+    this(client, streamIdleTimeout, cancelPollInterval, null);
+  }
+
+  private ProviderHttpTransport(
+      HttpClient client, Duration streamIdleTimeout, Duration cancelPollInterval,
+      ApiDebugLog debug) {
     this.client = Objects.requireNonNull(client, "client");
     this.streamIdleTimeout = requirePositive(streamIdleTimeout, "streamIdleTimeout");
     this.cancelPollInterval = requirePositive(cancelPollInterval, "cancelPollInterval");
+    this.debug = debug;
   }
 
   public void streamOpenAi(
@@ -74,9 +88,12 @@ public final class ProviderHttpTransport {
           "not authenticated â€” run 'ajent login' or set ANTHROPIC_API_KEY"));
       return;
     }
-    var decoder = new AnthropicStreamDecoder();
+    if (debug != null) debug.write("==== request ====%n%s%n==== /request ====%n",
+        AnthropicWire.body(request));
+    var decoder = debug == null
+        ? new AnthropicStreamDecoder() : new AnthropicStreamDecoder(debug::event);
     stream(AnthropicWire.buildHttpRequest(request), decoder::feed, decoder::end,
-        sink, cancelled, ProviderHttpTransport::anthropicHttpError);
+        sink, cancelled, ProviderHttpTransport::anthropicHttpError, debug);
   }
 
   public void streamOllama(
@@ -102,6 +119,17 @@ public final class ProviderHttpTransport {
       Consumer<StreamEvent> sink,
       BooleanSupplier cancelled,
       java.util.function.BiFunction<Integer, byte[], String> errorFormatter) {
+    stream(request, feed, end, sink, cancelled, errorFormatter, null);
+  }
+
+  private void stream(
+      HttpRequest request,
+      java.util.function.Function<byte[], List<StreamEvent>> feed,
+      java.util.function.Supplier<List<StreamEvent>> end,
+      Consumer<StreamEvent> sink,
+      BooleanSupplier cancelled,
+      java.util.function.BiFunction<Integer, byte[], String> errorFormatter,
+      ApiDebugLog requestDebug) {
     Objects.requireNonNull(sink, "sink");
     Objects.requireNonNull(cancelled, "cancelled");
     Objects.requireNonNull(errorFormatter, "errorFormatter");
@@ -115,9 +143,13 @@ public final class ProviderHttpTransport {
         sink.accept(new StreamEvent.Error("cancelled"));
         return;
       }
+      if (requestDebug != null) requestDebug.write(
+          "==== http status=%d ====%n", response.statusCode());
       try (InputStream body = response.body()) {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
           byte[] errorBody = body.readNBytes(ERROR_BODY_MAX);
+          if (requestDebug != null) requestDebug.write("error body: %s%n",
+              new String(errorBody, java.nio.charset.StandardCharsets.UTF_8));
           sink.accept(new StreamEvent.Error(
               errorFormatter.apply(response.statusCode(), errorBody), retryAfter(response),
               ProviderErrorPolicy.classifyHttpStatus(response.statusCode()), false));
@@ -137,6 +169,7 @@ public final class ProviderHttpTransport {
             if (count < 0) break;
             if (count == 0) continue;
             lastByteNanos.set(System.nanoTime());
+            if (requestDebug != null) requestDebug.write("-- chunk len=%d%n", count);
             terminalEvent |= dispatch(
                 feed.apply(java.util.Arrays.copyOf(buffer, count)), sink);
             if (terminalEvent) return;

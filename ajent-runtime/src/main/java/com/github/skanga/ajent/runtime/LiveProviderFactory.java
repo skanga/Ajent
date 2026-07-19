@@ -45,7 +45,7 @@ public final class LiveProviderFactory {
 
   public static ProviderPort create(Configuration configuration, HttpClient client) {
     Objects.requireNonNull(configuration, "configuration");
-    return new HttpProviderPort(new ProviderHttpTransport(client),
+    return new HttpProviderPort(new ProviderHttpTransport(client, configuration.environment()),
         messages -> request(configuration, messages));
   }
 
