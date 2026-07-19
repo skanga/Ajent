@@ -14,6 +14,8 @@ import com.github.skanga.ajent.domain.ToolCallId;
 import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
+import com.github.skanga.ajent.core.persistence.SettingsStore;
+import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.runtime.AgentState;
 import com.github.skanga.ajent.runtime.PermissionPort;
@@ -82,7 +84,8 @@ final class InteractiveCommandTest {
         "--sandbox", "off", "--key", "secret"}), stream(error));
     assertThat(defaults).isNotNull();
     assertThat(defaults.profile()).isEqualTo(Profile.ASK);
-    assertThat(defaults.model()).isEqualTo("claude-opus-4-5");
+    assertThat(defaults.model()).isEqualTo("local");
+    assertThat(defaults.providerConfiguration().provider()).isEqualTo("ollama");
 
     var invalidDocs = command(Map.of("AGENTTY_DOCS_DIR", "\0"));
     assertThat(invalidDocs.configure(CliArguments.parse(new String[] {
@@ -97,6 +100,43 @@ final class InteractiveCommandTest {
             "access", "refresh", System.currentTimeMillis() + 60_000));
     assertThat(command(Map.of()).configure(CliArguments.parse(new String[] {
         "--sandbox", "off"}), stream(error))).isNotNull();
+  }
+
+  @Test void interactiveStartupPersistsCliModelAndProviderWithPerProviderRecall() {
+    var store = new SettingsStore(directory.resolve(".agentty"));
+    assertThat(store.save(store.load()
+        .withProviderModel("anthropic", new ModelId("claude-opus-4-5"))
+        .withProviderModel("ollama", new ModelId("qwen2.5-coder:7b"))
+        .withProvider("anthropic"))).isTrue();
+    var error = new ByteArrayOutputStream();
+    var command = command(Map.of());
+
+    var recalled = command.configure(CliArguments.parse(new String[] {
+        "--sandbox", "off", "--provider", "ollama"}), stream(error));
+    assertThat(recalled).isNotNull();
+    assertThat(recalled.providerConfiguration().provider()).isEqualTo("ollama");
+    assertThat(recalled.model()).isEqualTo("qwen2.5-coder:7b");
+    assertThat(store.load()).satisfies(saved -> {
+      assertThat(saved.provider()).isEqualTo("ollama");
+      assertThat(saved.modelId().value()).isEqualTo("qwen2.5-coder:7b");
+    });
+
+    var explicit = command.configure(CliArguments.parse(new String[] {
+        "--sandbox", "off", "--provider", "groq", "--model", "llama-3.3-70b"}),
+        stream(error));
+    assertThat(explicit).isNotNull();
+    assertThat(store.load()).satisfies(saved -> {
+      assertThat(saved.provider()).isEqualTo("groq");
+      assertThat(saved.modelId().value()).isEqualTo("llama-3.3-70b");
+      assertThat(saved.providerModels()).containsEntry("groq", "llama-3.3-70b");
+    });
+
+    command.configure(CliArguments.parse(new String[] {
+        "--sandbox", "off", "--model", "llama-3.1-8b"}), stream(error));
+    assertThat(store.load()).satisfies(saved -> {
+      assertThat(saved.provider()).isEqualTo("groq");
+      assertThat(saved.modelId().value()).isEqualTo("llama-3.1-8b");
+    });
   }
 
   @Test void composerRoutesEditingSubmissionCancellationAndQuit() {

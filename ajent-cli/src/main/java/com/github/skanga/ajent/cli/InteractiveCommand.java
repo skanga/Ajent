@@ -536,9 +536,23 @@ final class InteractiveCommand {
     Path dataDirectory = home.resolve(".agentty");
     var settingsStore = new SettingsStore(dataDirectory);
     Settings settings = settingsStore.load();
-    String provider = arguments.provider().isBlank() ? settings.provider() : arguments.provider();
+    boolean providerOverride = !arguments.provider().isBlank();
+    boolean modelOverride = !arguments.model().isBlank();
+    if (modelOverride) settings = settings.withModel(new ModelId(arguments.model()));
+    if (providerOverride) {
+      String selectedProvider = arguments.provider();
+      String selectedModel = arguments.model();
+      if (selectedModel.isBlank()) {
+        selectedModel = settings.providerModels().getOrDefault(selectedProvider, "");
+      }
+      settings = selectedModel.isBlank()
+          ? settings.withProvider(selectedProvider)
+          : settings.withProviderModel(selectedProvider, new ModelId(selectedModel));
+    }
+    if (providerOverride || modelOverride) settingsStore.save(settings);
+    String provider = settings.provider();
     if (provider.isBlank()) provider = "anthropic";
-    String model = arguments.model().isBlank() ? settings.modelId().value() : arguments.model();
+    String model = settings.modelId().value();
     if (model.isBlank()) model = DEFAULT_MODEL;
     CredentialResolver.Resolution anthropic = CredentialResolver.resolve(
         arguments.key(), environment, credentials.load(), System.currentTimeMillis());
