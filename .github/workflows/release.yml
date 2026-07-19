@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          mvn-toolchain-id: jdk-25
+          mvn-toolchain-vendor: temurin
+
+      - name: Use the runner JDK 25 toolchain
+        shell: bash
+        run: cp "$HOME/.m2/toolchains.xml" .mvn/toolchains.xml
+
+      - name: Verify release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(bash ./mvnw -q -N help:evaluate -Dexpression=project.version -DforceStdout)"
+          test "$version" = "${GITHUB_REF_NAME#v}"
+          test "$version" = "${version%-SNAPSHOT}"
+
+      - name: Build release artifacts
+        run: bash ./mvnw -q verify
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd ajent-cli/target
+          cp ../../target/ajent-sbom.json ajent-sbom.json
+          sha256sum "ajent-${GITHUB_REF_NAME#v}.zip" \
+            "ajent-${GITHUB_REF_NAME#v}.tar.gz" \
+            ajent-sbom.json > SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            "ajent-cli/target/ajent-${GITHUB_REF_NAME#v}.zip" \
+            "ajent-cli/target/ajent-${GITHUB_REF_NAME#v}.tar.gz" \
+            "ajent-cli/target/SHA256SUMS" \
+            "ajent-cli/target/ajent-sbom.json"

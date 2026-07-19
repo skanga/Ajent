@@ -52,11 +52,15 @@ ajent-VERSION/
   LICENSE
   NOTICE
   CHANGELOG.md
+  ajent-sbom.json
   docs/
 ```
 
-Generate SHA-256 checksums for every archive and publish them beside the
-artifacts. The executable JAR must be the shaded
+The package phase produces both ZIP and TAR.GZ archives and a reproducible
+CycloneDX 1.6 JSON SBOM. The tag-triggered release workflow verifies that the
+tag and non-snapshot Maven version agree, runs the full reactor, generates a
+`SHA256SUMS` file covering both archives and the standalone SBOM, and publishes
+them through GitHub Releases. The executable JAR must be the shaded
 `ajent-cli/target/ajent.jar`, not the unshaded original JAR Maven Shade keeps
 for diagnostics.
 
