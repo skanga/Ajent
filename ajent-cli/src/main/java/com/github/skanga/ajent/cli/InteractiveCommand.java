@@ -2358,55 +2358,48 @@ final class InteractiveCommand {
           }
         }
         if (mentions instanceof MentionPicker.Open open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Mention File", Style.ACCENT));
-          lines.add(new StyledLine(open.query().isEmpty()
-              ? "@ type to filter files\u2026" : "@ " + open.query(), Style.MUTED));
           List<Integer> matches = MentionPicker.matches(open);
+          var pickerRows = new ArrayList<AppChrome.PickerRow>();
           if (open.files().isEmpty()) {
-            lines.add(new StyledLine("  workspace empty (or no readable files)", Style.MUTED));
+            pickerRows.add(new AppChrome.PickerRow(
+                "workspace empty (or no readable files)", "", false, false));
           } else if (matches.isEmpty()) {
-            lines.add(new StyledLine("  no matches", Style.MUTED));
+            pickerRows.add(new AppChrome.PickerRow("no matches", "", false, false));
           } else {
-            int start = pickerStart(open.index(), matches.size());
-            int end = Math.min(matches.size(), start + 14);
-            for (int index = start; index < end; index++) {
+            for (int index = 0; index < matches.size(); index++) {
               String path = open.files().get(matches.get(index));
-              String parent = parentSegment(path);
-              lines.add(new StyledLine((index == open.index() ? "\u203a " : "  ")
-                  + filenameOnly(path) + (parent.isEmpty() ? "" : "  " + parent),
-                  index == open.index() ? Style.ACCENT : Style.NORMAL));
+              pickerRows.add(new AppChrome.PickerRow(filenameOnly(path), parentSegment(path),
+                  index == open.index(), false));
             }
-            if (matches.size() > 14) lines.add(new StyledLine(
-                "  " + (open.index() + 1) + "/" + matches.size(), Style.MUTED));
           }
+          String position = matches.size() > 14
+              ? (open.index() + 1) + "/" + matches.size() : "";
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.mentionPicker(open.query(), pickerRows, position,
+              Math.max(50, width - 2), Math.min(14, Math.max(4, terminalRows - 8))));
+          lines = overlayBottom(lines, overlay);
         }
         if (symbols instanceof SymbolPicker.Open open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Symbol", Style.ACCENT));
-          lines.add(new StyledLine(open.query().isEmpty()
-              ? "# type to filter symbols\u2026" : "# " + open.query(), Style.MUTED));
           List<Integer> matches = SymbolPicker.matches(open);
+          var pickerRows = new ArrayList<AppChrome.PickerRow>();
           if (open.symbols().isEmpty()) {
-            lines.add(new StyledLine("  no symbols indexed", Style.MUTED));
+            pickerRows.add(new AppChrome.PickerRow("no symbols indexed", "", false, false));
           } else if (matches.isEmpty()) {
-            lines.add(new StyledLine("  no matches", Style.MUTED));
+            pickerRows.add(new AppChrome.PickerRow("no matches", "", false, false));
           } else {
-            int start = pickerStart(open.index(), matches.size());
-            int end = Math.min(matches.size(), start + 14);
-            for (int index = start; index < end; index++) {
+            for (int index = 0; index < matches.size(); index++) {
               WorkspaceSymbol symbol = open.symbols().get(matches.get(index));
-              String parent = parentSegment(symbol.path());
-              lines.add(new StyledLine((index == open.index() ? "\u203a " : "  ")
-                  + symbol.name() + "  " + filenameOnly(symbol.path()) + ":"
-                  + symbol.lineNumber() + (parent.isEmpty() ? "" : "  " + parent),
-                  index == open.index() ? Style.ACCENT : Style.NORMAL));
+              pickerRows.add(new AppChrome.PickerRow(symbol.name() + "  "
+                  + filenameOnly(symbol.path()) + ":" + symbol.lineNumber(),
+                  parentSegment(symbol.path()), index == open.index(), false));
             }
-            if (matches.size() > 14) lines.add(new StyledLine(
-                "  " + (open.index() + 1) + "/" + matches.size(), Style.MUTED));
           }
+          String position = matches.size() > 14
+              ? (open.index() + 1) + "/" + matches.size() : "";
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.symbolPicker(open.query(), pickerRows, position,
+              Math.max(60, width - 2), Math.min(14, Math.max(4, terminalRows - 8))));
+          lines = overlayBottom(lines, overlay);
         }
         if (modelPicker instanceof PickerState.OpenAt open) {
           List<Integer> visible = ModelPicker.filteredIndices(models, open.query());

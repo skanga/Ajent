@@ -190,6 +190,24 @@ final class AppChromeTest {
   }
 
   @Test
+  void rendersNativeMentionAndSymbolPickers() {
+    List<AppChrome.Row> mentions = AppChrome.mentionPicker("", List.of(
+        new AppChrome.PickerRow("ParityFile.java", "src", true, false)), "", 78, 14);
+    assertThat(mentions).hasSize(7).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(mentions.getFirst().text()).contains(" Mention File ");
+    assertThat(mentions.get(2).text()).contains("@ type to filter files…");
+    assertThat(mentions.get(4).text()).contains("▎ ParityFile.java", "src", "┃");
+
+    List<AppChrome.Row> symbols = AppChrome.symbolPicker("Parity", List.of(
+        new AppChrome.PickerRow("ParitySymbol  ParityFile.java:1", "src", true, false)),
+        "15/20", 78, 14);
+    assertThat(symbols).hasSize(8).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(symbols.getFirst().text()).contains(" Symbol ");
+    assertThat(symbols.get(2).text()).contains("# Parity");
+    assertThat(symbols.get(5).text()).contains("15/20");
+  }
+
+  @Test
   void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
     AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);

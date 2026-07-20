@@ -245,6 +245,8 @@ final class NativeTerminalParityIT {
       Path javaHome = Files.createDirectories(root.resolve("java-home"));
       Path nativeWorkspace = Files.createDirectories(root.resolve("native-workspace"));
       Path javaWorkspace = Files.createDirectories(root.resolve("java-workspace"));
+      seedPickerWorkspace(nativeWorkspace);
+      seedPickerWorkspace(javaWorkspace);
       Path nativeLauncher = launcher(root.resolve("native-permission.cmd"),
           List.of(nativeBinary.toString()));
 
@@ -278,6 +280,10 @@ final class NativeTerminalParityIT {
           "Threads", "thread picker viewport");
       assertMatchingRegion(nativeCapture.modelFrame(), javaCapture.modelFrame(),
           "Models", "model picker viewport");
+      assertMatchingRegion(nativeCapture.mentionFrame(), javaCapture.mentionFrame(),
+          "Mention File", "mention picker viewport");
+      assertMatchingRegion(nativeCapture.symbolFrame(), javaCapture.symbolFrame(),
+          "Symbol", "symbol picker viewport");
     } finally {
       provider.stop(0);
     }
@@ -500,6 +506,27 @@ final class NativeTerminalParityIT {
     process.getOutputStream().write(closePicker);
     process.getOutputStream().flush();
     Thread.sleep(400);
+    process.getOutputStream().write('@');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Mention File", Duration.ofSeconds(5));
+    process.getOutputStream().write("Parity".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    Thread.sleep(250);
+    String mentionFrame = combined(output, error);
+    process.getOutputStream().write(closePicker);
+    process.getOutputStream().flush();
+    Thread.sleep(400);
+    process.getOutputStream().write('#');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Symbol", Duration.ofSeconds(5));
+    process.getOutputStream().write("Parity".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "ParitySymbol", Duration.ofSeconds(5));
+    Thread.sleep(250);
+    String symbolFrame = combined(output, error);
+    process.getOutputStream().write(closePicker);
+    process.getOutputStream().flush();
+    Thread.sleep(400);
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -519,7 +546,12 @@ final class NativeTerminalParityIT {
     if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
-        threadFrame, modelFrame);
+        threadFrame, modelFrame, mentionFrame, symbolFrame);
+  }
+
+  private static void seedPickerWorkspace(Path workspace) throws java.io.IOException {
+    Path source = workspace.resolve("ParityFile.java");
+    Files.writeString(source, "final class ParitySymbol {}\n", StandardCharsets.UTF_8);
   }
 
   private static Map<String, String> terminalEnvironment(Path home) {
@@ -823,5 +855,5 @@ final class NativeTerminalParityIT {
                                String finalFrame, String pickerFrame,
                                String movedPickerFrame, String commandFrame,
                                String filteredCommandFrame, String threadFrame,
-                               String modelFrame) {}
+                               String modelFrame, String mentionFrame, String symbolFrame) {}
 }

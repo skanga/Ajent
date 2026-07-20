@@ -364,6 +364,20 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
+  /** Maya's @file picker. */
+  public static List<Row> mentionPicker(String query, List<PickerRow> fileRows,
+      String position, int width, int viewportRows) {
+    return searchablePicker(" Mention File ", "@", "type to filter files…", query,
+        fileRows, position, width, viewportRows, 50);
+  }
+
+  /** Maya's #symbol picker. */
+  public static List<Row> symbolPicker(String query, List<PickerRow> symbolRows,
+      String position, int width, int viewportRows) {
+    return searchablePicker(" Symbol ", "#", "type to filter symbols…", query,
+        symbolRows, position, width, viewportRows, 60);
+  }
+
   public static List<Row> changes(List<Change> changes, int width) {
     List<Change> values = List.copyOf(Objects.requireNonNull(changes, "changes"));
     if (values.isEmpty()) return List.of();
@@ -409,6 +423,42 @@ public final class AppChrome {
 
   private static Row pickerBody(String content, int width, Tone tone) {
     return row("  │  " + fit(content, width - 8) + "  │", tone);
+  }
+
+  private static List<Row> searchablePicker(String title, String prefix, String placeholder,
+      String query, List<PickerRow> pickerRows, String position, int width, int viewportRows,
+      int minimumWidth) {
+    Objects.requireNonNull(query, "query");
+    List<PickerRow> values = List.copyOf(Objects.requireNonNull(pickerRows, "pickerRows"));
+    Objects.requireNonNull(position, "position");
+    if (width < minimumWidth) {
+      throw new IllegalArgumentException("picker width must be at least " + minimumWidth);
+    }
+    if (viewportRows < 1) throw new IllegalArgumentException("picker viewport must be positive");
+    int panelWidth = width - 2;
+    int rules = panelWidth - columns(title) - 2;
+    int leftRule = rules / 2;
+    var rows = new ArrayList<Row>();
+    rows.add(row("  ╭" + "─".repeat(leftRule) + title
+        + "─".repeat(rules - leftRule) + "╮", Tone.ACCENT));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBody(prefix + " " + (query.isEmpty() ? placeholder : query),
+        width, Tone.MUTED));
+    rows.add(pickerBody("─".repeat(width - 8), width, Tone.MUTED));
+    int visibleRows = Math.min(values.size(), viewportRows);
+    int selected = 0;
+    for (int index = 0; index < values.size(); index++) {
+      if (values.get(index).selected()) selected = index;
+    }
+    int start = Math.max(0, Math.min(selected - visibleRows + 1, values.size() - visibleRows));
+    for (PickerRow value : values.subList(start, start + visibleRows)) {
+      rows.add(pickerBody(pickerDataRow(value, width - 9) + "┃", width,
+          value.selected() ? Tone.ACCENT : Tone.NORMAL));
+    }
+    if (!position.isBlank()) rows.add(pickerBody("  " + position, width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(row("  ╰" + "─".repeat(panelWidth - 2) + "╯", Tone.ACCENT));
+    return List.copyOf(rows);
   }
 
   private static String pickerDataRow(PickerRow row, int width) {

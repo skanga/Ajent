@@ -145,8 +145,8 @@ initial and Down-navigated frames, closes it with Escape, and proves the complet
 76-column bordered bottom overlay. Registry blurbs, authentication/local notes,
 cursor and scrollbar rails, blank padding, legend, key hints, and the native
 short-terminal `rows - 8` viewport clamp are shared production behavior. The
-remaining picker backlog is limited to the thread-switch, mention, symbol,
-code-block, and checkpoint surfaces.
+remaining picker backlog is limited to the thread-switch, code-block, and
+checkpoint surfaces.
 
 Ctrl+K now uses the same production picker chrome with the native search header,
 separator, protected descriptions, cursor/scroll rail, clipping, and responsive
@@ -155,8 +155,7 @@ viewport. The executable gate captures the open palette and compares a unique
 and predates the checked-in source's `Inspect tool outputs` palette entry;
 Ajent retains that source-correct fifteenth command, so only the common uniquely
 filtered view is asserted exactly. Command-palette rendering and filtering are
-complete; the remaining picker backlog is mention, symbol, code-block, and
-checkpoint surfaces.
+complete; the remaining picker backlog is code-block and checkpoint surfaces.
 
 Ctrl+J now opens the exact saved-thread picker in both executable clients. The
 characterization creates a real persisted turn in isolated homes and compares
@@ -176,6 +175,14 @@ filter, favorite, and reasoning-effort states. AgenTTY's Windows ConPTY capture
 substitutes U+FFFD for the source's two-cell search emoji while retaining its
 layout; the differential normalizes only that capture-layer glyph back to the
 source emoji. The model-picker surface and lifecycle are complete.
+
+The same production overlay now renders both composer-triggered search pickers.
+The differential seeds identical workspaces, types the trigger and query as
+separate terminal events, and compares `@Parity` file rows plus `#Parity`
+symbol name/file/line loci cell-for-cell. Source-derived tests additionally pin
+workspace-empty, no-symbol, no-match, parent-directory, clamped selection, and
+the native over-14-item position footer. Mention-file and symbol picker chrome,
+modal ownership, filtering, and attachment selection are complete.
 
 `TurnChromeTest` and live `InteractiveCommandTest` coverage now pin the native
 turn shell independently of the broader renderer: `❯ You` and model-aware

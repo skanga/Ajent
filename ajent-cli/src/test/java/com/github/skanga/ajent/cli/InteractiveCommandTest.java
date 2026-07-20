@@ -924,6 +924,12 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("no symbols indexed");
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
 
+    agent.workspaceFiles = java.util.stream.IntStream.range(0, 15)
+        .mapToObj(index -> "src/File" + index + ".java").toList();
+    ui.key(character('@'), agent);
+    assertThat(terminal.bytes.toString()).contains("1/15");
+    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
+
     agent.workspaceFiles = List.of("README.md", "src/Main.java");
     ui.key(character('@'), agent);
     ui.key(character('z'), agent);
