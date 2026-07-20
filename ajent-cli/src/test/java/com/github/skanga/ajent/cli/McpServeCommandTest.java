@@ -49,10 +49,10 @@ class McpServeCommandTest {
         .isEqualTo("ajent");
     assertThat(messages.get(1).path("result").path("tools"))
         .extracting(node -> node.path("name").asText())
-        .containsExactly("read", "edit", "write", "bash", "grep", "glob", "list_dir",
-            "repo_map", "todo", "web_fetch", "web_search", "find_definition",
-            "diagnostics", "git_status", "git_diff", "git_log", "git_commit",
-            "remember", "forget", "wipe_memory", "task", "skill", "search_docs");
+        .containsExactly("todo", "read", "list_dir", "edit", "grep", "write", "bash",
+            "glob", "web_fetch", "remember", "web_search", "find_definition",
+            "diagnostics", "git_status", "git_diff", "git_log", "git_commit", "task",
+            "forget", "wipe_memory", "skill", "search_docs");
     assertThat(messages.get(2).path("result").path("isError").asBoolean()).isFalse();
     assertThat(Files.readString(workspace.resolve("served.txt"))).isEqualTo("through MCP");
   }

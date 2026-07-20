@@ -127,7 +127,7 @@ public final class McpJsonRpcServer {
     ObjectNode info = result.putObject("serverInfo");
     info.put("name", "ajent");
     info.put("version", version);
-    info.put("description", "ajent native tools");
+    info.put("title", "ajent native tools");
     result.put("instructions", INSTRUCTIONS);
     return result;
   }

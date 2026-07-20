@@ -51,8 +51,9 @@ final class McpJsonRpcServerTest {
     assertThat(initialized.path("serverInfo").path("name").textValue()).isEqualTo("ajent");
     assertThat(initialized.path("serverInfo").path("version").textValue())
         .isEqualTo("test-version");
-    assertThat(initialized.path("serverInfo").path("description").textValue())
+    assertThat(initialized.path("serverInfo").path("title").textValue())
         .isEqualTo("ajent native tools");
+    assertThat(initialized.path("serverInfo").has("description")).isFalse();
     assertThat(initialized.path("instructions").textValue())
         .contains("native coding tools served over MCP");
     assertThat(result(server, 2, "ping", "{}")).isEmpty();

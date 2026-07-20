@@ -103,9 +103,15 @@
     },
     {
       "id": "mcp-server-client",
-      "status": "planned",
+      "status": "partial-native-executable-green",
       "sources": ["agentty/src/mcp", "agentty/tests/mcp_bridge_test.cpp", "agentty/tests/mcp_http_test.cpp"],
-      "cases": ["initialize", "capabilities", "tools/list", "tools/call", "resources", "prompts", "list_changed", "progress", "shutdown", "malformed request", "errors", "cancel", "stdio", "streamable HTTP"]
+      "cases": ["initialize", "capabilities", "tools/list", "tools/call", "resources", "prompts", "list_changed", "progress", "shutdown", "malformed request", "errors", "cancel", "stdio", "streamable HTTP"],
+      "javaEvidence": [
+        "com.github.skanga.ajent.parity.NativeMcpParityIT",
+        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC comparison of initialize, ping, the ordered 22-tool standalone catalog, a real write, and method-not-found against the pinned Windows executable"
+      ],
+      "coveredExecutableCases": ["initialize", "capabilities", "ping", "notifications/initialized", "tools/list full descriptions/schemas/annotations/order", "tools/call write result and structured change", "method-not-found", "stdio EOF shutdown"],
+      "remainingExecutableCases": ["other tools/call families", "resources", "prompts", "list_changed", "progress", "cancel", "configured downstream MCP servers", "streamable HTTP client"]
     },
     {
       "id": "terminal",
