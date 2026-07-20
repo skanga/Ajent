@@ -15,6 +15,7 @@ import org.jline.terminal.TerminalBuilder;
 
 /** Owns Ajent's JLine raw inline-terminal lifecycle and exact mode escapes. */
 public final class JLineTerminalSession implements AutoCloseable {
+  static final String FIXED_SIZE_PROPERTY = "ajent.terminal.fixedSize";
   public static final String ENTER_INLINE =
       "\u001b[?2004h\u001b[>1u\u001b[>4;2m\u001b[?25l";
   public static final String LEAVE_INLINE =
@@ -50,6 +51,20 @@ public final class JLineTerminalSession implements AutoCloseable {
   }
 
   public static JLineTerminalSession open() throws IOException {
+    Size fixed = fixedSize(System.getProperty(FIXED_SIZE_PROPERTY, ""));
+    if (fixed != null) {
+      Terminal terminal = TerminalBuilder.builder().name("ajent").system(false)
+          .streams(System.in, System.out).encoding(StandardCharsets.UTF_8)
+          .type("xterm-256color")
+          .size(new org.jline.terminal.Size(fixed.columns(), fixed.rows()))
+          .nativeSignals(false).build();
+      try {
+        return new JLineTerminalSession(terminal);
+      } catch (RuntimeException exception) {
+        terminal.close();
+        throw exception;
+      }
+    }
     Terminal terminal = TerminalBuilder.builder().name("ajent").system(true)
         .encoding(StandardCharsets.UTF_8).ffm(true).dumb(true).build();
     try {
@@ -57,6 +72,22 @@ public final class JLineTerminalSession implements AutoCloseable {
     } catch (RuntimeException exception) {
       terminal.close();
       throw exception;
+    }
+  }
+
+  static Size fixedSize(String specification) {
+    if (specification == null || specification.isBlank()) return null;
+    String[] parts = specification.strip().toLowerCase(java.util.Locale.ROOT).split("x", -1);
+    if (parts.length != 2) throw new IllegalArgumentException(
+        FIXED_SIZE_PROPERTY + " must be COLSxROWS");
+    try {
+      int columns = Integer.parseInt(parts[0]);
+      int rows = Integer.parseInt(parts[1]);
+      if (columns <= 0 || rows <= 0) throw new NumberFormatException();
+      return new Size(columns, rows);
+    } catch (NumberFormatException exception) {
+      throw new IllegalArgumentException(FIXED_SIZE_PROPERTY + " must be positive COLSxROWS",
+          exception);
     }
   }
 

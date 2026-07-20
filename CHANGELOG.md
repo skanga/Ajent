@@ -33,6 +33,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Native-executable tool edge characterization for validation, workspace
   recovery guidance, timeout, cancellation, large implicit reads, UTF-8-safe
   truncation, and structured changes.
+- A real Windows child-PTY characterization seam and executable startup/shutdown
+  capture for deterministic 80x24 terminal comparisons.
 
 ### Changed
 

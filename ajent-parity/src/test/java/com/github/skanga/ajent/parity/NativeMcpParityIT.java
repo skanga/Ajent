@@ -442,9 +442,14 @@ final class NativeMcpParityIT {
   }
 
   private static List<HttpRecord> canonicalHttpStartup(List<HttpRecord> records) {
-    if (records.size() < 3) return records;
+    if (records.size() < 2) return records;
     var canonical = new ArrayList<>(records);
-    canonical.subList(1, 3).sort(java.util.Comparator.comparing(
+    var startupMethods = java.util.Set.of("notifications/initialized", "tools/list",
+        "resources/list", "resources/templates/list", "prompts/list");
+    int end = 1;
+    while (end < canonical.size()
+        && startupMethods.contains(canonical.get(end).body().path("method").asText())) end++;
+    canonical.subList(1, end).sort(java.util.Comparator.comparing(
         record -> record.body().path("method").asText()));
     return List.copyOf(canonical);
   }

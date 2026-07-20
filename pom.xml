@@ -23,6 +23,7 @@
     <flexmark.version>0.64.8</flexmark.version>
     <jetty.version>12.1.11</jetty.version>
     <okhttp.version>5.4.0</okhttp.version>
+    <pty4j.version>0.13.12</pty4j.version>
     <maven.compiler.version>3.14.1</maven.compiler.version><maven.enforcer.version>3.6.3</maven.enforcer.version>
     <maven.surefire.version>3.5.4</maven.surefire.version><maven.failsafe.version>3.5.4</maven.failsafe.version>
     <jacoco.version>0.8.15</jacoco.version>
@@ -48,6 +49,7 @@
     <dependency><groupId>com.vladsch.flexmark</groupId><artifactId>flexmark-ext-gfm-tasklist</artifactId><version>${flexmark.version}</version></dependency>
     <dependency><groupId>org.openjdk.jmh</groupId><artifactId>jmh-core</artifactId><version>${jmh.version}</version></dependency>
     <dependency><groupId>org.openjdk.jmh</groupId><artifactId>jmh-generator-annprocess</artifactId><version>${jmh.version}</version></dependency>
+    <dependency><groupId>org.jetbrains.pty4j</groupId><artifactId>pty4j</artifactId><version>${pty4j.version}</version></dependency>
   </dependencies></dependencyManagement>
   <build>
     <pluginManagement><plugins>

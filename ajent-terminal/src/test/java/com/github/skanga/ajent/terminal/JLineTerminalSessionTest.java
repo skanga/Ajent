@@ -64,6 +64,16 @@ final class JLineTerminalSessionTest {
         .isThrownBy(() -> new JLineTerminalSession.Size(-1, 2));
   }
 
+  @Test void parsesTheOptInFixedSizeExecutableCharacterizationSeam() {
+    assertThat(JLineTerminalSession.fixedSize("")).isNull();
+    assertThat(JLineTerminalSession.fixedSize(" 80X24 "))
+        .isEqualTo(new JLineTerminalSession.Size(80, 24));
+    org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+        .isThrownBy(() -> JLineTerminalSession.fixedSize("80"));
+    org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+        .isThrownBy(() -> JLineTerminalSession.fixedSize("80x0"));
+  }
+
   @Test void suspendLeavesInlineModeRunsActionAndRestoresRawModesAndMouse() throws Exception {
     var output = new ByteArrayOutputStream();
     var session = JLineTerminalSession.forTerminal(virtual(new byte[0], output));

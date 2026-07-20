@@ -150,14 +150,22 @@
         "mvn -q verify -Pcharacterization: exact semantic JSON-RPC comparison of standalone initialize/ping/catalog and all 22 published tool families plus configured downstream stdio and Streamable HTTP initialization, discovery, tool/resource/prompt calls, rich/error results, progress, list-change refresh, timeout behavior, HTTP session/protocol/custom headers, and JSON/SSE response handling against the pinned Windows executable"
       ],
       "coveredExecutableCases": ["initialize", "capabilities", "ping", "notifications/initialized", "tools/list full descriptions/schemas/annotations/order", "all 22 standalone tools/call families", "real read/list/edit/write/bash/grep/glob/todo", "offline web validation", "definition validation", "diagnostics", "real git status/diff/commit/log", "memory remember/forget/wipe lifecycle", "unavailable task", "skill activation", "document-search validation", "configured stdio downstream server", "configured Streamable HTTP downstream server", "tools/call text, structured, image, audio, and error results", "resources/list", "resources/templates/list", "resources/read", "prompts/list", "prompts/get", "notifications/progress during an active call", "notifications/tools/list_changed refresh during an active call", "request timeout without outgoing notifications/cancelled", "explicit outer notifications/cancelled during a blocking configured tool call is accepted but not forwarded and the call retains its timeout", "HTTP JSON and SSE responses", "HTTP MCP-Session-Id replay", "HTTP MCP-Protocol-Version and custom headers", "method-not-found", "stdio EOF shutdown"],
-      "deliberateExecutableDifferences": ["AgenTTY rehashes configured external tools into an unstable interleaved catalog order; Ajent retains deterministic local-first order while the differential compares the protocol-defined unordered tool set", "AgenTTY races the Streamable HTTP notifications/initialized POST with the first tools/list POST; Ajent sends deterministic initialization order while the differential canonicalizes only those two startup records", "The pinned AgenTTY 0.2.8 Windows binary returns false negatives for positive find_definition calls because its rg shell command uses POSIX quoting; Ajent retains the checked-in source's working scanner and the executable sweep pins the validation path", "The pinned AgenTTY 0.2.8 Windows binary predates the checked-in source's skills/memory search_docs fusion and confidence metadata; Ajent retains the source-correct rich RAG and the executable sweep pins query validation"],
+      "deliberateExecutableDifferences": ["AgenTTY rehashes configured external tools into an unstable interleaved catalog order; Ajent retains deterministic local-first order while the differential compares the protocol-defined unordered tool set", "AgenTTY issues Streamable HTTP notifications/initialized and capability discovery concurrently; Ajent sends deterministic initialization order while the differential canonicalizes that protocol-independent startup request set", "The pinned AgenTTY 0.2.8 Windows binary returns false negatives for positive find_definition calls because its rg shell command uses POSIX quoting; Ajent retains the checked-in source's working scanner and the executable sweep pins the validation path", "The pinned AgenTTY 0.2.8 Windows binary predates the checked-in source's skills/memory search_docs fusion and confidence metadata; Ajent retains the source-correct rich RAG and the executable sweep pins query validation"],
       "remainingExecutableCases": []
     },
     {
       "id": "terminal",
-      "status": "planned",
+      "status": "native-executable-smoke-green-source-oracles-green",
       "sources": ["agentty/src/runtime/view", "agentty/maya", "agentty/tests/scrollback_oracle_test.cpp"],
-      "cases": ["welcome", "composer", "streaming markdown", "tool cards", "permissions", "pickers", "diff review", "thread switch", "resize", "cancel", "shutdown", "append-only scrollback"]
+      "cases": ["welcome", "composer", "streaming markdown", "tool cards", "permissions", "pickers", "diff review", "thread switch", "resize", "cancel", "shutdown", "append-only scrollback"],
+      "javaEvidence": [
+        "com.github.skanga.ajent.parity.NativeTerminalParityIT",
+        "com.github.skanga.ajent.terminal.JLineTerminalSessionTest",
+        "translated terminal oracle suites enumerated in test-manifest.json",
+        "mvn -q verify -Pcharacterization: launches both shaded Ajent and the pinned Windows executable in isolated fresh homes under real 80x24 pseudo-consoles, captures startup ANSI, verifies the shared welcome contract, and delivers bounded Ctrl-C shutdown"
+      ],
+      "coveredExecutableCases": ["real Windows pseudo-console startup", "80x24 geometry", "fresh isolated home and workspace", "visible welcome tagline", "configured local provider/model", "Ctrl-C shutdown"],
+      "remainingExecutableCases": ["canonical cell comparison", "composer input", "streamed provider turn", "tool cards and permissions", "pickers", "diff review", "thread switch", "resize", "append-only scrollback"]
     }
   ]
 }

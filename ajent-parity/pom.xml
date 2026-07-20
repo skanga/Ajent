@@ -35,6 +35,11 @@
       <artifactId>jetty-alpn-java-server</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.jetbrains.pty4j</groupId>
+      <artifactId>pty4j</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <profiles>
     <profile>
@@ -49,6 +54,7 @@
             <artifactId>maven-failsafe-plugin</artifactId>
             <version>${maven.failsafe.version}</version>
             <configuration>
+              <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
               <systemPropertyVariables>
                 <agentty.binary>${agentty.binary}</agentty.binary>
               </systemPropertyVariables>
