@@ -2,6 +2,8 @@ package com.github.skanga.ajent.parity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 final class NativeExecutableParityIT {
+  private static final ObjectMapper JSON = new ObjectMapper();
   private static final String PINNED_SHA256 =
       "8b108f09a62220136383835b52f1506f003e6da246a9b1335846ab3e11733fff";
 
@@ -49,6 +52,61 @@ final class NativeExecutableParityIT {
     }
   }
 
+  @Test
+  void modelSettingsPersistBeforeSandboxValidationLikePinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+    Path javaHome = Files.createDirectories(root.resolve("java-home"));
+    Path workspace = Files.createDirectories(root.resolve("workspace"));
+    String seeded = """
+        {
+          "model_id":"old-model",
+          "profile":2,
+          "favorite_models":["favorite-a","favorite-b"],
+          "provider":"anthropic",
+          "provider_keys":{"groq":"saved-key"},
+          "provider_models":{"anthropic":"old-model","ollama":"qwen3:14b"},
+          "effort":"high",
+          "always_allow_tools":["read","write"]
+        }
+        """;
+    seedSettings(nativeHome, seeded);
+    seedSettings(javaHome, seeded);
+    List<String> arguments = List.of("--model", "gpt-parity", "--provider", "openai",
+        "--workspace", workspace.toString(), "--sandbox", "invalid");
+
+    Execution nativeRun = execute(command(nativeBinary, arguments), isolated(nativeHome));
+    Execution javaRun = execute(javaCommand(ajentJar, arguments, javaHome), isolated(javaHome));
+
+    assertThat(normalize(nativeRun, nativeHome, true))
+        .isEqualTo(normalize(javaRun, javaHome, false));
+    JsonNode nativeSettings = JSON.readTree(
+        nativeHome.resolve(".agentty/settings.json").toFile());
+    JsonNode javaSettings = JSON.readTree(
+        javaHome.resolve(".agentty/settings.json").toFile());
+    assertThat(javaSettings).isEqualTo(nativeSettings);
+    assertThat(javaSettings.path("model_id").textValue()).isEqualTo("gpt-parity");
+    assertThat(javaSettings.path("provider").textValue()).isEqualTo("anthropic");
+    assertThat(javaSettings.at("/provider_models/openai").isMissingNode()).isTrue();
+    assertThat(javaSettings.path("favorite_models")).hasSize(2);
+    assertThat(javaSettings.path("always_allow_tools")).hasSize(2);
+    assertThat(Files.exists(nativeHome.resolve(".agentty/settings.json.tmp"))).isFalse();
+    assertThat(Files.exists(javaHome.resolve(".agentty/settings.json.tmp"))).isFalse();
+  }
+
+  private static void seedSettings(Path home, String content) throws Exception {
+    Path data = Files.createDirectories(home.resolve(".agentty"));
+    Files.writeString(data.resolve("settings.json"), content, StandardCharsets.UTF_8);
+  }
+
+  private static Map<String, String> isolated(Path home) {
+    return Map.of("HOME", home.toString(), "USERPROFILE", home.toString(),
+        "APPDATA", home.toString());
+  }
+
   private static Execution normalize(Execution execution, Path home, boolean nativeProgram) {
     String prefix = home.toAbsolutePath().normalize().toString();
     String stdout = execution.stdout().replace(prefix, "<HOME>");
@@ -76,10 +134,15 @@ final class NativeExecutableParityIT {
   }
 
   private static List<String> javaCommand(Path jar, List<String> arguments) {
+    return javaCommand(jar, arguments, null);
+  }
+
+  private static List<String> javaCommand(Path jar, List<String> arguments, Path home) {
     String executable = Path.of(System.getProperty("java.home"), "bin",
         System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
     var result = new ArrayList<String>();
     result.add(executable);
+    if (home != null) result.add("-Duser.home=" + home);
     result.add("-jar");
     result.add(jar.toString());
     result.addAll(arguments);

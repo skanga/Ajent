@@ -516,6 +516,14 @@ final class InteractiveCommand {
   }
 
   Configuration configure(CliArguments arguments, PrintStream error) {
+    Path dataDirectory = home.resolve(".agentty");
+    var settingsStore = new SettingsStore(dataDirectory);
+    Settings settings = settingsStore.load();
+    boolean modelOverride = !arguments.model().isBlank();
+    if (modelOverride) {
+      settings = settings.withModel(new ModelId(arguments.model()));
+      settingsStore.save(settings);
+    }
     Path workspace;
     try {
       workspace = arguments.workspace().isBlank() ? currentDirectory
@@ -540,9 +548,7 @@ final class InteractiveCommand {
           + sandbox.description() + "\n");
       return null;
     }
-    Path dataDirectory = home.resolve(".agentty");
-    var settingsStore = new SettingsStore(dataDirectory);
-    Settings settings = settingsStore.load();
+    settings = settingsStore.load();
     Profile profile;
     try {
       profile = arguments.profile().isBlank()
@@ -552,8 +558,6 @@ final class InteractiveCommand {
       return null;
     }
     boolean providerOverride = !arguments.provider().isBlank();
-    boolean modelOverride = !arguments.model().isBlank();
-    if (modelOverride) settings = settings.withModel(new ModelId(arguments.model()));
     if (providerOverride) {
       String selectedProvider = arguments.provider();
       String selectedModel = arguments.model();
@@ -564,7 +568,7 @@ final class InteractiveCommand {
           ? settings.withProvider(selectedProvider)
           : settings.withProviderModel(selectedProvider, new ModelId(selectedModel));
     }
-    if (providerOverride || modelOverride) settingsStore.save(settings);
+    if (providerOverride) settingsStore.save(settings);
     String provider = settings.provider();
     if (provider.isBlank()) provider = "anthropic";
     String model = settings.modelId().value();

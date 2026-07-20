@@ -49,9 +49,19 @@
     },
     {
       "id": "persistence",
-      "status": "planned",
+      "status": "native-executable-green",
       "sources": ["agentty/src/io/persistence.cpp", "agentty/src/io/cred_crypt.cpp", "agentty/src/io/auth.cpp"],
-      "cases": ["settings", "threads", "legacy fields", "metadata listing", "atomic write", "credential v1 envelope", "corruption"]
+      "cases": ["settings", "threads", "legacy fields", "metadata listing", "atomic write", "credential v1 envelope", "corruption"],
+      "javaEvidence": [
+        "com.github.skanga.ajent.parity.NativeExecutableParityIT",
+        "com.github.skanga.ajent.parity.NativeAcpParityIT",
+        "com.github.skanga.ajent.core.persistence.SettingsStoreTest",
+        "com.github.skanga.ajent.core.persistence.ThreadStoreTest",
+        "com.github.skanga.ajent.core.persistence.AsyncThreadWriterTest",
+        "mvn -q verify -Pcharacterization: exact CLI model-save ordering and complete settings preservation plus completed ACP thread/session-index JSON, shutdown flush, and atomic temporary-file cleanup against the pinned Windows executable; source-derived suites cover legacy, metadata-only, malformed-state, credential-envelope, and corruption paths that have no direct executable command surface"
+      ],
+      "coveredExecutableCases": ["model setting persisted before sandbox validation", "unrelated settings fields preserved", "completed ACP thread JSON", "message ids/roles/text/timestamps", "native ACP title derivation", "ACP session sidecar", "graceful shutdown flush", "atomic temporary-file cleanup"],
+      "remainingExecutableCases": []
     },
     {
       "id": "provider-anthropic",

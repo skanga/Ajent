@@ -66,6 +66,58 @@ final class NativeAcpParityIT {
   }
 
   @Test
+  void completedThreadAndSessionIndexPersistenceMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-persistence-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-persistence-workspace"));
+    Path nativeHome = root.resolve("native-persistence-home");
+    Path javaHome = root.resolve("java-persistence-home");
+    var captures = new java.util.concurrent.CopyOnWriteArrayList<HostedCapture>();
+    HostedH2Server provider = hostedProvider(captures);
+    provider.start();
+    Map<String, String> environment = hostedEnvironment(provider);
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(commandWithKey(
+          nativeBinary, nativeWorkspace, "openai"), nativeHome, false, environment)) {
+        nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "persist this turn");
+      }
+      captures.clear();
+
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommandWithKey(
+          ajentJar, javaWorkspace, "openai"), javaHome, true, environment)) {
+        javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "persist this turn");
+      }
+
+      JsonNode nativeThread = normalizedPersistedThread(
+          nativeHome, nativeTranscript.sessionId(), nativeWorkspace);
+      JsonNode javaThread = normalizedPersistedThread(
+          javaHome, javaTranscript.sessionId(), javaWorkspace);
+      assertThat(javaThread).isEqualTo(nativeThread);
+      assertThat(javaThread.path("messages")).hasSize(2);
+      assertThat(javaThread.at("/messages/0/role").textValue()).isEqualTo("user");
+      assertThat(javaThread.at("/messages/0/text").textValue()).isEqualTo("persist this turn\n");
+      assertThat(javaThread.at("/messages/1/role").textValue()).isEqualTo("assistant");
+      assertThat(javaThread.at("/messages/1/text").textValue()).isEqualTo("Hosted reply.");
+
+      assertThat(normalizedSessionIndex(
+          nativeHome, nativeTranscript.sessionId(), nativeWorkspace))
+          .isEqualTo(normalizedSessionIndex(
+              javaHome, javaTranscript.sessionId(), javaWorkspace));
+      assertThat(Files.exists(nativeHome.resolve(".agentty/threads/acp_sessions.json.tmp")))
+          .isFalse();
+      assertThat(Files.exists(javaHome.resolve(".agentty/threads/acp_sessions.json.tmp")))
+          .isFalse();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void nativeOllamaRequestAndFragmentedNdjsonMatchPinnedExecutable(@TempDir Path root)
       throws Exception {
     Path repository = repositoryRoot();
@@ -2241,6 +2293,64 @@ final class NativeAcpParityIT {
       }
     }
     return result;
+  }
+
+  private static JsonNode normalizedPersistedThread(
+      Path home, String sessionId, Path workspace) throws Exception {
+    Path file = home.resolve(".agentty/threads").resolve(sessionId + ".json");
+    assertThat(file).isRegularFile();
+    ObjectNode result = (ObjectNode) JSON.readTree(file.toFile());
+    assertThat(result.path("id").textValue()).isEqualTo(sessionId);
+    result.put("id", "<SESSION>");
+    normalizeGeneratedEpoch(result, "created_at");
+    normalizeGeneratedEpoch(result, "updated_at");
+    for (JsonNode message : result.path("messages")) {
+      ObjectNode object = (ObjectNode) message;
+      assertThat(object.path("id").textValue()).matches("[0-9a-f]{16}");
+      object.put("id", "<MESSAGE>");
+      normalizeGeneratedEpoch(object, "timestamp");
+    }
+    return replacePersistenceRoot(result, workspace);
+  }
+
+  private static JsonNode normalizedSessionIndex(
+      Path home, String sessionId, Path workspace) throws Exception {
+    Path file = home.resolve(".agentty/threads/acp_sessions.json");
+    assertThat(file).isRegularFile();
+    JsonNode raw = JSON.readTree(file.toFile());
+    assertThat(raw).hasSize(1);
+    JsonNode rawSession = raw.path(sessionId);
+    assertThat(rawSession.isObject()).isTrue();
+    ObjectNode session = rawSession.deepCopy();
+    normalizeGeneratedEpoch(session, "updatedAt");
+    ObjectNode result = JSON.createObjectNode();
+    result.set("<SESSION>", replacePersistenceRoot(session, workspace));
+    return result;
+  }
+
+  private static void normalizeGeneratedEpoch(ObjectNode value, String field) {
+    assertThat(value.path(field).isIntegralNumber()).as(field).isTrue();
+    assertThat(value.path(field).longValue()).as(field).isPositive();
+    value.put(field, 0);
+  }
+
+  private static JsonNode replacePersistenceRoot(JsonNode value, Path workspace) {
+    if (value.isTextual()) {
+      return JSON.getNodeFactory().textNode(value.textValue()
+          .replace(workspace.toString(), "<WORKSPACE>"));
+    }
+    if (value.isObject()) {
+      ObjectNode result = JSON.createObjectNode();
+      value.properties().forEach(entry ->
+          result.set(entry.getKey(), replacePersistenceRoot(entry.getValue(), workspace)));
+      return result;
+    }
+    if (value.isArray()) {
+      var result = JSON.createArrayNode();
+      value.forEach(item -> result.add(replacePersistenceRoot(item, workspace)));
+      return result;
+    }
+    return value.deepCopy();
   }
 
   private static JsonNode toolByName(JsonNode body, String name) {

@@ -28,6 +28,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   execution/continuation, HTTP errors, and live cancellation.
 - Native-executable Anthropic characterization for exact Messages API requests,
   fragmented SSE, tool execution/continuation, HTTP errors, and cancellation.
+- Native-executable persistence characterization for settings save ordering,
+  complete ACP thread/session-index JSON, atomic cleanup, and shutdown flush.
 
 ### Changed
 
@@ -54,6 +56,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched Anthropic's request prompt terminator and ACP projection of the latest
   provider usage frame; documented three source-defined fields absent from the
   downloaded 0.2.8 binary.
+- Matched native pre-validation model persistence and ACP title derivation from
+  the newline-terminated stored user message.
 
 ### Known limitations
 

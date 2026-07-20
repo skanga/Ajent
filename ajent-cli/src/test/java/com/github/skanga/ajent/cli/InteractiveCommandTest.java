@@ -66,6 +66,13 @@ final class InteractiveCommandTest {
         stream(error))).isNull();
     assertThat(error.toString(StandardCharsets.UTF_8)).contains("sandbox");
 
+    error.reset();
+    assertThat(command.configure(CliArguments.parse(new String[] {
+        "--model", "persisted-before-sandbox", "--sandbox", "invalid"}), stream(error)))
+        .isNull();
+    assertThat(new SettingsStore(directory.resolve(".agentty")).load().modelId().value())
+        .isEqualTo("persisted-before-sandbox");
+
     var configured = command.configure(CliArguments.parse(new String[] {
         "--sandbox", "off", "--provider", "ollama", "--model", "local",
         "--profile", "minimal"}), stream(error));

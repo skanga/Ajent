@@ -443,7 +443,8 @@ public final class AcpJsonRpcServer {
       throw new RpcFailure(INVALID_PARAMS, "session already has an active prompt: " + id);
     }
     if (session.thread.messages().isEmpty()) {
-      session.thread = new Thread(session.thread.id(), title(text), session.thread.messages(),
+      session.thread = new Thread(session.thread.id(), threads.titleFromFirstMessage(text),
+          session.thread.messages(),
           session.thread.createdAt(), session.thread.updatedAt(), session.thread.compactions());
     }
 
@@ -505,11 +506,6 @@ public final class AcpJsonRpcServer {
       }
     }
     return text.toString();
-  }
-
-  private static String title(String text) {
-    String oneLine = text.strip().replaceAll("\\s+", " ");
-    return oneLine.substring(0, Math.min(80, oneLine.length()));
   }
 
   private static void replay(String sessionId, Thread thread, List<ObjectNode> frames) {

@@ -480,7 +480,10 @@ final class AcpJsonRpcServerTest {
     ThreadLoadResult persisted = new ThreadStore(directory)
         .load(directory.resolve("threads/prompt-session.json"));
     assertThat(persisted).isInstanceOfSatisfying(ThreadLoadResult.Success.class, loaded ->
-        assertThat(loaded.thread().messages()).hasSize(3));
+        assertThat(loaded.thread()).satisfies(thread -> {
+          assertThat(thread.title()).isEqualTo("please write the file ");
+          assertThat(thread.messages()).hasSize(3);
+        }));
   }
 
   @Test void pinnedIntegrationExecutesApprovedWriteAndNeverExecutesRejectedWrite(

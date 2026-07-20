@@ -77,6 +77,7 @@ Ajent keeps AgenTTY-compatible application data under `~/.agentty`:
   settings.json
   threads/
     THREAD_ID.json
+    acp_sessions.json
 ```
 
 `settings.json` stores the selected model, numeric permission profile,
@@ -85,6 +86,15 @@ always-allowed tool names, and provider keys saved through the provider UI.
 Writes use a temporary file, forced flush, and atomic replacement when the
 filesystem supports it. Malformed optional state falls back to defaults and is
 reported only through the debug log.
+
+Thread files retain stable message/tool ids, roles, text, images, attachments,
+thinking/signatures, tool results, errors, checkpoints, timestamps, and wire
+compaction records. `acp_sessions.json` is a metadata sidecar mapping ACP
+session ids to working directories, titles, and update times; it is not a
+conversation file and is skipped by the saved-thread metadata walk. Completed
+turns are flushed before process shutdown. The executable parity gate compares
+both files against AgenTTY after a real streamed ACP turn and also verifies
+model-setting persistence before later startup validation fails.
 
 Anthropic login credentials are stored separately at
 `$XDG_CONFIG_HOME/agentty/credentials.json`, or
