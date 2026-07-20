@@ -2911,9 +2911,10 @@ final class InteractiveCommand {
       boolean animating = false;
       List<Message> messages = state.thread().messages();
       reconcileFrozenSurface(state, messages, width, terminalRows, nowNanos);
+      int chromeWidth = Math.max(8, width - 2);
       if (messages.isEmpty()) {
-        appendChrome(output, AppChrome.welcome(new AppChrome.Welcome(
-            modelId, profile, !threadsLoading && threadRows.isEmpty(), width,
+        appendInsetChrome(output, AppChrome.welcome(new AppChrome.Welcome(
+            modelId, profile, !threadsLoading && threadRows.isEmpty(), chromeWidth,
             Math.max(4, terminalRows - 11))));
       }
 
@@ -2988,16 +2989,18 @@ final class InteractiveCommand {
           .toList();
       if (!changes.isEmpty()) {
         output.add(new StyledLine("", Style.NORMAL));
-        appendChrome(output, AppChrome.changes(changes, width));
+        appendInsetChrome(output, AppChrome.changes(changes, chromeWidth));
       }
       output.add(new StyledLine("", Style.NORMAL));
-      wrap(output, "> " + AttachmentText.display(composer, composerAttachments), width,
-          Style.NORMAL);
+      String displayedComposer = AttachmentText.display(composer, composerAttachments);
+      appendInsetChrome(output, AppChrome.composer(new AppChrome.Composer(
+          displayedComposer, displayedComposerCursor(composer, cursor, composerAttachments), profile,
+          chromePhase(state), state.queued().size(), composerExpanded, chromeWidth)));
       String banner = !uiStatus.isEmpty() ? uiStatus : state.status();
-      appendChrome(output, AppChrome.status(new AppChrome.Status(
+      appendInsetChrome(output, AppChrome.statusPanel(new AppChrome.Status(
           state.thread().title(), providerLabel(providerId), chromePhase(state),
           chromePhaseDetail(state, permission), state.tokensIn(), effectiveContextMax(),
-          state.queued().size(), banner, width)));
+          state.queued().size(), banner, chromeWidth)));
       var text = new StringBuilder();
       for (StyledLine line : output) text.append(line.text()).append('\n');
       renderedText = text.toString();
@@ -3012,6 +3015,34 @@ final class InteractiveCommand {
         case SUCCESS -> Style.SUCCESS;
         case DANGER -> Style.DANGER;
       }));
+    }
+
+    private static void appendInsetChrome(List<StyledLine> output, List<AppChrome.Row> rows) {
+      for (AppChrome.Row row : rows) {
+        appendChrome(output, List.of(new AppChrome.Row(" " + row.text(), row.tone())));
+      }
+    }
+
+    private static int displayedComposerCursor(
+        String text, int cursor, List<Attachment> attachments) {
+      int raw = 0;
+      int displayed = 0;
+      int limit = Math.clamp(cursor, 0, text.length());
+      while (raw < limit) {
+        int placeholderLength = AttachmentText.placeholderLengthAt(text, raw);
+        if (placeholderLength > 0 && raw + placeholderLength <= limit) {
+          int index = AttachmentText.placeholderIndex(text, raw);
+          if (index >= 0 && index < attachments.size()) {
+            displayed += AttachmentText.chipLabel(attachments.get(index)).length() + 2;
+          }
+          raw += placeholderLength;
+        } else {
+          int codePoint = text.codePointAt(raw);
+          raw += Character.charCount(codePoint);
+          displayed += Character.charCount(codePoint);
+        }
+      }
+      return displayed;
     }
 
     private static AppChrome.Phase chromePhase(AgentState state) {

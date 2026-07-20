@@ -155,17 +155,17 @@
     },
     {
       "id": "terminal",
-      "status": "native-executable-smoke-green-source-oracles-green",
+      "status": "native-executable-stable-viewport-green-source-oracles-green",
       "sources": ["agentty/src/runtime/view", "agentty/maya", "agentty/tests/scrollback_oracle_test.cpp"],
       "cases": ["welcome", "composer", "streaming markdown", "tool cards", "permissions", "pickers", "diff review", "thread switch", "resize", "cancel", "shutdown", "append-only scrollback"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeTerminalParityIT",
         "com.github.skanga.ajent.terminal.JLineTerminalSessionTest",
         "translated terminal oracle suites enumerated in test-manifest.json",
-        "mvn -q verify -Pcharacterization: launches both shaded Ajent and the pinned Windows executable in isolated fresh homes under real 80x24 pseudo-consoles, captures startup ANSI, verifies the shared welcome contract, and delivers bounded Ctrl-C shutdown"
+        "mvn -q verify -Pcharacterization: launches the pinned Windows executable under a real 80x24 pseudo-console and shaded Ajent through a deterministic 80x24 stream terminal in isolated fresh homes, decodes both ANSI streams through the same Unicode-width viewport emulator, compares stable startup rows 7-23 cell-for-cell, verifies nonblank wordmark regions, and delivers bounded Ctrl-C shutdown"
       ],
-      "coveredExecutableCases": ["real Windows pseudo-console startup", "80x24 geometry", "fresh isolated home and workspace", "visible welcome tagline", "configured local provider/model", "Ctrl-C shutdown"],
-      "remainingExecutableCases": ["canonical cell comparison", "composer input", "streamed provider turn", "tool cards and permissions", "pickers", "diff review", "thread switch", "resize", "append-only scrollback"]
+      "coveredExecutableCases": ["real Windows pseudo-console startup", "deterministic Java stream-terminal startup", "80x24 geometry", "fresh isolated home and workspace", "Unicode-width ANSI viewport decoding", "stable startup rows 7-23 exact cell comparison", "visible welcome tagline", "configured local provider/model badge", "six-row bordered composer", "three-row provider/context status panel", "Ctrl-C shutdown"],
+      "remainingExecutableCases": ["time-dependent animated wordmark frame comparison", "composer input", "streamed provider turn", "tool cards and permissions", "pickers", "diff review", "thread switch", "resize", "append-only scrollback"]
     }
   ]
 }

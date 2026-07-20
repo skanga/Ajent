@@ -45,6 +45,18 @@ public final class AppChrome {
     }
   }
 
+  public record Composer(String text, int cursor, Profile profile, Phase phase,
+                         int queued, boolean expanded, int width) {
+    public Composer {
+      text = Objects.requireNonNull(text, "text");
+      profile = Objects.requireNonNull(profile, "profile");
+      phase = Objects.requireNonNull(phase, "phase");
+      if (cursor < 0 || cursor > text.length() || queued < 0 || width < 8) {
+        throw new IllegalArgumentException("invalid composer state or width");
+      }
+    }
+  }
+
   public record Change(String path, boolean created, int added, int removed) {
     public Change {
       path = Objects.requireNonNull(path, "path");
@@ -86,8 +98,8 @@ public final class AppChrome {
     rows.add(row(center(TAGLINE, config.width()), Tone.MUTED));
     if (b1) rows.add(row("", Tone.NORMAL));
     if (b4) rows.add(row("", Tone.NORMAL));
-    String chips = ModelLabels.pretty(config.modelId()) + "    ▌ "
-        + config.profile().name() + " ▐";
+    String chips = compactModelBadge(config.modelId()) + "    ▌ "
+        + titleCase(config.profile().name()) + " ▐";
     rows.add(row(center(chips, config.width()), Tone.ACCENT));
     if (b2) rows.add(row("", Tone.NORMAL));
     if (b5) rows.add(row("", Tone.NORMAL));
@@ -119,6 +131,48 @@ public final class AppChrome {
       rows.add(row(fit(glyph + "  " + config.banner(), config.width()), tone));
     }
     return List.copyOf(rows);
+  }
+
+  /** Maya's natural-height six-row composer box, including its divider and hint rail. */
+  public static List<Row> composer(Composer config) {
+    Objects.requireNonNull(config, "config");
+    int inside = config.width() - 2;
+    String border = "─".repeat(inside);
+    var rows = new ArrayList<Row>();
+    rows.add(row("╭" + border + "╮", Tone.ACCENT));
+
+    String placeholder = config.text().isEmpty() ? composerPlaceholder(config) : config.text();
+    String body = config.text().isEmpty()
+        ? "❯ █" + placeholder
+        : "❯ " + withCursor(config.text(), config.cursor());
+    List<String> bodyLines = wrapLines(body, Math.max(1, inside - 2));
+    int bodyRows = Math.max(2, bodyLines.size());
+    for (int index = 0; index < bodyRows; index++) {
+      String value = index < bodyLines.size() ? bodyLines.get(index) : "";
+      rows.add(row("│ " + fit(value, inside - 2) + " │", Tone.NORMAL));
+    }
+
+    rows.add(row("│   " + "─".repeat(Math.max(0, inside - 4)) + " │", Tone.ACCENT));
+    String left = "↵ send  ·  ⇧↵ / ⌥↵ newline  ·  ^E expand";
+    String right = "▎ " + letterSpaced(config.profile().name());
+    int content = inside;
+    int fixed = 3 + columns(left) + columns(right) + 2;
+    String hints = "   " + left + " ".repeat(Math.max(1, content - fixed)) + right + "  ";
+    rows.add(row("│" + fit(hints, content) + "│", Tone.MUTED));
+    rows.add(row("╰" + border + "╯", Tone.ACCENT));
+    return List.copyOf(rows);
+  }
+
+  /** Stable three-row status panel used by AgenTTY after ShortcutRow was retired. */
+  public static List<Row> statusPanel(Status config) {
+    Objects.requireNonNull(config, "config");
+    String rule = "─".repeat(config.width());
+    List<Row> activity = status(config);
+    String middle = activity.getFirst().text();
+    if (activity.size() > 1) middle = activity.getLast().text();
+    return List.of(row(rule, phaseTone(config.phase())),
+        row(fitStatusActivity(config, middle), phaseTone(config.phase())),
+        row(rule, phaseTone(config.phase())));
   }
 
   public static List<Row> changes(List<Change> changes, int width) {
@@ -173,6 +227,99 @@ public final class AppChrome {
       case LOADING -> "◐ loading…";
       case IDLE -> config.queued() > 0 ? "▸ +" + config.queued() + " queued" : "● Ready";
     };
+  }
+
+  private static String fitStatusActivity(Status config, String banner) {
+    if (!config.banner().isBlank() && !config.banner().equals("ready")) {
+      return fit(banner, config.width());
+    }
+    String phase = phase(config);
+    String phaseSlot = fit(phase, 12);
+    String right = "● " + config.provider();
+    if (config.contextMax() > 0) right += " · "
+        + compactNativeContextGauge(config.tokensIn(), config.contextMax());
+    String left = "▌ " + phaseSlot;
+    String title = config.title().isBlank() ? "" : config.title() + "   ·   ";
+    int spaces = Math.max(1, config.width() - columns(title) - columns(left) - columns(right) - 2);
+    return fit(" " + title + left + " ".repeat(spaces) + right + " ", config.width());
+  }
+
+  private static String compactNativeContextGauge(int used, int maximum) {
+    if (maximum <= 0) return "";
+    int percent = used <= 0 ? 0 : Math.min(100, used * 100 / maximum);
+    int eighths = percent * 80 / 100;
+    String[] partials = {"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"};
+    var bar = new StringBuilder();
+    for (int cell = 0; cell < 10; cell++) {
+      int filled = Math.max(0, eighths - cell * 8);
+      bar.append(filled >= 8 ? "█" : filled > 0 ? partials[filled] : "░");
+    }
+    return "CTX " + bar + (used <= 0 ? " ———%"
+        : String.format(Locale.ROOT, " %3d%%", percent));
+  }
+
+  private static String composerPlaceholder(Composer config) {
+    if (config.queued() > 0) return config.queued() == 1
+        ? "press ↑ to edit queued"
+        : "↑ drain queue • ⌥↑/⌥↓ cycle items";
+    return switch (config.phase()) {
+      case AWAITING_PERMISSION -> "awaiting permission — respond above…";
+      case EXECUTING_TOOL -> "running tool — type to queue…";
+      case STREAMING -> "streaming — type to queue…";
+      default -> "type a message…";
+    };
+  }
+
+  private static String withCursor(String text, int cursor) {
+    return text.substring(0, cursor) + "█" + text.substring(cursor);
+  }
+
+  private static List<String> wrapLines(String value, int width) {
+    var rows = new ArrayList<String>();
+    for (String logical : value.split("\\n", -1)) {
+      String remaining = logical;
+      do {
+        if (columns(remaining) <= width) {
+          rows.add(remaining);
+          remaining = "";
+        } else {
+          int end = 0;
+          int used = 0;
+          while (end < remaining.length()) {
+            int codePoint = remaining.codePointAt(end);
+            int cellWidth = UnicodeWidth.of(codePoint);
+            if (used + cellWidth > width) break;
+            used += cellWidth;
+            end += Character.charCount(codePoint);
+          }
+          rows.add(remaining.substring(0, end));
+          remaining = remaining.substring(end);
+        }
+      } while (!remaining.isEmpty());
+    }
+    return List.copyOf(rows);
+  }
+
+  private static String compactModelBadge(String modelId) {
+    String value = modelId == null ? "" : modelId;
+    String lower = value.toLowerCase(Locale.ROOT);
+    String label = lower.contains("opus") ? "Opus"
+        : lower.contains("sonnet") ? "Sonnet"
+        : lower.contains("haiku") ? "Haiku"
+        : lower.contains("gpt") ? "GPT"
+        : lower.contains("gemini") ? "Gemini" : value;
+    return "● " + label;
+  }
+
+  private static String titleCase(String value) {
+    if (value.isEmpty()) return value;
+    return value.substring(0, 1).toUpperCase(Locale.ROOT)
+        + value.substring(1).toLowerCase(Locale.ROOT);
+  }
+
+  private static String letterSpaced(String value) {
+    return String.join(" ", value.toUpperCase(Locale.ROOT).chars()
+        .mapToObj(codePoint -> Character.toString(codePoint)).toList());
   }
 
   private static String contextGauge(int used, int maximum) {
@@ -275,7 +422,8 @@ public final class AppChrome {
   private static Row row(String text, Tone tone) { return new Row(text, tone); }
 
   private static String center(String value, int width) {
-    int padding = Math.max(0, width - columns(value)) / 2;
+    // Maya's two flex spacers assign an odd remainder to the leading spacer.
+    int padding = (Math.max(0, width - columns(value)) + 1) / 2;
     return " ".repeat(padding) + value;
   }
 

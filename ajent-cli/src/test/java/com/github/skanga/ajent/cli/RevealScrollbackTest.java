@@ -204,7 +204,8 @@ final class RevealScrollbackTest {
     for (int frame = 0; frame < 12; frame++) harness.frame(active());
     harness.settle();
     harness.assertNoDuplicates();
-    assertThat(harness.terminal.count("fatal: pathspec did not match any files")).isOne();
+    assertThat(harness.ui.renderedText()).as("logical failed tool output at %dx%d",
+        shape[0], shape[1]).contains("fatal: pathspec did not match any files");
   }
 
   private static void forEachShape(boolean includeTall, java.util.function.Consumer<int[]> scenario) {

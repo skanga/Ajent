@@ -15,8 +15,8 @@ final class AppChromeTest {
 
     assertThat(text(roomy))
         .contains("a calm middleware between you and the model")
-        .contains("Claude Opus 4 6")
-        .contains("WRITE")
+        .contains("● Opus")
+        .contains("▌ Write ▐")
         .contains("NEW HERE? TRY ONE OF THESE")
         .contains("Explain what this project does and how it's structured")
         .contains("Find and fix the bug in <file> — it <symptom>")
@@ -28,9 +28,39 @@ final class AppChromeTest {
     List<AppChrome.Row> narrow = AppChrome.welcome(new AppChrome.Welcome(
         "openai/gpt-5.4", Profile.ASK, false, 36, 4));
     assertThat(narrow).extracting(row -> row.text().strip()).contains("» A G E N T T Y");
-    assertThat(text(narrow)).contains("GPT 5.4", "ASK", "^K", "^J", "^C")
+    assertThat(text(narrow)).contains("● GPT", "▌ Ask ▐", "^K", "^J", "^C")
         .doesNotContain("palette", "NEW HERE");
     assertThat(narrow).hasSize(6);
+  }
+
+  @Test
+  void rendersNativeSixRowIdleComposerAndThreeRowStatusPanel() {
+    List<AppChrome.Row> composer = AppChrome.composer(new AppChrome.Composer(
+        "", 0, Profile.WRITE, AppChrome.Phase.IDLE, 0, false, 78));
+
+    assertThat(composer).hasSize(6);
+    assertThat(composer.getFirst().text()).startsWith("╭").endsWith("╮")
+        .hasSize(78);
+    assertThat(composer.get(1).text()).startsWith("│ ❯ █type a message…")
+        .endsWith(" │").hasSize(78);
+    assertThat(composer.get(2).text()).isEqualTo("│" + " ".repeat(76) + "│");
+    assertThat(composer.get(3).text()).startsWith("│   ─").endsWith(" │")
+        .hasSize(78);
+    assertThat(composer.get(4).text())
+        .contains("↵ send", "⇧↵ / ⌥↵ newline", "^E expand", "▎ W R I T E")
+        .hasSize(78);
+    assertThat(composer.getLast().text()).startsWith("╰").endsWith("╯")
+        .hasSize(78);
+
+    List<AppChrome.Row> status = AppChrome.statusPanel(new AppChrome.Status(
+        "", "Ollama", AppChrome.Phase.IDLE, "", 0, 32_768, 0, "", 78));
+    assertThat(status).hasSize(3);
+    assertThat(status.getFirst().text()).isEqualTo("─".repeat(78));
+    assertThat(status.get(1).text())
+        .startsWith(" ▌ ● Ready")
+        .contains("● Ollama · CTX", "░".repeat(10), "———%")
+        .hasSize(78);
+    assertThat(status.getLast().text()).isEqualTo("─".repeat(78));
   }
 
   @Test
@@ -118,6 +148,8 @@ final class AppChromeTest {
         -1, 0, 0, "", 80)).isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new AppChrome.Change("file", false, -1, 0))
         .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> new AppChrome.Composer("x", 2, Profile.WRITE,
+        AppChrome.Phase.IDLE, 0, false, 80)).isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> AppChrome.changes(
         List.of(new AppChrome.Change("file", true, 0, 0)), 3))
         .isInstanceOf(IllegalArgumentException.class);

@@ -35,6 +35,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   truncation, and structured changes.
 - A real Windows child-PTY characterization seam and executable startup/shutdown
   capture for deterministic 80x24 terminal comparisons.
+- A deterministic Unicode-width ANSI viewport emulator for executable terminal
+  differentials, with cursor, erase, scroll, wrap, OSC, and wide-cell coverage.
 
 ### Changed
 
@@ -66,10 +68,14 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched native large-file read outlining/leading slices, inclusive
   `end_line`, workspace recovery guidance, and the provider-plus-dispatcher
   two-stage output budget.
+- Matched AgenTTY's stable 80x24 startup viewport below the animated wordmark:
+  welcome alignment and compact labels, the six-row Maya composer, attachment
+  cursor projection, and the three-row provider/context status panel.
 
 ### Known limitations
 
-- Full native terminal visual differential capture remains under parity work.
+- Animated wordmark-frame and scripted live terminal differentials remain under
+  parity work; stable startup rows 7-23 now compare cell-for-cell.
 - OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's
   OpenAI-compatible transport uses Chat Completions and API keys.
 - The pinned AgenTTY 0.2.8 Windows binary has a positive `find_definition`

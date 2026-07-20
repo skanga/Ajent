@@ -198,7 +198,7 @@ final class InteractiveCommandTest {
     var agent = new FakeAgent(state);
     ui.render();
     assertThat(terminal.bytes.toString()).contains(
-        "a calm middleware between you and the mo", "^C", "Ready", "Anthropic");
+        "a calm middleware between you and the m", "^C", "Ready", "Anthropic");
 
     assertThat(ui.key(character('a'), agent)).isTrue();
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
@@ -305,7 +305,7 @@ final class InteractiveCommandTest {
 
     assertThat(terminal.bytes.toString()).contains(
         "NEW HERE? TRY ONE OF THESE", "Changes (1 files)", "M src/Main.java  +12 -3",
-        "Anthropic", "ctx", "19%");
+        "Anthropic", "CTX", "18%");
   }
 
   @Test void bracketedTextPasteAlwaysBecomesOneNormalizedAttachment() {
@@ -353,7 +353,7 @@ final class InteractiveCommandTest {
 
     ui.paste(png);
     assertThat(terminal.bytes.toString())
-        .contains("[Image \u00b7 <paste> \u00b7 image/png \u00b7 9 B]");
+        .contains("[Image \u00b7 <paste> \u00b7 image/png \u00b7 9", " B]");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     RuntimeMessage.Submit raw = (RuntimeMessage.Submit) agent.messages.getLast();
     assertThat(raw.attachments()).singleElement().satisfies(image -> {
@@ -443,7 +443,7 @@ final class InteractiveCommandTest {
     queryUi.key(character(22, true), queryAgent);
     assertThat(queryTerminal.bytes.toString())
         .contains(com.github.skanga.ajent.terminal.input.TerminalClipboardQuery.OSC_5522_KITTY)
-        .contains("reading clipboard from your terminal");
+        .contains("reading clipboard from your termin");
     assertThat(queryAgent.messages).isEmpty();
     queryUi.paste(png); // decoded OSC 5522 reply re-enters the ordinary paste path
     queryUi.key(special(TerminalKey.SpecialKey.ENTER), queryAgent);
@@ -1176,7 +1176,7 @@ final class InteractiveCommandTest {
     state.set(withPhase(AgentState.initial(thread(List.of(checkpointMessage("cp", "prompt")))),
         new SessionPhase.Streaming(ActiveTurn.start(new CancellationSignal(), 1))));
     selectCommand(ui, agent, "rewind");
-    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is wor");
+    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is w");
     state.set(AgentState.initial(thread(List.of(checkpointMessage("cp", "prompt")))));
     selectCommand(ui, agent, "rewind");
     ui.key(special(TerminalKey.SpecialKey.TAB), agent);
@@ -1204,7 +1204,7 @@ final class InteractiveCommandTest {
     assertThat(terminal.bytes.toString()).contains("no changes");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     selectCommand(ui, agent, "rewind");
-    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is wor");
+    assertThat(terminal.bytes.toString()).contains("cannot rewind while the agent is w");
     agent.completeCheckpointRestore();
   }
 
@@ -1667,14 +1667,14 @@ final class InteractiveCommandTest {
 
     animation.now += 16_000_000;
     animation.runFrame();
-    assertThat(terminal.bytes.toString()).doesNotContain("boundary-tool");
+    assertThat(terminal.bytes.toString()).doesNotContain("R U N N I N G");
 
     for (int index = 0; index < 110
-        && !terminal.bytes.toString().contains("boundary-tool"); index++) {
+        && !terminal.bytes.toString().contains("R U N N I N G"); index++) {
       animation.now += 16_000_000;
       animation.runFrame();
     }
-    assertThat(terminal.bytes.toString()).contains("boundary-tool");
+    assertThat(terminal.bytes.toString()).contains("R U N N I N G");
   }
 
   @Test void streamingAssistantMarkdownNeverExposesSourcePunctuation() {
