@@ -30,8 +30,10 @@ loopback OpenAI-compatible turns and compares their complete request sequences,
 including accepted, rejected, and two sequential tool-result continuations.
 This covers the native 22-tool provider subset and recall-biased order,
 system/user messages, output controls, tool-call replay, canonical argument
-encoding, and usage/stop
-stream handling without sending traffic to an external provider.
+encoding, and usage/stop stream handling without sending traffic to an external
+provider.
+The same gate holds a local SSE body open, cancels the turn through ACP, and
+requires the native local-HTTP cancellation error and prompt metadata.
 
 Ajent does not currently implement `/v1/responses`. That is an optional future
 extension, not part of the pinned AgenTTY behavior.

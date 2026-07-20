@@ -11,6 +11,7 @@ import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
+import com.github.skanga.ajent.domain.SessionPhase;
 import com.github.skanga.ajent.domain.Thread;
 import com.github.skanga.ajent.domain.ThreadId;
 import com.github.skanga.ajent.domain.ToolStatus;
@@ -657,6 +658,7 @@ public final class AcpJsonRpcServer {
     private final CompletableFuture<JsonNode> result;
     private final Map<String, Class<?>> statuses = new LinkedHashMap<>();
     private ObjectNode pendingUsage;
+    private SessionPhase lastPhase = new SessionPhase.Idle();
 
     private TurnProjection(
         Session session, Client client, CompletableFuture<JsonNode> result) {
@@ -666,6 +668,7 @@ public final class AcpJsonRpcServer {
     }
 
     private void seed(AgentState state) {
+      lastPhase = state.phase();
       seed(state.thread());
     }
 
@@ -679,9 +682,11 @@ public final class AcpJsonRpcServer {
       synchronized (AcpJsonRpcServer.this) {
         if (session.projection != this || result.isDone()) return;
         session.thread = state.thread();
+        SessionPhase previousPhase = lastPhase;
         projectMessage(message, state);
         projectTools(message, state);
-        projectCompletion(message, state);
+        projectCompletion(message, state, previousPhase);
+        lastPhase = state.phase();
       }
     }
 
@@ -758,11 +763,13 @@ public final class AcpJsonRpcServer {
       }
     }
 
-    private void projectCompletion(RuntimeMessage message, AgentState state) {
+    private void projectCompletion(
+        RuntimeMessage message, AgentState state, SessionPhase previousPhase) {
       if (!(state.phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle)) return;
       String stop = null;
       String failure = "";
       if (message instanceof RuntimeMessage.Cancel) {
+        if (previousPhase instanceof SessionPhase.Streaming) return;
         stop = "cancelled";
       } else if (message instanceof RuntimeMessage.ProviderEvent(
           long ignored, StreamEvent.Finished finished)) {

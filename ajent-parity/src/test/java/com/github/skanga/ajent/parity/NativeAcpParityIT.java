@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -186,8 +187,80 @@ final class NativeAcpParityIT {
     }
   }
 
+  @Test
+  void cancellationOfStalledProviderTurnMatchesPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-cancel-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-cancel-workspace"));
+    var activeGate = new AtomicReference<CancelGate>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = stalledProvider(activeGate, requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      CancelGate nativeGate = new CancelGate();
+      activeGate.set(nativeGate);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-cancel-home"), false)) {
+        nativeTranscript = exerciseCancellation(agent, nativeWorkspace, nativeGate);
+      } finally {
+        nativeGate.release().set(true);
+        assertThat(nativeGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+
+      CancelGate javaGate = new CancelGate();
+      activeGate.set(javaGate);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-cancel-home"), true)) {
+        javaTranscript = exerciseCancellation(agent, javaWorkspace, javaGate);
+      } finally {
+        javaGate.release().set(true);
+        assertThat(javaGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+
+      Transcript normalizedNative = normalizePrompt(nativeTranscript, nativeWorkspace, true);
+      Transcript normalizedJava = normalizePrompt(javaTranscript, javaWorkspace, false);
+      assertThat(firstDifference(normalizedNative, normalizedJava))
+          .as("native=%s%njava=%s", normalizedNative, normalizedJava).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("cancelled");
+    } finally {
+      CancelGate gate = activeGate.get();
+      if (gate != null) gate.release().set(true);
+      provider.stop(0);
+    }
+  }
+
   private static Transcript exercisePrompt(AgentProcess agent, Path workspace) throws Exception {
     return exercisePrompt(agent, workspace, "allow_once");
+  }
+
+  private static Transcript exerciseCancellation(
+      AgentProcess agent, Path workspace, CancelGate gate) throws Exception {
+    agent.call("initialize", JSON.readTree(
+        "{\"protocolVersion\":1,\"clientCapabilities\":{}}"));
+    List<JsonNode> created = agent.call("session/new", JSON.createObjectNode()
+        .put("cwd", workspace.toString()).set("mcpServers", JSON.createArrayNode()));
+    String sessionId = response(created).path("result").path("sessionId").textValue();
+    ObjectNode params = session(sessionId);
+    var prompt = JSON.createArrayNode();
+    prompt.addObject().put("type", "text").put("text", "wait until cancelled");
+    params.set("prompt", prompt);
+    int promptId = agent.sendRequest("session/prompt", params);
+    assertThat(gate.started().await(5, TimeUnit.SECONDS)).isTrue();
+    agent.sendNotification("session/cancel", session(sessionId));
+    return new Transcript(sessionId, List.of(agent.readUntilResponse(promptId, "")));
   }
 
   private static Transcript exercisePrompt(
@@ -290,10 +363,46 @@ final class NativeAcpParityIT {
     return server;
   }
 
+  private static HttpServer stalledProvider(
+      AtomicReference<CancelGate> activeGate, List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      CancelGate gate = activeGate.get();
+      try (exchange) {
+        requests.add(JSON.readTree(exchange.getRequestBody()).deepCopy());
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, 0);
+        byte[] heartbeat = ": waiting\n\n".getBytes(StandardCharsets.UTF_8);
+        while (!gate.release().get()) {
+          exchange.getResponseBody().write(heartbeat);
+          exchange.getResponseBody().flush();
+          gate.started().countDown();
+          java.util.concurrent.locks.LockSupport.parkNanos(10_000_000);
+        }
+      } catch (java.io.IOException ignored) {
+        // Cancellation closes the response stream.
+      } finally {
+        gate.started().countDown();
+        gate.finished().countDown();
+      }
+    });
+    return server;
+  }
+
   private static long permissionRequestCount(Transcript transcript) {
     return transcript.exchanges().stream().flatMap(List::stream)
         .filter(frame -> "session/request_permission".equals(frame.path("method").asText()))
         .count();
+  }
+
+  private record CancelGate(
+      java.util.concurrent.CountDownLatch started,
+      java.util.concurrent.CountDownLatch finished,
+      AtomicBoolean release) {
+    private CancelGate() {
+      this(new java.util.concurrent.CountDownLatch(1),
+          new java.util.concurrent.CountDownLatch(1), new AtomicBoolean());
+    }
   }
 
   private static Transcript exercise(AgentProcess agent, Path workspace) throws Exception {
@@ -567,24 +676,39 @@ final class NativeAcpParityIT {
     }
 
     List<JsonNode> call(String method, JsonNode params) throws Exception {
-      return call(method, params, "");
+      int id = sendRequest(method, params);
+      return readUntilResponse(id, "");
     }
 
     List<JsonNode> callWithPermission(String method, JsonNode params, String optionId)
         throws Exception {
-      return call(method, params, optionId);
+      int id = sendRequest(method, params);
+      return readUntilResponse(id, optionId);
     }
 
-    private List<JsonNode> call(String method, JsonNode params, String permissionOption)
-        throws Exception {
+    int sendRequest(String method, JsonNode params) throws Exception {
       int id = ++nextId;
       ObjectNode request = JSON.createObjectNode().put("jsonrpc", "2.0").put("id", id)
           .put("method", method);
       request.set("params", params);
-      stdin.write(JSON.writeValueAsString(request));
+      write(request);
+      return id;
+    }
+
+    void sendNotification(String method, JsonNode params) throws Exception {
+      ObjectNode notification = JSON.createObjectNode().put("jsonrpc", "2.0")
+          .put("method", method);
+      notification.set("params", params);
+      write(notification);
+    }
+
+    private void write(JsonNode frame) throws Exception {
+      stdin.write(JSON.writeValueAsString(frame));
       stdin.newLine();
       stdin.flush();
+    }
 
+    List<JsonNode> readUntilResponse(int id, String permissionOption) throws Exception {
       var frames = new ArrayList<JsonNode>();
       while (true) {
         String line = stdout.readLine();

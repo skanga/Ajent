@@ -239,7 +239,28 @@ class ProviderHttpTransportTest {
     new ProviderHttpTransport(HttpClient.newHttpClient())
         .streamOpenAi(request(false, new ProviderAuth.Empty()), events::add, () -> true);
 
-    assertThat(events).containsExactly(new StreamEvent.Error("cancelled"));
+    assertThat(events).containsExactly(new StreamEvent.Error(
+        "http: [cancelled] h1 plain stream  (is the server running? start it with "
+            + "'ollama serve', or check the --provider host:port)"));
+  }
+
+  @Test
+  void rendersNativeDialectSpecificCancellationDetails() throws Exception {
+    start(HttpExchange::close);
+    var transport = new ProviderHttpTransport(HttpClient.newHttpClient());
+    var anthropicEvents = new ArrayList<StreamEvent>();
+    var ollamaEvents = new ArrayList<StreamEvent>();
+
+    transport.streamAnthropic(
+        anthropicRequest(new ProviderAuth.ApiKey("key")), anthropicEvents::add, () -> true);
+    transport.streamOllama(
+        request(false, new ProviderAuth.Empty()), ollamaEvents::add, () -> true);
+
+    assertThat(anthropicEvents).containsExactly(
+        new StreamEvent.Error("http: [cancelled] h1 plain stream"));
+    assertThat(ollamaEvents).containsExactly(new StreamEvent.Error(
+        "http: [cancelled] h1 plain stream  (is Ollama running? start it with "
+            + "'ollama serve', or check --provider host:port)"));
   }
 
   @Test
@@ -273,7 +294,9 @@ class ProviderHttpTransportTest {
     }
 
     assertThat(events).containsExactly(
-        new StreamEvent.TextDelta("started"), new StreamEvent.Error("cancelled"));
+        new StreamEvent.TextDelta("started"), new StreamEvent.Error(
+            "http: [cancelled] h1 plain stream  (is the server running? start it with "
+                + "'ollama serve', or check the --provider host:port)"));
   }
 
   @Test

@@ -78,7 +78,7 @@ public final class ProviderHttpTransport {
         ? OpenAiStreamDecoder.ndjson(toolNames(request))
         : OpenAiStreamDecoder.sse(toolNames(request));
     stream(OpenAiWire.buildHttpRequest(request), decoder::feed, decoder::end,
-        sink, cancelled);
+        sink, cancelled, ProviderHttpTransport::openAiCancelledMessage);
   }
 
   public void streamAnthropic(
@@ -94,23 +94,15 @@ public final class ProviderHttpTransport {
     var decoder = debug == null
         ? new AnthropicStreamDecoder() : new AnthropicStreamDecoder(debug::event);
     stream(AnthropicWire.buildHttpRequest(request), decoder::feed, decoder::end,
-        sink, cancelled, ProviderHttpTransport::anthropicHttpError, debug);
+        sink, cancelled, ProviderHttpTransport::anthropicHttpError, debug,
+        ProviderHttpTransport::baseCancelledMessage);
   }
 
   public void streamOllama(
       ChatRequest request, Consumer<StreamEvent> sink, BooleanSupplier cancelled) {
     var decoder = new OllamaStreamDecoder(toolNames(request), request.jsonProtocol());
     stream(OllamaWire.buildHttpRequest(request), decoder::feed, decoder::end,
-        sink, cancelled);
-  }
-
-  private void stream(
-      HttpRequest request,
-      java.util.function.Function<byte[], List<StreamEvent>> feed,
-      java.util.function.Supplier<List<StreamEvent>> end,
-      Consumer<StreamEvent> sink,
-      BooleanSupplier cancelled) {
-    stream(request, feed, end, sink, cancelled, ProviderHttpTransport::httpError);
+        sink, cancelled, ProviderHttpTransport::ollamaCancelledMessage);
   }
 
   private void stream(
@@ -119,8 +111,9 @@ public final class ProviderHttpTransport {
       java.util.function.Supplier<List<StreamEvent>> end,
       Consumer<StreamEvent> sink,
       BooleanSupplier cancelled,
-      java.util.function.BiFunction<Integer, byte[], String> errorFormatter) {
-    stream(request, feed, end, sink, cancelled, errorFormatter, null);
+      java.util.function.Function<HttpRequest, String> cancelledMessage) {
+    stream(request, feed, end, sink, cancelled, ProviderHttpTransport::httpError, null,
+        cancelledMessage);
   }
 
   private void stream(
@@ -130,18 +123,20 @@ public final class ProviderHttpTransport {
       Consumer<StreamEvent> sink,
       BooleanSupplier cancelled,
       java.util.function.BiFunction<Integer, byte[], String> errorFormatter,
-      ApiDebugLog requestDebug) {
+      ApiDebugLog requestDebug,
+      java.util.function.Function<HttpRequest, String> cancelledMessage) {
     Objects.requireNonNull(sink, "sink");
     Objects.requireNonNull(cancelled, "cancelled");
     Objects.requireNonNull(errorFormatter, "errorFormatter");
+    Objects.requireNonNull(cancelledMessage, "cancelledMessage");
     if (cancelled.getAsBoolean()) {
-      sink.accept(new StreamEvent.Error("cancelled"));
+      sink.accept(new StreamEvent.Error(cancelledMessage.apply(request)));
       return;
     }
     try {
       HttpResponse<InputStream> response = awaitResponse(request, cancelled);
       if (response == null) {
-        sink.accept(new StreamEvent.Error("cancelled"));
+        sink.accept(new StreamEvent.Error(cancelledMessage.apply(request)));
         return;
       }
       if (requestDebug != null) requestDebug.write(
@@ -184,7 +179,7 @@ public final class ProviderHttpTransport {
         if (terminalEvent) return;
         if (closeReason.get() != null) {
           sink.accept(closeReason.get() == CloseReason.CANCELLED
-              ? new StreamEvent.Error("cancelled")
+              ? new StreamEvent.Error(cancelledMessage.apply(request))
               : new StreamEvent.Error("http: idle timeout (no bytes for "
                   + streamIdleTimeout.toSeconds() + "s)", Optional.empty(),
                   ErrorClass.TRANSIENT, false));
@@ -282,6 +277,24 @@ public final class ProviderHttpTransport {
     } catch (IOException ignored) {
       return "HTTP " + status + ": " + text;
     }
+  }
+
+  private static String baseCancelledMessage(HttpRequest request) {
+    return "http: [cancelled] " + ("http".equalsIgnoreCase(request.uri().getScheme())
+        ? "h1 plain stream" : "stream aborted by caller");
+  }
+
+  private static String openAiCancelledMessage(HttpRequest request) {
+    String message = baseCancelledMessage(request);
+    return "http".equalsIgnoreCase(request.uri().getScheme())
+        ? message + "  (is the server running? start it with 'ollama serve', or check "
+            + "the --provider host:port)"
+        : message;
+  }
+
+  private static String ollamaCancelledMessage(HttpRequest request) {
+    return baseCancelledMessage(request)
+        + "  (is Ollama running? start it with 'ollama serve', or check --provider host:port)";
   }
 
   private static String anthropicHttpError(int status, byte[] body) {

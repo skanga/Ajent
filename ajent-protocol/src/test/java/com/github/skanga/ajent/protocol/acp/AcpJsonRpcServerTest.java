@@ -655,6 +655,7 @@ final class AcpJsonRpcServerTest {
                     while (!cancellation.isCancelled()) {
                       java.util.concurrent.locks.LockSupport.parkNanos(1_000_000);
                     }
+                    sink.accept(new StreamEvent.Error("cancelled"));
                   } else {
                     sink.accept(new StreamEvent.TextDelta("independent"));
                     sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
@@ -689,6 +690,8 @@ final class AcpJsonRpcServerTest {
     result(server, 5, "session/cancel", "{\"sessionId\":\"session-1\"}");
     assertThat(parse(first.get(5, java.util.concurrent.TimeUnit.SECONDS).getLast())
         .path("result").path("stopReason").textValue()).isEqualTo("cancelled");
+    assertThat(parse(first.get().getLast()).at("/result/_meta/error").textValue())
+        .isEqualTo("cancelled");
     assertThat(parse(second.getLast()).path("result").path("stopReason").textValue())
         .isEqualTo("end_turn");
     assertThat(result(server, 6, "session/cancel",
