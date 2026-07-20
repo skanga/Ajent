@@ -26,6 +26,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Native-executable Ollama characterization for `/api/chat` request bodies,
   fragmented NDJSON, persisted images, native and weak-model JSON-protocol tool
   execution/continuation, HTTP errors, and live cancellation.
+- Native-executable Anthropic characterization for exact Messages API requests,
+  fragmented SSE, tool execution/continuation, HTTP errors, and cancellation.
 
 ### Changed
 
@@ -49,6 +51,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   recovery hint.
 - Matched Ollama's UTF-8-byte tool-description truncation and recursively
   canonical JSON-protocol continuation history.
+- Matched Anthropic's request prompt terminator and ACP projection of the latest
+  provider usage frame; documented three source-defined fields absent from the
+  downloaded 0.2.8 binary.
 
 ### Known limitations
 

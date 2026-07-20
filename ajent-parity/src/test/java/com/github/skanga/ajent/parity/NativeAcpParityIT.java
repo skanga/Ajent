@@ -356,6 +356,221 @@ final class NativeAcpParityIT {
   }
 
   @Test
+  void nativeAnthropicRequestAndFragmentedSseMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-anthropic-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-anthropic-workspace"));
+    var captures = new java.util.concurrent.CopyOnWriteArrayList<HostedCapture>();
+    HostedH2Server provider = hostedAnthropicProvider(captures);
+    provider.start();
+    Map<String, String> environment = hostedEnvironment(provider);
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(commandWithKey(
+          nativeBinary, nativeWorkspace, "anthropic"),
+          root.resolve("native-anthropic-home"), false, environment)) {
+        nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "anthropic parity probe");
+      }
+      assertThat(captures).hasSize(1);
+      HostedCapture nativeCapture = captures.getFirst();
+
+      captures.clear();
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommandWithKey(
+          ajentJar, javaWorkspace, "anthropic"),
+          root.resolve("java-anthropic-home"), true, environment)) {
+        javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "anthropic parity probe");
+      }
+      assertThat(captures).hasSize(1);
+      HostedCapture javaCapture = captures.getFirst();
+
+      assertThat(nativeCapture.path()).isEqualTo("/v1/messages?beta=true");
+      assertThat(javaCapture.path()).isEqualTo("/v1/messages?beta=true");
+      assertGeneratedAnthropicUserId(nativeCapture.body());
+      assertGeneratedAnthropicUserId(javaCapture.body());
+      HostedCapture normalizedNative = normalizeHostedCapture(
+          nativeCapture, nativeWorkspace, true);
+      HostedCapture normalizedJava = normalizeHostedCapture(
+          javaCapture, javaWorkspace, false);
+      assertThat(normalizedNative.selectedHeaders()).isEqualTo(normalizedJava.selectedHeaders());
+      assertThat(normalizedNative.body().at("/system/0/text").textValue())
+          .doesNotContain("<big-codebases>", "<in-house-languages>");
+      assertThat(normalizedJava.body().at("/system/0/text").textValue())
+          .contains("<big-codebases>", "<in-house-languages>");
+      assertThat(Files.readString(
+          repository.resolve("agentty/src/provider/anthropic/transport.cpp")))
+          .contains("<big-codebases>", "<in-house-languages>");
+      assertThat(toolByName(normalizedNative.body(), "todo").has("eager_input_streaming"))
+          .isFalse();
+      assertThat(toolByName(normalizedJava.body(), "todo").path("eager_input_streaming")
+          .booleanValue()).isTrue();
+      assertThat(Files.readString(repository.resolve("agentty/include/agentty/tool/spec.hpp")))
+          .containsPattern("ToolSpec\\{\"todo\"[^\\r\\n]+true,");
+      assertThat(firstJsonListDifference(
+          List.of(withoutSourceAheadAnthropicFields(normalizedNative.body())),
+          List.of(withoutSourceAheadAnthropicFields(normalizedJava.body())))).isEmpty();
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("end_turn");
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void nativeAnthropicToolCallAndContinuationMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-anthropic-tool-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-anthropic-tool-workspace"));
+    var target = new AtomicReference<Path>();
+    var captures = new java.util.concurrent.CopyOnWriteArrayList<HostedCapture>();
+    HostedH2Server provider = hostedAnthropicToolProvider(target, captures);
+    provider.start();
+    Map<String, String> environment = hostedEnvironment(provider);
+    try {
+      Path nativeTarget = nativeWorkspace.resolve("anthropic-tool.txt");
+      target.set(nativeTarget);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(commandWithKey(
+          nativeBinary, nativeWorkspace, "anthropic"),
+          root.resolve("native-anthropic-tool-home"), false, environment)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace, "allow_always");
+      }
+      List<HostedCapture> nativeCaptures = List.copyOf(captures);
+      captures.clear();
+      assertThat(nativeTarget).hasContent("written by anthropic\n");
+
+      Path javaTarget = javaWorkspace.resolve("anthropic-tool.txt");
+      target.set(javaTarget);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommandWithKey(
+          ajentJar, javaWorkspace, "anthropic"),
+          root.resolve("java-anthropic-tool-home"), true, environment)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace, "allow_always");
+      }
+      List<HostedCapture> javaCaptures = List.copyOf(captures);
+      assertThat(javaTarget).hasContent("written by anthropic\n");
+
+      assertThat(nativeCaptures).hasSize(2);
+      assertThat(javaCaptures).hasSize(2);
+      assertAnthropicCapturesMatch(
+          nativeCaptures, javaCaptures, nativeWorkspace, javaWorkspace);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void nativeAnthropicHttpErrorMatchesPinnedExecutable(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-anthropic-error-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-anthropic-error-workspace"));
+    var captures = new java.util.concurrent.CopyOnWriteArrayList<HostedCapture>();
+    HostedH2Server provider = hostedAnthropicErrorProvider(captures);
+    provider.start();
+    Map<String, String> environment = hostedEnvironment(provider);
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(commandWithKey(
+          nativeBinary, nativeWorkspace, "anthropic"),
+          root.resolve("native-anthropic-error-home"), false, environment)) {
+        nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "fail once");
+      }
+      List<HostedCapture> nativeCaptures = List.copyOf(captures);
+      captures.clear();
+
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommandWithKey(
+          ajentJar, javaWorkspace, "anthropic"),
+          root.resolve("java-anthropic-error-home"), true, environment)) {
+        javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "fail once");
+      }
+      List<HostedCapture> javaCaptures = List.copyOf(captures);
+
+      assertThat(nativeCaptures).hasSize(1);
+      assertThat(javaCaptures).hasSize(1);
+      assertAnthropicCapturesMatch(
+          nativeCaptures, javaCaptures, nativeWorkspace, javaWorkspace);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("refusal");
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void nativeAnthropicCancellationMatchesPinnedExecutable(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-anthropic-cancel-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-anthropic-cancel-workspace"));
+    var activeGate = new AtomicReference<CancelGate>();
+    var captures = new java.util.concurrent.CopyOnWriteArrayList<HostedCapture>();
+    HostedH2Server provider = hostedAnthropicStalledProvider(activeGate, captures);
+    provider.start();
+    Map<String, String> environment = hostedEnvironment(provider);
+    try {
+      CancelGate nativeGate = new CancelGate();
+      activeGate.set(nativeGate);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(commandWithKey(
+          nativeBinary, nativeWorkspace, "anthropic"),
+          root.resolve("native-anthropic-cancel-home"), false, environment)) {
+        nativeTranscript = exerciseCancellation(agent, nativeWorkspace, nativeGate);
+      } finally {
+        nativeGate.release().set(true);
+        assertThat(nativeGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      }
+      List<HostedCapture> nativeCaptures = List.copyOf(captures);
+      captures.clear();
+
+      CancelGate javaGate = new CancelGate();
+      activeGate.set(javaGate);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommandWithKey(
+          ajentJar, javaWorkspace, "anthropic"),
+          root.resolve("java-anthropic-cancel-home"), true, environment)) {
+        javaTranscript = exerciseCancellation(agent, javaWorkspace, javaGate);
+      } finally {
+        javaGate.release().set(true);
+        assertThat(javaGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      }
+      List<HostedCapture> javaCaptures = List.copyOf(captures);
+
+      assertThat(nativeCaptures).hasSize(1);
+      assertThat(javaCaptures).hasSize(1);
+      assertAnthropicCapturesMatch(
+          nativeCaptures, javaCaptures, nativeWorkspace, javaWorkspace);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("cancelled");
+    } finally {
+      CancelGate gate = activeGate.get();
+      if (gate != null) gate.release().set(true);
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void livePromptPermissionToolAndContinuationMatchPinnedExecutable(@TempDir Path root)
       throws Exception {
     Path repository = repositoryRoot();
@@ -1486,11 +1701,205 @@ final class NativeAcpParityIT {
     });
   }
 
+  private static HostedH2Server hostedAnthropicProvider(List<HostedCapture> captures)
+      throws Exception {
+    return new HostedH2Server((request, response, callback) -> {
+      captures.add(anthropicHostedCapture(request));
+      String body = anthropicEvent("message_start", """
+          {"type":"message_start","message":{"id":"msg_parity","type":"message",
+           "role":"assistant","content":[],"model":"parity-model","stop_reason":null,
+           "stop_sequence":null,"usage":{"input_tokens":123,"output_tokens":1,
+           "cache_creation_input_tokens":2,"cache_read_input_tokens":3}}}
+          """)
+          + anthropicEvent("ping", "{\"type\":\"ping\"}")
+          + anthropicEvent("content_block_start", """
+              {"type":"content_block_start","index":0,
+               "content_block":{"type":"text","text":""}}
+              """)
+          + anthropicEvent("content_block_delta", """
+              {"type":"content_block_delta","index":0,
+               "delta":{"type":"text_delta","text":"Anthropic parity "}}
+              """)
+          + anthropicEvent("content_block_delta", """
+              {"type":"content_block_delta","index":0,
+               "delta":{"type":"text_delta","text":"reply."}}
+              """)
+          + anthropicEvent("content_block_stop",
+              "{\"type\":\"content_block_stop\",\"index\":0}")
+          + anthropicEvent("message_delta", """
+              {"type":"message_delta","delta":{"stop_reason":"end_turn",
+               "stop_sequence":null},"usage":{"output_tokens":7}}
+              """)
+          + anthropicEvent("message_stop", "{\"type\":\"message_stop\"}");
+      response.setStatus(200);
+      response.getHeaders().put("content-type", "text/event-stream");
+      writeFragmented(response, body.getBytes(StandardCharsets.UTF_8), 7, callback);
+    });
+  }
+
+  private static HostedH2Server hostedAnthropicToolProvider(
+      AtomicReference<Path> target, List<HostedCapture> captures) throws Exception {
+    return new HostedH2Server((request, response, callback) -> {
+      HostedCapture capture = anthropicHostedCapture(request);
+      captures.add(capture);
+      boolean continuation = false;
+      for (JsonNode message : capture.body().path("messages")) {
+        for (JsonNode block : message.path("content")) {
+          if ("tool_result".equals(block.path("type").asText())) continuation = true;
+        }
+      }
+      String body;
+      if (continuation) {
+        body = anthropicMessageStart(250, 5, 6)
+            + anthropicEvent("content_block_start", """
+                {"type":"content_block_start","index":0,
+                 "content_block":{"type":"text","text":""}}
+                """)
+            + anthropicEvent("content_block_delta", """
+                {"type":"content_block_delta","index":0,
+                 "delta":{"type":"text_delta","text":"Anthropic tool complete."}}
+                """)
+            + anthropicEvent("content_block_stop",
+                "{\"type\":\"content_block_stop\",\"index\":0}")
+            + anthropicMessageDelta("end_turn", 8)
+            + anthropicEvent("message_stop", "{\"type\":\"message_stop\"}");
+      } else {
+        String arguments = JSON.writeValueAsString(JSON.createObjectNode()
+            .put("file_path", target.get().toString())
+            .put("content", "written by anthropic\n"));
+        int split = arguments.length() / 2;
+        body = anthropicMessageStart(200, 10, 20)
+            + anthropicEvent("content_block_start", """
+                {"type":"content_block_start","index":0,
+                 "content_block":{"type":"text","text":""}}
+                """)
+            + anthropicEvent("content_block_delta", """
+                {"type":"content_block_delta","index":0,
+                 "delta":{"type":"text_delta","text":"Writing with Anthropic."}}
+                """)
+            + anthropicEvent("content_block_stop",
+                "{\"type\":\"content_block_stop\",\"index\":0}")
+            + anthropicEvent("content_block_start", """
+                {"type":"content_block_start","index":1,
+                 "content_block":{"type":"tool_use","id":"toolu_write_0",
+                 "name":"write","input":{}}}
+                """)
+            + anthropicInputDelta(1, arguments.substring(0, split))
+            + anthropicInputDelta(1, arguments.substring(split))
+            + anthropicEvent("content_block_stop",
+                "{\"type\":\"content_block_stop\",\"index\":1}")
+            + anthropicMessageDelta("tool_use", 12)
+            + anthropicEvent("message_stop", "{\"type\":\"message_stop\"}");
+      }
+      response.setStatus(200);
+      response.getHeaders().put("content-type", "text/event-stream");
+      writeFragmented(response, body.getBytes(StandardCharsets.UTF_8), 5, callback);
+    });
+  }
+
+  private static HostedH2Server hostedAnthropicErrorProvider(List<HostedCapture> captures)
+      throws Exception {
+    return new HostedH2Server((request, response, callback) -> {
+      captures.add(anthropicHostedCapture(request));
+      byte[] body = "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\","
+          .concat("\"message\":\"slow down\"}}")
+          .getBytes(StandardCharsets.UTF_8);
+      response.setStatus(429);
+      response.getHeaders().put("content-type", "application/json");
+      response.getHeaders().put("retry-after", "3");
+      response.write(true, ByteBuffer.wrap(body), callback);
+    });
+  }
+
+  private static String anthropicMessageStart(
+      int inputTokens, int cacheCreationTokens, int cacheReadTokens) {
+    ObjectNode event = JSON.createObjectNode().put("type", "message_start");
+    ObjectNode message = event.putObject("message").put("id", "msg_parity")
+        .put("type", "message").put("role", "assistant").put("model", "parity-model");
+    message.putArray("content");
+    message.putNull("stop_reason").putNull("stop_sequence");
+    message.putObject("usage").put("input_tokens", inputTokens).put("output_tokens", 0)
+        .put("cache_creation_input_tokens", cacheCreationTokens)
+        .put("cache_read_input_tokens", cacheReadTokens);
+    return anthropicEvent("message_start", event.toString());
+  }
+
+  private static String anthropicMessageDelta(String stopReason, int outputTokens) {
+    ObjectNode event = JSON.createObjectNode().put("type", "message_delta");
+    event.putObject("delta").put("stop_reason", stopReason).putNull("stop_sequence");
+    event.putObject("usage").put("output_tokens", outputTokens);
+    return anthropicEvent("message_delta", event.toString());
+  }
+
+  private static String anthropicInputDelta(int index, String partialJson) {
+    ObjectNode event = JSON.createObjectNode().put("type", "content_block_delta")
+        .put("index", index);
+    event.putObject("delta").put("type", "input_json_delta").put("partial_json", partialJson);
+    return anthropicEvent("content_block_delta", event.toString());
+  }
+
+  private static String anthropicEvent(String event, String data) {
+    try {
+      return "event: " + event + "\ndata: "
+          + JSON.writeValueAsString(JSON.readTree(data)) + "\n\n";
+    } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+      throw new IllegalArgumentException("invalid Anthropic fixture JSON", exception);
+    }
+  }
+
+  private static void writeFragmented(
+      Response response, byte[] body, int fragmentBytes, Callback callback) {
+    writeFragmented(response, body, fragmentBytes, 0, callback);
+  }
+
+  private static void writeFragmented(
+      Response response, byte[] body, int fragmentBytes, int offset, Callback callback) {
+    int length = Math.min(fragmentBytes, body.length - offset);
+    boolean last = offset + length == body.length;
+    response.write(last, ByteBuffer.wrap(body, offset, length), Callback.from(
+        () -> {
+          if (last) callback.succeeded();
+          else writeFragmented(response, body, fragmentBytes, offset + length, callback);
+        }, callback::failed));
+  }
+
   private static HostedH2Server hostedStalledProvider(
       AtomicReference<CancelGate> activeGate, List<HostedCapture> captures) throws Exception {
     return new HostedH2Server((request, response, callback) -> {
       CancelGate gate = activeGate.get();
       captures.add(hostedCapture(request));
+      response.setStatus(200);
+      response.getHeaders().put("content-type", "text/event-stream");
+      byte[] heartbeat = ": waiting\n\n".getBytes(StandardCharsets.UTF_8);
+      response.write(false, ByteBuffer.wrap(heartbeat), Callback.from(
+          gate.started()::countDown,
+          failure -> {
+            gate.started().countDown();
+            gate.finished().countDown();
+            callback.failed(failure);
+          }));
+      java.lang.Thread.startVirtualThread(() -> {
+        while (!gate.release().get()) {
+          java.util.concurrent.locks.LockSupport.parkNanos(10_000_000);
+        }
+        response.write(true, ByteBuffer.allocate(0), Callback.from(
+            () -> {
+              gate.finished().countDown();
+              callback.succeeded();
+            },
+            failure -> {
+              gate.finished().countDown();
+              callback.failed(failure);
+            }));
+      });
+    });
+  }
+
+  private static HostedH2Server hostedAnthropicStalledProvider(
+      AtomicReference<CancelGate> activeGate, List<HostedCapture> captures) throws Exception {
+    return new HostedH2Server((request, response, callback) -> {
+      CancelGate gate = activeGate.get();
+      captures.add(anthropicHostedCapture(request));
       response.setStatus(200);
       response.getHeaders().put("content-type", "text/event-stream");
       byte[] heartbeat = ": waiting\n\n".getBytes(StandardCharsets.UTF_8);
@@ -1538,6 +1947,18 @@ final class NativeAcpParityIT {
     return new HostedCapture(request.getHttpURI().getPath(), headers, body.deepCopy());
   }
 
+  private static HostedCapture anthropicHostedCapture(Request request) throws IOException {
+    JsonNode body = JSON.readTree(Content.Source.asString(request));
+    var headers = new java.util.TreeMap<String, String>();
+    for (String name : List.of("accept", "anthropic-beta", "anthropic-dangerous-direct-browser-access",
+        "anthropic-version", "content-type", "user-agent", "x-api-key", "x-app",
+        "x-stainless-retry-count", "x-stainless-timeout")) {
+      headers.put(name, header(request, name));
+    }
+    return new HostedCapture(request.getHttpURI().getPathQuery(), Map.copyOf(headers),
+        body.deepCopy());
+  }
+
   private static String header(Request request, String name) {
     String value = request.getHeaders().get(name);
     return value == null ? "" : value;
@@ -1553,10 +1974,36 @@ final class NativeAcpParityIT {
       HostedCapture capture, Path workspace, boolean nativeAgent) {
     var headers = new java.util.TreeMap<>(capture.selectedHeaders());
     if (nativeAgent) {
-      headers.computeIfPresent("user-agent", (ignored, value) -> value.replace("agentty", "ajent"));
+      headers.replaceAll((ignored, value) -> value.replace("agentty", "ajent"));
     }
     JsonNode body = normalizeRequests(List.of(capture.body()), workspace, nativeAgent).getFirst();
     return new HostedCapture(capture.path(), Map.copyOf(headers), body);
+  }
+
+  private static void assertAnthropicCapturesMatch(
+      List<HostedCapture> nativeCaptures,
+      List<HostedCapture> javaCaptures,
+      Path nativeWorkspace,
+      Path javaWorkspace) throws Exception {
+    assertThat(nativeCaptures).hasSameSizeAs(javaCaptures).isNotEmpty();
+    for (int index = 0; index < nativeCaptures.size(); index++) {
+      HostedCapture nativeCapture = nativeCaptures.get(index);
+      HostedCapture javaCapture = javaCaptures.get(index);
+      assertThat(nativeCapture.path()).isEqualTo("/v1/messages?beta=true");
+      assertThat(javaCapture.path()).isEqualTo("/v1/messages?beta=true");
+      assertGeneratedAnthropicUserId(nativeCapture.body());
+      assertGeneratedAnthropicUserId(javaCapture.body());
+      HostedCapture normalizedNative = normalizeHostedCapture(
+          nativeCapture, nativeWorkspace, true);
+      HostedCapture normalizedJava = normalizeHostedCapture(
+          javaCapture, javaWorkspace, false);
+      assertThat(normalizedNative.selectedHeaders()).isEqualTo(normalizedJava.selectedHeaders());
+      assertThat(firstJsonListDifference(
+          List.of(withoutSourceAheadAnthropicFields(normalizedNative.body())),
+          List.of(withoutSourceAheadAnthropicFields(normalizedJava.body()))))
+          .as("Anthropic request %s", index + 1)
+          .isEmpty();
+    }
   }
 
   private static HttpServer stalledProvider(
@@ -1744,7 +2191,72 @@ final class NativeAcpParityIT {
         .map(request -> normalize(request, "__NO_SESSION__", nativeProgram))
         .map(request -> replaceText(request, workspaceText, "<WORKSPACE>"))
         .map(request -> replaceText(request, jsonEncodedWorkspace, "<WORKSPACE>"))
+        .map(NativeAcpParityIT::normalizeGeneratedProviderMetadata)
         .toList();
+  }
+
+  private static JsonNode normalizeGeneratedProviderMetadata(JsonNode value) {
+    if (value.isObject()) {
+      ObjectNode result = JSON.createObjectNode();
+      value.properties().forEach(entry -> result.set(entry.getKey(),
+          normalizeGeneratedProviderMetadata(entry.getValue())));
+      JsonNode userId = result.path("user_id");
+      if (userId.isTextual()) {
+        try {
+          JsonNode identity = JSON.readTree(userId.textValue());
+          if (identity.isObject()
+              && identity.path("device_id").asText().matches("[0-9a-f]{32}")
+              && identity.path("session_id").asText().matches("[0-9a-f]{32}")) {
+            ObjectNode normalized = (ObjectNode) identity;
+            normalized.put("device_id", "<DEVICE>");
+            normalized.put("session_id", "<SESSION>");
+            result.put("user_id", JSON.writeValueAsString(normalized));
+          }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
+          // Non-Anthropic user_id values remain exact.
+        }
+      }
+      return result;
+    }
+    if (value.isArray()) {
+      var result = JSON.createArrayNode();
+      value.forEach(item -> result.add(normalizeGeneratedProviderMetadata(item)));
+      return result;
+    }
+    return value.deepCopy();
+  }
+
+  private static JsonNode withoutSourceAheadAnthropicFields(JsonNode body) {
+    ObjectNode result = body.deepCopy();
+    JsonNode prompt = result.at("/system/0/text");
+    if (prompt.isTextual()) {
+      String text = prompt.textValue()
+          .replaceAll("(?s)<big-codebases>\\n.*?</big-codebases>\\n\\n", "")
+          .replaceAll("(?s)<in-house-languages>\\n.*?</in-house-languages>\\n\\n", "");
+      ((ObjectNode) result.at("/system/0")).put("text", text);
+    }
+    for (JsonNode tool : result.path("tools")) {
+      if ("todo".equals(tool.path("name").asText()) && tool instanceof ObjectNode object) {
+        object.remove("eager_input_streaming");
+      }
+    }
+    return result;
+  }
+
+  private static JsonNode toolByName(JsonNode body, String name) {
+    for (JsonNode tool : body.path("tools")) {
+      if (name.equals(tool.path("name").asText())) return tool;
+    }
+    throw new AssertionError("missing provider tool " + name);
+  }
+
+  private static void assertGeneratedAnthropicUserId(JsonNode body) throws Exception {
+    JsonNode identity = JSON.readTree(body.at("/metadata/user_id").textValue());
+    var names = new java.util.TreeSet<String>();
+    identity.fieldNames().forEachRemaining(names::add);
+    assertThat(names).containsExactly("device_id", "session_id");
+    assertThat(identity.path("device_id").textValue()).matches("[0-9a-f]{32}");
+    assertThat(identity.path("session_id").textValue()).matches("[0-9a-f]{32}");
   }
 
   private static List<JsonNode> sortedNormalizedRequests(
@@ -1840,6 +2352,20 @@ final class NativeAcpParityIT {
       return actual.decimalValue().compareTo(expected.decimalValue()) == 0 ? ""
           : path + ": expected " + expected + " but was " + actual;
     }
+    if (actual.isTextual() && expected.isTextual()) {
+      String left = actual.textValue();
+      String right = expected.textValue();
+      if (left.equals(right)) return "";
+      int index = 0;
+      while (index < left.length() && index < right.length()
+          && left.charAt(index) == right.charAt(index)) index++;
+      int start = Math.max(0, index - 40);
+      int leftEnd = Math.min(left.length(), index + 80);
+      int rightEnd = Math.min(right.length(), index + 80);
+      return path + ": text mismatch at char " + index + ", expected "
+          + quoted(right.substring(start, rightEnd)) + " but was "
+          + quoted(left.substring(start, leftEnd));
+    }
     if (actual.isObject() && expected.isObject()) {
       var actualNames = new java.util.TreeSet<String>();
       var expectedNames = new java.util.TreeSet<String>();
@@ -1867,6 +2393,14 @@ final class NativeAcpParityIT {
     }
     return actual.equals(expected) ? ""
         : path + ": expected " + expected + " but was " + actual;
+  }
+
+  private static String quoted(String value) {
+    try {
+      return JSON.writeValueAsString(value);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+      throw new AssertionError("cannot quote diagnostic text", impossible);
+    }
   }
 
   private static JsonNode normalizePromptFrame(JsonNode frame, Path workspace) {
@@ -1926,7 +2460,11 @@ final class NativeAcpParityIT {
     if (value.isIntegralNumber()) return JSON.getNodeFactory().numberNode(value.longValue());
     if (!value.isTextual()) return value.deepCopy();
     String text = value.textValue().replace(sessionId, "<SESSION>");
-    if (nativeProgram) text = text.replace("agentty", "ajent");
+    if (nativeProgram) {
+      text = text.replace(".agentty", "<AGENT_DATA_DIRECTORY>")
+          .replace("agentty", "ajent")
+          .replace("<AGENT_DATA_DIRECTORY>", ".agentty");
+    }
     return JSON.getNodeFactory().textNode(text);
   }
 

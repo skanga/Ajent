@@ -55,9 +55,15 @@
     },
     {
       "id": "provider-anthropic",
-      "status": "planned",
+      "status": "native-executable-green",
       "sources": ["agentty/src/provider/anthropic/transport.cpp", "agentty/tests/anthropic_md_stream.cpp"],
-      "cases": ["request headers/body", "fragmented SSE", "text", "tool calls", "usage", "stop reasons", "errors", "retries", "cancel"]
+      "cases": ["request headers/body", "fragmented SSE", "text", "tool calls", "usage", "stop reasons", "errors", "retries", "cancel"],
+      "javaEvidence": [
+        "com.github.skanga.ajent.parity.NativeAcpParityIT",
+        "mvn -q verify -Pcharacterization: exact Anthropic Messages API path, headers, complete initial and tool-result continuation bodies, fragmented SSE text/tool/usage decoding, permissioned filesystem execution, one-shot 429 refusal, and blocked-body cancellation against the pinned Windows executable"
+      ],
+      "coveredExecutableCases": ["API-key headers", "Messages API path", "initial request body", "provider-facing 22-tool subset and recall-bias order", "fragmented SSE text", "usage", "end_turn stop reason", "fragmented input_json_delta tool call", "permissioned write execution", "tool-result continuation request", "tool_use stop reason", "ACP 429 with Retry-After fails fast without retry", "blocked-body cancellation and exact error"],
+      "remainingExecutableCases": []
     },
     {
       "id": "provider-openai-compatible",

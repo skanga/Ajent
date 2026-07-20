@@ -12,6 +12,15 @@ Uses the Messages API with typed content blocks, tool use/results, images,
 prompt caching, signed thinking replay, adaptive reasoning, usage counters, and
 incremental SSE. Both API-key and Anthropic OAuth credentials are supported.
 
+Executable parity tests route Ajent and the pinned AgenTTY binary through the
+same loopback Anthropic server. They compare the exact Messages API path,
+API-key headers, complete request bodies, generated metadata shape, fragmented
+SSE text and tool-input assembly, four-counter usage, stop reasons, a real
+permissioned write and tool-result continuation, one-shot `429` handling, and
+cancellation of an open response body. The downloaded 0.2.8 binary predates two
+checked-in prompt sections and the `todo` eager-streaming flag; Ajent follows
+the pinned source for those three fields, as recorded in the parity ledger.
+
 ### Ollama
 
 Uses Ollama's native chat/model/embedding endpoints. Ajent probes models and

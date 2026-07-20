@@ -28,6 +28,7 @@ class AgentSystemPromptTest {
             "call `search_docs`", "<memory-tools>", "MUST call the `remember` tool",
             "  os: Windows\n", "  shell: cmd.exe (Windows Command Prompt)\n",
             "  cwd: " + workspace, "Prefer native Windows equivalents", "powershell -c")
+        .endsWith("</memory-tools>\n")
         .doesNotContain("<memory>", "<skills>");
   }
 

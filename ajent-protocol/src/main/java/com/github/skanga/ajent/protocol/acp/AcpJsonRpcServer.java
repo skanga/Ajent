@@ -713,10 +713,12 @@ public final class AcpJsonRpcServer {
           send(update);
         });
       } else if (message instanceof RuntimeMessage.ProviderEvent(
-          long ignored, StreamEvent.Usage ignoredUsage)) {
+          long ignored, StreamEvent.Usage usage)) {
         ObjectNode update = JSON.createObjectNode();
         update.put("sessionUpdate", "usage_update");
-        update.put("used", Math.max(0L, (long) state.tokensIn() + state.tokensOut()));
+        long used = (long) usage.inputTokens() + usage.outputTokens()
+            + usage.cacheCreationInputTokens() + usage.cacheReadInputTokens();
+        update.put("used", Math.max(0L, used));
         update.put("size", contextMax);
         pendingUsage = update;
       } else if (message instanceof RuntimeMessage.ProviderEvent(

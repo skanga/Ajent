@@ -100,8 +100,7 @@ public final class AgentSystemPrompt {
         .replace("{{OS}}", environment.os())
         .replace("{{SHELL}}", environment.shell())
         .replace("{{CWD}}", workspace.toString())
-        .replace("{{SHELL_NOTES}}", environment.notes())
-        .stripTrailing();
+        .replace("{{SHELL_NOTES}}", environment.notes());
     return prompt + collectMemory() + skills.catalogBlock();
   }
 

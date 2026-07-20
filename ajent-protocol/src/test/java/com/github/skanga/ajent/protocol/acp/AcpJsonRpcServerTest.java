@@ -389,11 +389,13 @@ final class AcpJsonRpcServerTest {
               sink.accept(new StreamEvent.ToolUseDelta(
                   "{\"path\":\"C:/workspace/file.txt\",\"content\":\"hello\"}"));
               sink.accept(new StreamEvent.ToolUseEnd());
-              sink.accept(new StreamEvent.Usage(20, 5, 2, 3));
+              sink.accept(new StreamEvent.Usage(20, 0, 2, 3));
+              sink.accept(new StreamEvent.Usage(0, 5, 0, 0));
               sink.accept(new StreamEvent.Finished(StopReason.TOOL_USE));
             } else {
               sink.accept(new StreamEvent.TextDelta("Done."));
-              sink.accept(new StreamEvent.Usage(30, 4, 1, 2));
+              sink.accept(new StreamEvent.Usage(30, 0, 1, 2));
+              sink.accept(new StreamEvent.Usage(0, 4, 0, 0));
               sink.accept(new StreamEvent.Finished(StopReason.END_TURN));
             }
           }, call -> {
@@ -472,6 +474,9 @@ final class AcpJsonRpcServerTest {
         "usage_update".equals(update.path("sessionUpdate").textValue())))
         .hasSize(2).allSatisfy(update -> assertThat(update.path("size").intValue())
             .isEqualTo(200_000));
+    assertThat(projected.stream().filter(update ->
+        "usage_update".equals(update.path("sessionUpdate").textValue()))
+        .map(update -> update.path("used").intValue())).containsExactly(5, 4);
     ThreadLoadResult persisted = new ThreadStore(directory)
         .load(directory.resolve("threads/prompt-session.json"));
     assertThat(persisted).isInstanceOfSatisfying(ThreadLoadResult.Success.class, loaded ->
