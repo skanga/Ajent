@@ -2330,15 +2330,17 @@ final class InteractiveCommand {
             state, pendingPermission, width, terminalRows, composer, nowNanos);
         List<StyledLine> lines = rendered.lines();
         if (palette instanceof CommandPalette.Open open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Commands  " + open.query(), Style.ACCENT));
           List<CommandPalette.Command> matches = CommandPalette.filtered(open.query());
+          var pickerRows = new ArrayList<AppChrome.PickerRow>();
           for (int index = 0; index < matches.size(); index++) {
             CommandPalette.Command command = matches.get(index);
-            lines.add(new StyledLine((index == open.index() ? "› " : "  ") + command.label(),
-                index == open.index() ? Style.ACCENT : Style.NORMAL));
+            pickerRows.add(new AppChrome.PickerRow(command.label(), command.description(),
+                index == open.index(), false));
           }
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.commandPalette(open.query(), pickerRows,
+              Math.max(50, width - 2), Math.min(14, Math.max(4, terminalRows - 8))));
+          lines = overlayBottom(lines, overlay);
         }
         if (toolViewer instanceof ToolOutputViewer.Open open) {
           lines = new ArrayList<>(lines);

@@ -541,7 +541,7 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.BACKSPACE), agent);
     for (int codePoint : "quit".codePoints().toArray()) ui.key(character(codePoint), agent);
     assertThat(ui.key(special(TerminalKey.SpecialKey.ENTER), agent)).isFalse();
-    assertThat(terminal.bytes.toString()).contains("Commands");
+    assertThat(terminal.bytes.toString()).contains("Command Palette");
 
     ui.key(character('k', true), agent);
     assertThat(ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent)).isTrue();
@@ -625,7 +625,7 @@ final class InteractiveCommandTest {
     var agent = new FakeAgent(state);
 
     ui.key(character('/'), agent);
-    assertThat(terminal.bytes.toString()).contains("Commands");
+    assertThat(terminal.bytes.toString()).contains("Command Palette");
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
 
     ui.insert("https:");

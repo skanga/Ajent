@@ -145,8 +145,18 @@ initial and Down-navigated frames, closes it with Escape, and proves the complet
 76-column bordered bottom overlay. Registry blurbs, authentication/local notes,
 cursor and scrollbar rails, blank padding, legend, key hints, and the native
 short-terminal `rows - 8` viewport clamp are shared production behavior. The
-remaining picker backlog is limited to the model, thread, command, mention,
-symbol, code-block, and checkpoint surfaces.
+remaining picker backlog is limited to the model, thread, mention, symbol,
+code-block, and checkpoint surfaces.
+
+Ctrl+K now uses the same production picker chrome with the native search header,
+separator, protected descriptions, cursor/scroll rail, clipping, and responsive
+viewport. The executable gate captures the open palette and compares a unique
+`provider` filter cell-for-cell. The pinned 0.2.8 executable has fourteen rows
+and predates the checked-in source's `Inspect tool outputs` palette entry;
+Ajent retains that source-correct fifteenth command, so only the common uniquely
+filtered view is asserted exactly. Command-palette rendering and filtering are
+complete; the remaining picker backlog is model, thread, mention, symbol,
+code-block, and checkpoint surfaces.
 
 `TurnChromeTest` and live `InteractiveCommandTest` coverage now pin the native
 turn shell independently of the broader renderer: `❯ You` and model-aware

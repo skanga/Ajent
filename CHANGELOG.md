@@ -85,11 +85,14 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched the executable provider picker cell-for-cell, including its bordered
   bottom overlay, registry descriptions, protected authentication/local notes,
   footer legend and hints, cursor navigation, and short-terminal height clamp.
+- Matched the source-correct searchable command palette chrome and filtering,
+  with an executable exact differential for a uniquely filtered command and an
+  explicit record of the pinned binary's missing tool-output command entry.
 
 ### Known limitations
 
-- Animated wordmark-frame and model/thread/command/mention/symbol/code/checkpoint
-  picker, review, resize, attachment, queue, and scrollback terminal
+- Animated wordmark-frame and model/thread/mention/symbol/code/checkpoint picker,
+  review, resize, attachment, queue, and scrollback terminal
   differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live
   permissioned Bash-tool turn now compare cell-for-cell.

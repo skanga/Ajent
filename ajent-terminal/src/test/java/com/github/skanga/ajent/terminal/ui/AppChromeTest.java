@@ -141,6 +141,24 @@ final class AppChromeTest {
   }
 
   @Test
+  void rendersTheNativeSearchableCommandPalette() {
+    List<AppChrome.PickerRow> commands = List.of(
+        new AppChrome.PickerRow("New thread", "Start a fresh conversation", true, false),
+        new AppChrome.PickerRow("Switch provider",
+            "Choose the LLM backend (Anthropic, OpenAI, …)", false, false));
+
+    List<AppChrome.Row> rows = AppChrome.commandPalette("", commands, 78, 14);
+
+    assertThat(rows).hasSize(8).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(rows.getFirst().text()).contains(" Command Palette ");
+    assertThat(rows.get(2).text()).contains("› type to filter…");
+    assertThat(rows.get(3).text()).contains("─".repeat(70));
+    assertThat(rows.get(4).text()).contains("▎ New thread", "Start a fresh conversation", "┃");
+    assertThat(AppChrome.commandPalette("provider", commands.subList(1, 2), 78, 14).get(2)
+        .text()).contains("› provider");
+  }
+
+  @Test
   void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
     AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);

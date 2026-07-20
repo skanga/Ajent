@@ -269,6 +269,11 @@ final class NativeTerminalParityIT {
           "Providers", "provider picker viewport");
       assertMatchingRegion(nativeCapture.movedPickerFrame(), javaCapture.movedPickerFrame(),
           "Providers", "navigated provider picker viewport");
+      assertViewportContains(nativeCapture.commandFrame(), "Command Palette");
+      assertViewportContains(javaCapture.commandFrame(), "Command Palette");
+      assertMatchingRegion(nativeCapture.filteredCommandFrame(),
+          javaCapture.filteredCommandFrame(), "Command Palette",
+          "filtered command palette viewport");
     } finally {
       provider.stop(0);
     }
@@ -458,9 +463,20 @@ final class NativeTerminalParityIT {
     process.getOutputStream().flush();
     Thread.sleep(150);
     String movedPickerFrame = combined(output, error);
-    byte[] closePicker = enhancedControlC
-        ? "\u001b[27u".getBytes(StandardCharsets.US_ASCII)
-        : new byte[] {27};
+    byte[] closePicker = "\u001b[27u".getBytes(StandardCharsets.US_ASCII);
+    process.getOutputStream().write(closePicker);
+    process.getOutputStream().flush();
+    Thread.sleep(400);
+    process.getOutputStream().write(11); // Ctrl+K
+    process.getOutputStream().flush();
+    awaitAnyViewportText(output, error, List.of("Command Palette", "Commands"),
+        Duration.ofSeconds(5));
+    Thread.sleep(150);
+    String commandFrame = combined(output, error);
+    process.getOutputStream().write("provider".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    Thread.sleep(150);
+    String filteredCommandFrame = combined(output, error);
     process.getOutputStream().write(closePicker);
     process.getOutputStream().flush();
     Thread.sleep(400);
@@ -482,7 +498,7 @@ final class NativeTerminalParityIT {
     reader.join(Duration.ofSeconds(3));
     if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
-        finalFrame, pickerFrame, movedPickerFrame);
+        finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame);
   }
 
   private static Map<String, String> terminalEnvironment(Path home) {
@@ -715,15 +731,27 @@ final class NativeTerminalParityIT {
 
   private static void assertMatchingRegion(String nativeFrame, String javaFrame,
                                            String anchor, String description) {
+    assertMatchingRegion(nativeFrame, javaFrame, anchor, anchor, description);
+  }
+
+  private static void assertViewportContains(String frame, String expected) {
+    var viewport = new AnsiViewport(COLUMNS, ROWS);
+    viewport.feed(frame);
+    assertThat(viewport.lines()).anyMatch(line -> line.contains(expected));
+  }
+
+  private static void assertMatchingRegion(String nativeFrame, String javaFrame,
+                                           String nativeAnchor, String javaAnchor,
+                                           String description) {
     var nativeViewport = new AnsiViewport(COLUMNS, ROWS);
     nativeViewport.feed(nativeFrame);
     var javaViewport = new AnsiViewport(COLUMNS, ROWS);
     javaViewport.feed(javaFrame);
-    assertThat(normalizeDynamicCells(regionFrom(javaViewport.lines(), anchor))).as(
+    assertThat(normalizeDynamicCells(regionFrom(javaViewport.lines(), javaAnchor))).as(
             "%s native viewport:%n%s%nJava viewport:%n%s", description,
             numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
         .containsExactlyElementsOf(normalizeDynamicCells(
-            regionFrom(nativeViewport.lines(), anchor)));
+            regionFrom(nativeViewport.lines(), nativeAnchor)));
   }
 
   private static List<String> normalizeDynamicCells(List<String> lines) {
@@ -760,5 +788,6 @@ final class NativeTerminalParityIT {
   private record Capture(int exitCode, String output, String frame) {}
   private record StagedCapture(int exitCode, String output, String permissionFrame,
                                String finalFrame, String pickerFrame,
-                               String movedPickerFrame) {}
+                               String movedPickerFrame, String commandFrame,
+                               String filteredCommandFrame) {}
 }
