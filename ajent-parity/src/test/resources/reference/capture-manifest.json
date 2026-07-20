@@ -66,10 +66,10 @@
       "cases": ["openai", "groq", "openrouter", "together", "cerebras", "raw host:port", "request body", "fragmented tool calls", "tool-result continuation", "weak-model salvage"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeAcpParityIT",
-        "mvn -q verify -Pcharacterization: exact semantic comparison of complete OpenAI-compatible request sequences, fragmented multi-tool assembly, and streamed tool continuations against the pinned Windows executable"
+        "mvn -q verify -Pcharacterization: exact semantic comparison of complete OpenAI-compatible request sequences, fragmented multi-tool assembly, weak-model leaked-content salvage, and streamed tool continuations against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["raw host:port", "initial request body", "provider-facing 22-tool subset and recall-bias order", "streamed text/tool/usage", "two fragmented tool calls in one batch", "canonical multi-tool result continuation", "accepted and rejected tool-result continuation request bodies", "two sequential tool continuations", "two concurrent session request bodies", "stalled local HTTP stream cancellation and exact error", "stop reason"],
-      "remainingExecutableCases": ["hosted preset endpoints and headers", "weak-model salvage", "HTTP errors and retries", "hosted TLS cancellation"]
+      "coveredExecutableCases": ["raw host:port", "initial request body", "provider-facing 22-tool subset and recall-bias order", "streamed text/tool/usage", "two fragmented tool calls in one batch", "canonical multi-tool result continuation", "weak-model fragmented leaked-content salvage", "synthetic salvaged-call execution and structured continuation", "accepted and rejected tool-result continuation request bodies", "two sequential tool continuations", "two concurrent session request bodies", "stalled local HTTP stream cancellation and exact error", "stop reason"],
+      "remainingExecutableCases": ["hosted preset endpoints and headers", "HTTP errors and retries", "hosted TLS cancellation"]
     },
     {
       "id": "provider-ollama",

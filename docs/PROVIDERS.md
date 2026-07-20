@@ -30,6 +30,9 @@ loopback OpenAI-compatible turns and compares their complete request sequences,
 including accepted, rejected, and two sequential tool-result continuations. It
 also splits each of two calls across multiple SSE frames, executes the
 same-path batch in order, and compares the canonical two-result continuation.
+For a weak `qwen2.5-coder:7b` model, it additionally streams a bare JSON call
+through `delta.content` with `finish_reason: stop`, then proves identical
+salvage, one execution, synthetic call identity, and structured continuation.
 This covers the native 22-tool provider subset and recall-biased order,
 system/user messages, output controls, tool-call replay, canonical argument
 encoding, and usage/stop stream handling without sending traffic to an external

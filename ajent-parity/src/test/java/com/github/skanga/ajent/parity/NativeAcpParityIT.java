@@ -239,6 +239,57 @@ final class NativeAcpParityIT {
   }
 
   @Test
+  void weakModelLeakedToolCallSalvageMatchesPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-salvage-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-salvage-workspace"));
+    var target = new AtomicReference<Path>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedWeakModelSalvageProvider(target, requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    String model = "qwen2.5-coder:7b";
+    try {
+      Path nativeTarget = nativeWorkspace.resolve("salvaged.txt");
+      target.set(nativeTarget);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(
+          command(nativeBinary, nativeWorkspace, endpoint, model),
+          root.resolve("native-salvage-home"), false)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace);
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+      assertThat(nativeTarget).hasContent("salvaged tool call\n");
+
+      Path javaTarget = javaWorkspace.resolve("salvaged.txt");
+      target.set(javaTarget);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(
+          javaCommand(ajentJar, javaWorkspace, endpoint, model),
+          root.resolve("java-salvage-home"), true)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace);
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+      assertThat(javaTarget).hasContent("salvaged tool call\n");
+
+      assertThat(nativeRequests).hasSize(2);
+      assertThat(javaRequests).hasSize(2);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void cancellationOfStalledProviderTurnMatchesPinnedExecutable(@TempDir Path root)
       throws Exception {
     Path repository = repositoryRoot();
@@ -589,6 +640,51 @@ final class NativeAcpParityIT {
       }
     });
     return server;
+  }
+
+  private static HttpServer scriptedWeakModelSalvageProvider(
+      AtomicReference<Path> target, List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        JsonNode request = JSON.readTree(exchange.getRequestBody());
+        requests.add(request.deepCopy());
+        boolean continuation = false;
+        for (JsonNode message : request.path("messages")) {
+          if ("tool".equals(message.path("role").asText())) continuation = true;
+        }
+        String body;
+        if (continuation) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":\"Salvage done.\"}}]}\n\n"
+              + "data: {\"usage\":{\"prompt_tokens\":1250,\"completion_tokens\":8},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else {
+          String leaked = JSON.writeValueAsString(JSON.createObjectNode()
+              .put("name", "write").set("arguments", JSON.createObjectNode()
+                  .put("path", target.get().toString()).put("content", "salvaged tool call\n")));
+          int firstCut = leaked.length() / 3;
+          int secondCut = leaked.length() * 2 / 3;
+          body = contentDelta(leaked.substring(0, firstCut))
+              + contentDelta(leaked.substring(firstCut, secondCut))
+              + contentDelta(leaked.substring(secondCut))
+              + "data: {\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":35},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static String contentDelta(String content) throws IOException {
+    ObjectNode frame = JSON.createObjectNode();
+    frame.putArray("choices").addObject().putObject("delta").put("content", content);
+    return "data: " + JSON.writeValueAsString(frame) + "\n\n";
   }
 
   private static String toolCallDelta(
@@ -979,8 +1075,13 @@ final class NativeAcpParityIT {
   }
 
   private static List<String> command(Path executable, Path workspace, String provider) {
+    return command(executable, workspace, provider, "qwen3:14b");
+  }
+
+  private static List<String> command(
+      Path executable, Path workspace, String provider, String model) {
     return List.of(executable.toString(), "acp", "--workspace", workspace.toString(),
-        "--sandbox", "off", "--provider", provider, "--model", "qwen3:14b");
+        "--sandbox", "off", "--provider", provider, "--model", model);
   }
 
   private static List<String> javaCommand(Path jar, Path workspace) {
@@ -988,9 +1089,14 @@ final class NativeAcpParityIT {
   }
 
   private static List<String> javaCommand(Path jar, Path workspace, String provider) {
+    return javaCommand(jar, workspace, provider, "qwen3:14b");
+  }
+
+  private static List<String> javaCommand(
+      Path jar, Path workspace, String provider, String model) {
     return List.of(javaExecutable(), "-jar", jar.toString(), "acp", "--workspace",
         workspace.toString(), "--sandbox", "off", "--provider", provider, "--model",
-        "qwen3:14b");
+        model);
   }
 
   private static String javaExecutable() {
