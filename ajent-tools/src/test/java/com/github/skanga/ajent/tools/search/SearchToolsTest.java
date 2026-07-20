@@ -98,6 +98,18 @@ class SearchToolsTest {
   }
 
   @Test
+  void grepDoesNotRenderATerminalNewlineAsAnExtraContextRow(@TempDir Path root)
+      throws Exception {
+    Files.writeString(root.resolve("three.txt"), "alpha\nNEEDLE\ngamma\n");
+
+    String result = success(tools(root).execute("grep", JSON.createObjectNode()
+        .put("pattern", "NEEDLE").put("case_sensitive", true)));
+
+    assertThat(result).contains("### L1-3\n```\nalpha\nNEEDLE\ngamma\n```")
+        .doesNotContain("L1-4", "gamma\n\n```");
+  }
+
+  @Test
   void grepPinsScanLimitAndTwentyMatchPagination(@TempDir Path root) throws Exception {
     Files.writeString(root.resolve("many.txt"), "hit ".repeat(501));
 

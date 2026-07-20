@@ -61,6 +61,9 @@ class WebToolsTest {
         .isEqualTo(ToolErrorKind.INVALID_ARGS);
     assertThat(failure(tools.execute("web_search", JSON.createObjectNode())).error().kind())
         .isEqualTo(ToolErrorKind.INVALID_ARGS);
+    assertThat(failure(tools.execute("web_fetch", JSON.createObjectNode()
+        .put("url", "not a url"))).error().detail())
+        .isEqualTo("url must start with https:// (web_fetch is TLS-only)");
     assertThat(failure(tools.execute("missing", JSON.createObjectNode())).error().kind())
         .isEqualTo(ToolErrorKind.UNKNOWN);
   }

@@ -210,8 +210,11 @@ public final class FileTools {
     String description = args.string("display_description", "");
     String prefix = stale ? STALE_EDIT_WARNING : "";
     if (!description.isEmpty()) prefix += description + "\n\n";
+    String unified = UnifiedDiff.render(change);
+    String separator = unified.endsWith("\n") ? "" : "\n";
     return success(new ToolOutput(prefix + "Edited " + path + " (" + change.added()
-        + "+ " + change.removed() + "-)", Optional.of(change)));
+        + "+ " + change.removed() + "-):\n\n```diff\n" + unified + separator + "```",
+        Optional.of(change)));
   }
 
   private ToolResult listDirectory(JsonNode arguments) throws IOException {

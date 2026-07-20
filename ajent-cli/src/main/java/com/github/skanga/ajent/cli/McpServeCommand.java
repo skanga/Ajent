@@ -1,17 +1,6 @@
 package com.github.skanga.ajent.cli;
 
-import com.github.skanga.ajent.core.persistence.Settings;
-import com.github.skanga.ajent.core.persistence.SettingsStore;
-import com.github.skanga.ajent.provider.auth.Credential;
-import com.github.skanga.ajent.provider.EnvironmentHttpClient;
-import com.github.skanga.ajent.provider.auth.CredentialResolver;
-import com.github.skanga.ajent.provider.auth.CredentialStore;
-import com.github.skanga.ajent.provider.auth.ProviderAuth;
-import com.github.skanga.ajent.provider.openai.ProviderAuthResolver;
 import com.github.skanga.ajent.protocol.mcp.McpJsonRpcServer;
-import com.github.skanga.ajent.runtime.DispatcherToolPort;
-import com.github.skanga.ajent.runtime.LiveProviderFactory;
-import com.github.skanga.ajent.runtime.ProviderBackedSubagentRunner;
 import com.github.skanga.ajent.tools.catalog.NativeToolWireCatalog;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
@@ -20,7 +9,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -35,29 +23,17 @@ final class McpServeCommand {
   private final Path currentDirectory;
   private final Path home;
   private final Map<String, String> environment;
-  private final CredentialStore credentials;
-  private final HttpClient client;
 
   McpServeCommand(Path currentDirectory, Path home, Map<String, String> environment) {
-    this(currentDirectory, home, environment,
-        new CredentialStore(home.resolve(".agentty/credentials.json"), "mcp-test"),
-        EnvironmentHttpClient.createProvider(environment));
-  }
-
-  McpServeCommand(Path currentDirectory, Path home, Map<String, String> environment,
-                  CredentialStore credentials, HttpClient client) {
     this.currentDirectory = Objects.requireNonNull(currentDirectory, "currentDirectory")
         .toAbsolutePath().normalize();
     this.home = Objects.requireNonNull(home, "home").toAbsolutePath().normalize();
     this.environment = Map.copyOf(environment);
-    this.credentials = Objects.requireNonNull(credentials, "credentials");
-    this.client = Objects.requireNonNull(client, "client");
   }
 
   static McpServeCommand systemDefault() {
     String configuredHome = System.getProperty("user.home", ".");
-    return new McpServeCommand(Path.of(""), Path.of(configuredHome), System.getenv(),
-        CredentialStore.systemDefault(), EnvironmentHttpClient.createProvider(System.getenv()));
+    return new McpServeCommand(Path.of(""), Path.of(configuredHome), System.getenv());
   }
 
   int run(CliArguments arguments, BufferedReader input, PrintStream output, PrintStream error) {
@@ -87,28 +63,12 @@ final class McpServeCommand {
     }
     error.print("ajent: " + processSandbox.description() + "\n");
     Path docsRoot = resolveDocs(workspace);
-    Settings settings = new SettingsStore(home.resolve(".agentty")).load();
-    String provider = arguments.provider().isBlank() ? settings.provider() : arguments.provider();
-    if (provider.isBlank()) provider = "anthropic";
-    String model = arguments.model().isBlank() ? settings.modelId().value() : arguments.model();
-    if (model.isBlank()) model = "claude-opus-4-5";
-    CredentialResolver.Resolution anthropic = CredentialResolver.resolve(
-        arguments.key(), environment, credentials.load(), System.currentTimeMillis());
-    ProviderAuth auth = ProviderAuthResolver.resolve(provider,
-        providerAuth(anthropic.credential()), arguments.key(),
-        settings.providerKeys().getOrDefault(provider, ""), environment);
     try (var mcp = McpRuntime.connect(workspace, home, environment, error)) {
-      var subagents = new ProviderBackedSubagentRunner(client);
       var configuration = new ToolRuntimeFactory.Configuration(
-          workspace, workspace, home, docsRoot, new JdkWebTransport(), null, subagents,
+          workspace, workspace, home, docsRoot, new JdkWebTransport(), null, null,
           processSandbox.runner(), mcp.tools(), environment);
       var tools = ToolRuntimeFactory.compose(configuration);
       var dispatcher = tools.dispatcher();
-      subagents.bind(new DispatcherToolPort(dispatcher));
-      var providerConfiguration = new LiveProviderFactory.Configuration(
-          provider, model, auth, settings.effort(), tools.systemPrompt(), 0, environment,
-          tools::additionalTools);
-      subagents.install(() -> providerConfiguration);
       var published = java.util.stream.Stream.concat(
           NativeToolWireCatalog.standaloneMcp().stream().map(specification ->
               new McpJsonRpcServer.PublishedTool(specification,
@@ -126,14 +86,6 @@ final class McpServeCommand {
           + (detail == null ? exception.getClass().getSimpleName() : detail) + "\n");
       return SOFTWARE_ERROR;
     }
-  }
-
-  private static ProviderAuth providerAuth(Credential credential) {
-    return switch (credential) {
-      case Credential.None ignored -> new ProviderAuth.Empty();
-      case Credential.ApiKey key -> new ProviderAuth.ApiKey(key.key());
-      case Credential.OAuth oauth -> new ProviderAuth.Bearer(oauth.accessToken());
-    };
   }
 
   private Path resolveDocs(Path workspace) {

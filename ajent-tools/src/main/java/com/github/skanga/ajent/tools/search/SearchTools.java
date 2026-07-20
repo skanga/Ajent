@@ -118,7 +118,7 @@ public final class SearchTools {
       byte[] bytes = Files.readAllBytes(path);
       if (containsNull(bytes, Math.min(bytes.length, 4096))) continue;
       String content = new String(bytes, StandardCharsets.UTF_8);
-      List<String> lines = List.of(content.split("\\n", -1));
+      List<String> lines = contentLines(content);
       var lineMatches = new ArrayList<Integer>();
       var matcher = regex.matcher(content);
       int cursor = 0;
@@ -200,6 +200,14 @@ public final class SearchTools {
 
   private static boolean isLiteral(String expression) {
     return expression.chars().noneMatch(character -> ".^$*+?()[]{}|\\".indexOf(character) >= 0);
+  }
+
+  private static List<String> contentLines(String content) {
+    var lines = new ArrayList<>(List.of(content.split("\\n", -1)));
+    if (content.endsWith("\n") && !lines.isEmpty() && lines.getLast().isEmpty()) {
+      lines.removeLast();
+    }
+    return List.copyOf(lines);
   }
 
   private static boolean containsNull(byte[] bytes, int limit) {

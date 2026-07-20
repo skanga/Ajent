@@ -41,12 +41,12 @@ public final class WebTools {
     var args = new ArgReader(arguments);
     String url = args.requiredString("url").orElse("");
     if (url.isEmpty()) return failure(ToolErrorKind.INVALID_ARGS, "url required");
+    if (!url.startsWith("https://")) return failure(ToolErrorKind.INVALID_ARGS,
+        "url must start with https:// (web_fetch is TLS-only)");
     URI uri;
     try { uri = URI.create(url); } catch (IllegalArgumentException exception) {
       return failure(ToolErrorKind.INVALID_ARGS, "invalid URL: " + exception.getMessage());
     }
-    if (!"https".equals(uri.getScheme())) return failure(ToolErrorKind.INVALID_ARGS,
-        "url must start with https:// (web_fetch is TLS-only)");
     if (uri.getHost() == null || uri.getHost().isEmpty())
       return failure(ToolErrorKind.INVALID_ARGS, "invalid URL: empty host");
     if (isBlockedHost(uri.getHost())) return failure(ToolErrorKind.NETWORK,

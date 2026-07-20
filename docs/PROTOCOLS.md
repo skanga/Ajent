@@ -114,11 +114,23 @@ Run:
 
 This publishes the complete validated native tool set over stdio JSON-RPC.
 The same production `ToolRuntimeFactory` provides workspace filesystem,
-process/search/map/Git, web, memory, skills, RAG, todos, and subagent services.
-Provider-backed subagents snapshot the configured live provider per call.
+process/search/map/Git, web, memory, skills, RAG, and todos. Matching AgenTTY,
+the published `task` shell reports that subagents are unavailable in standalone
+MCP mode; ACP and interactive sessions provide provider-backed subagents.
 
-The server validates workspace, provider/auth/profile/sandbox configuration
-before entering the protocol loop. stdout contains protocol bytes only.
+The server validates workspace and sandbox configuration before entering the
+protocol loop. stdout contains protocol bytes only.
+
+Executable characterization runs all 22 published tool families against paired
+Git workspaces, including real filesystem mutation, process/search operations,
+offline web validation, Git commit/log, memory lifecycle, skill activation,
+host validation failures, and exact MCP result envelopes. The pinned 0.2.8
+Windows executable has two release-binary defects that Ajent deliberately does
+not copy: positive `find_definition` calls return no matches because its `rg`
+command uses POSIX quoting, and its `search_docs` output predates the source
+tree's skills/memory fusion and confidence metadata. Source-derived Java tests
+pin the corrected behavior; the executable sweep uses deterministic validation
+paths for those two calls.
 
 ## Debugging protocol mode
 

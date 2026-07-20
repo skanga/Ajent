@@ -107,7 +107,7 @@ public final class HostTools {
 
   private ToolResult task(JsonNode arguments, CancellationSignal cancellation,
                           Consumer<String> progress) {
-    if (subagentRunner == null || !subagentRunner.available()) return failure(ToolErrorKind.NOT_FOUND,
+    if (subagentRunner == null || !subagentRunner.available()) return failure(ToolErrorKind.UNKNOWN,
         "task: subagent unavailable (not configured, or max nesting depth reached).");
     var args = new ArgReader(arguments);
     String prompt = args.string("prompt", "");

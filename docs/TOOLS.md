@@ -67,6 +67,10 @@ Todos/plans, document search, memory lifecycle, skills activation, and the
 `task` subagent tool. Host services are injected so protocol and interactive
 sessions use the same implementations.
 
+Standalone MCP matches AgenTTY's host boundary: `task` is published but
+reports that subagents are unavailable. Interactive and ACP sessions install
+the provider-backed runner described below.
+
 ## Workspace sandbox
 
 Every path is resolved against the canonical workspace. Traversal, absolute

@@ -38,7 +38,10 @@ class FileToolsTest {
     ObjectNode edit = object().put("old_text", "line2").put("new_text", "LINE-TWO");
     ToolResult.Success edited = success(tools.execute("edit", object()
         .put("path", file.toString()).set("edits", JSON.createArrayNode().add(edit))));
-    assertThat(edited.output().text()).contains("Edited");
+    assertThat(edited.output().text())
+        .startsWith("Edited " + file.toAbsolutePath().normalize() + " (1+ 1-):\n\n```diff\n")
+        .contains("--- a/" + file.toAbsolutePath().normalize(), "-line2", "+LINE-TWO")
+        .endsWith("\n```");
     assertThat(edited.output().change()).isPresent().get().satisfies(change -> {
       assertThat(change.before()).contains("line2");
       assertThat(change.after()).contains("LINE-TWO");

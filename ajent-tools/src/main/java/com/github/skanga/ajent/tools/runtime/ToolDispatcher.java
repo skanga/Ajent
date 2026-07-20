@@ -89,6 +89,12 @@ public final class ToolDispatcher {
     } catch (RuntimeException exception) {
       return failure(ToolErrorKind.UNKNOWN, "tool crashed: " + exception.getMessage());
     }
+    if (result instanceof ToolResult.Failure failed) {
+      String detail = family(spec.kind()) == ToolFamily.HOST
+          || failed.error().kind() == ToolErrorKind.UNKNOWN
+          ? failed.error().detail() : failed.error().render();
+      result = failure(ToolErrorKind.UNKNOWN, detail);
+    }
     return applyBudget(spec, result);
   }
 

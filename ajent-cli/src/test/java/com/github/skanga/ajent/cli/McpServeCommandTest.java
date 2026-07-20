@@ -29,7 +29,8 @@ class McpServeCommandTest {
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}",
         frame(2, "tools/list", "{}"),
         frame(3, "tools/call", "{\"name\":\"write\",\"arguments\":{"
-            + "\"path\":\"served.txt\",\"content\":\"through MCP\"}}")) + "\n";
+            + "\"path\":\"served.txt\",\"content\":\"through MCP\"}}"),
+        frame(4, "tools/call", "{\"name\":\"task\",\"arguments\":{}}")) + "\n";
     var stdout = new ByteArrayOutputStream();
     var stderr = new ByteArrayOutputStream();
     var parsed = CliArguments.parse(new String[] {
@@ -44,7 +45,7 @@ class McpServeCommandTest {
     for (String line : stdout.toString(StandardCharsets.UTF_8).lines().toList()) {
       messages.add(JSON.readTree(line));
     }
-    assertThat(messages).hasSize(3);
+    assertThat(messages).hasSize(4);
     assertThat(messages.get(0).path("result").path("serverInfo").path("name").asText())
         .isEqualTo("ajent");
     assertThat(messages.get(1).path("result").path("tools"))
@@ -54,6 +55,9 @@ class McpServeCommandTest {
             "diagnostics", "git_status", "git_diff", "git_log", "git_commit", "task",
             "forget", "wipe_memory", "skill", "search_docs");
     assertThat(messages.get(2).path("result").path("isError").asBoolean()).isFalse();
+    assertThat(messages.get(3).path("result").path("content").path(0).path("text").asText())
+        .isEqualTo("[unknown] task: subagent unavailable "
+            + "(not configured, or max nesting depth reached).");
     assertThat(Files.readString(workspace.resolve("served.txt"))).isEqualTo("through MCP");
   }
 

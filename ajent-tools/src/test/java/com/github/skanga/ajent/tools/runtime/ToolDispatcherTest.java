@@ -74,7 +74,15 @@ class ToolDispatcherTest {
     ToolResult.Failure normalized = (ToolResult.Failure) dispatcher.execute(
         "read", JSON.createArrayNode().add("not an object"));
     assertThat(normalized.error()).isEqualTo(
-        new ToolError(ToolErrorKind.INVALID_ARGS, "path required"));
+        new ToolError(ToolErrorKind.UNKNOWN, "[invalid args] path required"));
+    ToolResult.Failure unavailable = (ToolResult.Failure) dispatcher.execute(
+        "task", JSON.createObjectNode());
+    assertThat(unavailable.error()).isEqualTo(new ToolError(ToolErrorKind.UNKNOWN,
+        "task: subagent unavailable (not configured, or max nesting depth reached)."));
+    ToolResult.Failure missingQuery = (ToolResult.Failure) dispatcher.execute(
+        "search_docs", JSON.createObjectNode());
+    assertThat(missingQuery.error()).isEqualTo(new ToolError(ToolErrorKind.UNKNOWN,
+        "search_docs: `query` is required."));
 
     var broken = new ToolDispatcher(null, null, null, null, null, null, null, null);
     ToolResult.Failure crashed = (ToolResult.Failure) broken.execute(

@@ -36,10 +36,12 @@ final class NativeMcpParityIT {
     Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
     Path nativeWorkspace = Files.createDirectories(root.resolve("native-workspace"));
     Path javaWorkspace = Files.createDirectories(root.resolve("java-workspace"));
+    prepareToolWorkspace(nativeWorkspace);
+    prepareToolWorkspace(javaWorkspace);
 
     Transcript nativeTranscript;
     try (var process = McpProcess.start(command(nativeBinary, nativeWorkspace),
-        root.resolve("native-home"), false)) {
+        root.resolve("native-home"), false, toolEnvironment(nativeWorkspace))) {
       nativeTranscript = exercise(process, nativeWorkspace);
     }
     assertThat(nativeWorkspace.resolve("served.txt")).as(nativeTranscript.toString())
@@ -47,7 +49,7 @@ final class NativeMcpParityIT {
 
     Transcript javaTranscript;
     try (var process = McpProcess.start(javaCommand(ajentJar, javaWorkspace),
-        root.resolve("java-home"), true)) {
+        root.resolve("java-home"), true, toolEnvironment(javaWorkspace))) {
       javaTranscript = exercise(process, javaWorkspace);
     }
     assertThat(javaWorkspace.resolve("served.txt")).as(javaTranscript.toString())
@@ -184,8 +186,114 @@ final class NativeMcpParityIT {
     write.putObject("arguments").put("path", workspace.resolve("served.txt").toString())
         .put("content", "through MCP");
     exchanges.add(process.call("tools/call", write));
+    exerciseToolFamilies(process, workspace, exchanges);
     exchanges.add(process.call("does/not/exist", JSON.createObjectNode()));
     return new Transcript(List.copyOf(exchanges));
+  }
+
+  private static void exerciseToolFamilies(
+      McpProcess process, Path workspace, List<JsonNode> exchanges) throws Exception {
+    Path seed = workspace.resolve("src/seed.txt");
+    recordTool(process, exchanges,
+        toolCall("read", "path", workspace.resolve("served.txt").toString()));
+    recordTool(process, exchanges, toolCall("list_dir", "path", workspace.toString()));
+    ObjectNode edit = toolCall("edit");
+    edit.withObject("arguments").put("path", seed.toString()).putArray("edits").addObject()
+        .put("old_text", "beta").put("new_text", "MCP-EDITED");
+    recordTool(process, exchanges, edit);
+    recordTool(process, exchanges, toolCall("grep", "pattern", "MCP-EDITED"));
+    recordTool(process, exchanges, toolCall("glob", "pattern", "*.java"));
+    recordTool(process, exchanges, toolCall("bash", "command", "echo mcp-bash-ok"));
+    ObjectNode todo = toolCall("todo");
+    todo.withObject("arguments").putArray("todos").addObject()
+        .put("content", "prove MCP tool parity").put("status", "in_progress");
+    recordTool(process, exchanges, todo);
+    recordTool(process, exchanges, toolCall("web_fetch", "url", "not a url"));
+    recordTool(process, exchanges, toolCall("web_search", "query", ""));
+    // The pinned Windows binary invokes rg with POSIX single quotes and consequently returns
+    // false negatives for positive definition searches. Exercise the deterministic no-hit wire
+    // result here; SearchToolsTest pins Ajent's source-intended positive scanner behavior.
+    ObjectNode definition = toolCall("find_definition", "symbol", "missingParityDefinition");
+    definition.withObject("arguments").put("path", workspace.toString());
+    recordTool(process, exchanges, definition);
+    recordTool(process, exchanges,
+        toolCall("diagnostics", "command", "echo mcp-diagnostics-ok"));
+    recordTool(process, exchanges, toolCall("git_status", "path", workspace.toString()));
+    recordTool(process, exchanges, toolCall("git_diff", "path", workspace.toString()));
+    ObjectNode commit = toolCall("git_commit", "message", "MCP parity commit");
+    commit.withObject("arguments").put("path", workspace.toString()).put("stage_all", true);
+    recordTool(process, exchanges, commit);
+    ObjectNode log = toolCall("git_log", "path", workspace.toString());
+    log.withObject("arguments").put("count", 2).put("oneline", true);
+    recordTool(process, exchanges, log);
+    recordTool(process, exchanges, toolCall("task", "prompt", ""));
+    ObjectNode remember = toolCall("remember", "text", "parity memory sentinel");
+    remember.withObject("arguments").put("scope", "project");
+    recordTool(process, exchanges, remember);
+    ObjectNode forget = toolCall("forget", "substring", "memory sentinel");
+    forget.withObject("arguments").put("dry_run", true);
+    recordTool(process, exchanges, forget);
+    ObjectNode wipe = toolCall("wipe_memory", "scope", "project");
+    wipe.withObject("arguments").put("confirm", true);
+    recordTool(process, exchanges, wipe);
+    recordTool(process, exchanges, toolCall("skill", "name", "parity-skill"));
+    recordTool(process, exchanges, toolCall("search_docs", "query", ""));
+    assertThat(exchanges).hasSize(25);
+  }
+
+  private static void recordTool(
+      McpProcess process, List<JsonNode> exchanges, ObjectNode call) throws Exception {
+    JsonNode response = process.call("tools/call", call);
+    JsonNode content = response.path("result").path("content");
+    assertThat(content.isArray()).as(call.toString()).isTrue();
+    assertThat(content.isEmpty()).as(call.toString()).isFalse();
+    exchanges.add(response);
+  }
+
+  private static void prepareToolWorkspace(Path workspace) throws Exception {
+    Path source = Files.createDirectories(workspace.resolve("src"));
+    Files.writeString(source.resolve("seed.txt"), "alpha\nbeta\ngamma\n");
+    Files.writeString(source.resolve("ParityCode.java"),
+        "final class ParityCode {\n  static int parityAnswer() { return 42; }\n}\n");
+    Path docs = Files.createDirectories(workspace.resolve("docs"));
+    Files.writeString(docs.resolve("parity.md"),
+        "# Quartz guide\nThe quartz parity knowledge sentinel is deterministic.\n");
+    Path skill = Files.createDirectories(
+        workspace.resolve(".agents/skills/parity-skill"));
+    Files.writeString(skill.resolve("SKILL.md"), """
+        ---
+        name: parity-skill
+        description: Executable MCP parity fixture
+        ---
+        Follow the quartz parity skill instructions.
+        """);
+    runGit(workspace, "init", "-q");
+    runGit(workspace, "config", "user.email", "parity@example.test");
+    runGit(workspace, "config", "user.name", "MCP Parity");
+    runGit(workspace, "add", "-A");
+    runGit(workspace, "commit", "-qm", "seed");
+  }
+
+  private static void runGit(Path workspace, String... arguments) throws Exception {
+    var command = new ArrayList<String>();
+    command.add("git");
+    command.addAll(List.of(arguments));
+    var builder = new ProcessBuilder(command).directory(workspace.toFile())
+        .redirectErrorStream(true);
+    builder.environment().putAll(Map.of(
+        "GIT_AUTHOR_DATE", "2001-02-03T04:05:06Z",
+        "GIT_COMMITTER_DATE", "2001-02-03T04:05:06Z", "TZ", "UTC"));
+    Process process = builder.start();
+    String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertThat(process.waitFor()).as(output).isZero();
+  }
+
+  private static Map<String, String> toolEnvironment(Path workspace) {
+    return Map.of(
+        "AGENTTY_DOCS_DIR", workspace.resolve("docs").toString(),
+        "GIT_AUTHOR_DATE", "2001-02-03T04:05:06Z",
+        "GIT_COMMITTER_DATE", "2001-02-03T04:05:06Z",
+        "TZ", "UTC");
   }
 
   private static Transcript exerciseDownstream(McpProcess process) throws Exception {
@@ -481,7 +589,10 @@ final class NativeMcpParityIT {
     if (value.isIntegralNumber()) return JSON.getNodeFactory().numberNode(value.longValue());
     if (!value.isTextual()) return value.deepCopy();
     String text = value.textValue().replace(workspace, "<WORKSPACE>");
+    text = text.replaceAll("\\[[0-9a-fA-F]{8}]", "[<MEMORY-ID>]");
+    text = text.replace(".agentty", ".<PROGRAM-DATA>");
     if (nativeProgram) text = text.replace("agentty", "ajent");
+    text = text.replace(".<PROGRAM-DATA>", ".agentty");
     return JSON.getNodeFactory().textNode(text);
   }
 

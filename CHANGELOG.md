@@ -21,6 +21,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Native-executable MCP client characterization for configured stdio and
   Streamable HTTP servers, including rich tool results, resources, prompts,
   progress, list refresh, timeouts, sessions, headers, and JSON/SSE envelopes.
+- Native-executable standalone MCP characterization that executes every one of
+  the 22 published tool families against paired deterministic workspaces.
 
 ### Changed
 
@@ -37,9 +39,15 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Pinned AgenTTY's explicit MCP cancellation limitation: a cancellation
   notification queued during a synchronous configured tool call neither
   preempts the call nor propagates downstream, and the normal timeout wins.
+- Matched standalone MCP edit diffs, terminal-newline grep context, typed local
+  error wrapping, host-shell error wrapping, TLS-only URL validation, Git
+  output, application-data paths, and unavailable `task` behavior.
 
 ### Known limitations
 
 - Full native terminal visual differential capture remains under parity work.
 - OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's
   OpenAI-compatible transport uses Chat Completions and API keys.
+- The pinned AgenTTY 0.2.8 Windows binary has a positive `find_definition`
+  false-negative and predates the checked-in multi-source/confidence RAG
+  output. Ajent retains the source-correct implementations for both.
