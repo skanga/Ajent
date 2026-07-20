@@ -202,6 +202,26 @@ class ProviderHttpTransportTest {
   }
 
   @Test
+  void ollamaNotFoundAddsThePinnedModelPullHint() throws Exception {
+    start(exchange -> {
+      capture(exchange);
+      byte[] response = "{\"error\":\"model not found\"}"
+          .getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(404, response.length);
+      exchange.getResponseBody().write(response);
+      exchange.close();
+    });
+    var events = new ArrayList<StreamEvent>();
+
+    new ProviderHttpTransport(HttpClient.newHttpClient())
+        .streamOllama(request(false, new ProviderAuth.Empty()), events::add, () -> false);
+
+    assertThat(events).containsExactly(new StreamEvent.Error(
+        "HTTP 404: model not found  (model not loaded — run 'ollama pull model')",
+        java.util.Optional.empty(), ErrorClass.TERMINAL, false));
+  }
+
+  @Test
   void reportsRetryAfterForNonSuccessAndRefusesMissingHostedAuth() throws Exception {
     start(exchange -> {
       capture(exchange);

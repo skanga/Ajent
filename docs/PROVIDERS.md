@@ -19,6 +19,12 @@ context capabilities, selects native or JSON-protocol tool handling according
 to model strength, and can use Ollama for optional repository embeddings,
 query expansion, and reranking.
 
+Executable parity tests route both Ajent and the pinned AgenTTY binary through
+the same loopback Ollama server. They compare complete `/api/chat` bodies,
+fragmented NDJSON, usage and stop reasons, structured tool execution and
+continuation, no-key operation, and model-specific 404 guidance. Missing native
+tool-call ids use AgenTTY's exact `call_ollama_<sequence>_<index>` form.
+
 ### OpenAI-compatible
 
 Presets include OpenAI, Groq, OpenRouter, Together, Cerebras, llama.cpp, and a

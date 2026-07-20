@@ -66,6 +66,140 @@ final class NativeAcpParityIT {
   }
 
   @Test
+  void nativeOllamaRequestAndFragmentedNdjsonMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-ollama-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-ollama-workspace"));
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedOllamaProvider(requests);
+    provider.start();
+    Map<String, String> environment = Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + provider.getAddress().getPort());
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace),
+          root.resolve("native-ollama-home"), false, environment)) {
+        nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "ollama parity probe");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace),
+          root.resolve("java-ollama-home"), true, environment)) {
+        javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "ollama parity probe");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+
+      assertThat(nativeRequests).hasSize(1);
+      assertThat(javaRequests).hasSize(1);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void nativeOllamaToolCallAndContinuationMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-ollama-tool-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-ollama-tool-workspace"));
+    var target = new AtomicReference<Path>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedOllamaToolProvider(target, requests);
+    provider.start();
+    Map<String, String> environment = Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + provider.getAddress().getPort());
+    try {
+      Path nativeTarget = nativeWorkspace.resolve("ollama-tool.txt");
+      target.set(nativeTarget);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace),
+          root.resolve("native-ollama-tool-home"), false, environment)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace, "allow_always");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+      assertThat(nativeTarget).hasContent("written by ollama\n");
+
+      Path javaTarget = javaWorkspace.resolve("ollama-tool.txt");
+      target.set(javaTarget);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace),
+          root.resolve("java-ollama-tool-home"), true, environment)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace, "allow_always");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+      assertThat(javaTarget).hasContent("written by ollama\n");
+
+      assertThat(nativeRequests).hasSize(2);
+      assertThat(javaRequests).hasSize(2);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void nativeOllamaHttpErrorMatchesPinnedExecutable(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-ollama-error-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-ollama-error-workspace"));
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = ollamaErrorProvider(requests);
+    provider.start();
+    Map<String, String> environment = Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + provider.getAddress().getPort());
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace),
+          root.resolve("native-ollama-error-home"), false, environment)) {
+        nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "missing model probe");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace),
+          root.resolve("java-ollama-error-home"), true, environment)) {
+        javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "missing model probe");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+
+      assertThat(nativeRequests).hasSize(1);
+      assertThat(javaRequests).hasSize(1);
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("refusal");
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void livePromptPermissionToolAndContinuationMatchPinnedExecutable(@TempDir Path root)
       throws Exception {
     Path repository = repositoryRoot();
@@ -779,6 +913,105 @@ final class NativeAcpParityIT {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
         exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static HttpServer scriptedOllamaProvider(List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/api/show", exchange -> {
+      try (exchange) {
+        byte[] bytes = "{\"model_info\":{\"qwen3.context_length\":32768},"
+            .concat("\"capabilities\":[\"tools\"]}").getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.createContext("/api/chat", exchange -> {
+      try (exchange) {
+        requests.add(JSON.readTree(exchange.getRequestBody()).deepCopy());
+        String first = "{\"model\":\"qwen3:14b\",\"message\":{"
+            + "\"role\":\"assistant\",\"content\":\"Ollama parity \"},\"done\":false}\n";
+        String second = "{\"model\":\"qwen3:14b\",\"message\":{"
+            + "\"role\":\"assistant\",\"content\":\"reply.\"},\"done\":false}\n";
+        String done = "{\"model\":\"qwen3:14b\",\"message\":{"
+            + "\"role\":\"assistant\",\"content\":\"\"},\"done\":true,"
+            + "\"done_reason\":\"stop\",\"prompt_eval_count\":321,\"eval_count\":7}\n";
+        exchange.getResponseHeaders().set("Content-Type", "application/x-ndjson");
+        exchange.sendResponseHeaders(200, 0);
+        byte[] body = (first + second + done).getBytes(StandardCharsets.UTF_8);
+        for (int offset = 0; offset < body.length; offset += 7) {
+          exchange.getResponseBody().write(body, offset, Math.min(7, body.length - offset));
+          exchange.getResponseBody().flush();
+        }
+      }
+    });
+    return server;
+  }
+
+  private static HttpServer scriptedOllamaToolProvider(
+      AtomicReference<Path> target, List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/api/show", exchange -> {
+      try (exchange) {
+        byte[] bytes = "{\"model_info\":{\"qwen3.context_length\":32768},"
+            .concat("\"capabilities\":[\"tools\"]}").getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.createContext("/api/chat", exchange -> {
+      try (exchange) {
+        JsonNode request = JSON.readTree(exchange.getRequestBody());
+        requests.add(request.deepCopy());
+        boolean continuation = false;
+        for (JsonNode message : request.path("messages")) {
+          if ("tool".equals(message.path("role").asText())) continuation = true;
+        }
+        ObjectNode frame = JSON.createObjectNode().put("model", "qwen3:14b");
+        ObjectNode message = frame.putObject("message").put("role", "assistant");
+        if (continuation) {
+          message.put("content", "Ollama tool complete.");
+        } else {
+          message.put("content", "");
+          ObjectNode function = message.putArray("tool_calls").addObject().putObject("function");
+          function.put("name", "write").putObject("arguments")
+              .put("path", target.get().toString()).put("content", "written by ollama\n");
+        }
+        frame.put("done", true).put("done_reason", continuation ? "stop" : "tool_calls")
+            .put("prompt_eval_count", continuation ? 420 : 350)
+            .put("eval_count", continuation ? 8 : 12);
+        byte[] bytes = (JSON.writeValueAsString(frame) + "\n").getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/x-ndjson");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static HttpServer ollamaErrorProvider(List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/api/show", exchange -> {
+      try (exchange) {
+        byte[] bytes = "{\"model_info\":{},\"capabilities\":[\"tools\"]}"
+            .getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.createContext("/api/chat", exchange -> {
+      try (exchange) {
+        requests.add(JSON.readTree(exchange.getRequestBody()).deepCopy());
+        byte[] bytes = "{\"error\":\"model 'qwen3:14b' not found\"}"
+            .getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(404, bytes.length);
         exchange.getResponseBody().write(bytes);
       }
     });

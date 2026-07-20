@@ -23,6 +23,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   progress, list refresh, timeouts, sessions, headers, and JSON/SSE envelopes.
 - Native-executable standalone MCP characterization that executes every one of
   the 22 published tool families against paired deterministic workspaces.
+- Native-executable Ollama characterization for `/api/chat` request bodies,
+  fragmented NDJSON, tool execution/continuation, and HTTP errors.
 
 ### Changed
 
@@ -42,6 +44,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched standalone MCP edit diffs, terminal-newline grep context, typed local
   error wrapping, host-shell error wrapping, TLS-only URL validation, Git
   output, application-data paths, and unavailable `task` behavior.
+- Matched Ollama's synthetic missing tool-call ids and model-specific HTTP 404
+  recovery hint.
 
 ### Known limitations
 

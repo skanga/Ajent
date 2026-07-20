@@ -53,13 +53,16 @@ public final class OllamaStreamParser {
       if (content.isTextual() && !content.textValue().isEmpty()) chunks.add(content.textValue());
       JsonNode calls = message.path("tool_calls");
       if (calls.isArray()) {
+        int index = 0;
         for (JsonNode call : calls) {
           JsonNode function = call.path("function");
-          String id = call.path("id").asText("call_native_" + nativeSequence++);
+          String id = call.path("id").asText();
+          if (id.isEmpty()) id = "call_ollama_" + nativeSequence++ + "_" + index;
           String name = function.path("name").asText();
           JsonNode arguments = repairArguments(name, function.path("arguments"));
           emitTool(events, id, name, arguments);
           toolEmitted = true;
+          index++;
         }
       }
       if (root.path("prompt_eval_count").canConvertToInt()

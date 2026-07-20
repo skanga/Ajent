@@ -102,7 +102,8 @@ public final class ProviderHttpTransport {
       ChatRequest request, Consumer<StreamEvent> sink, BooleanSupplier cancelled) {
     var decoder = new OllamaStreamDecoder(toolNames(request), request.jsonProtocol());
     stream(OllamaWire.buildHttpRequest(request), decoder::feed, decoder::end,
-        sink, cancelled, ProviderHttpTransport::ollamaCancelledMessage);
+        sink, cancelled, (status, body) -> ollamaHttpError(status, body, request.model()), null,
+        ProviderHttpTransport::ollamaCancelledMessage);
   }
 
   private void stream(
@@ -301,6 +302,13 @@ public final class ProviderHttpTransport {
     String message = httpError(status, body);
     return status == 401 || status == 403
         ? message + "  (run 'ajent login' to re-authenticate)"
+        : message;
+  }
+
+  private static String ollamaHttpError(int status, byte[] body, String model) {
+    String message = httpError(status, body);
+    return status == 404
+        ? message + "  (model not loaded — run 'ollama pull " + model + "')"
         : message;
   }
 

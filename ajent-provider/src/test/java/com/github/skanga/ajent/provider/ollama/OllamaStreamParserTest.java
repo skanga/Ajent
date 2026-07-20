@@ -41,6 +41,20 @@ class OllamaStreamParserTest {
   }
 
   @Test
+  void synthesizesMissingNativeCallIdsWithPinnedFrameAndIndexSequence() {
+    String stream = line("{\"message\":{\"role\":\"assistant\",\"content\":\"\","
+        + "\"tool_calls\":[{\"id\":\"provided\",\"function\":{\"name\":\"read\","
+        + "\"arguments\":{}}},{\"function\":{\"name\":\"write\",\"arguments\":{}}}]}}")
+        + line("{\"message\":{\"role\":\"assistant\",\"content\":\"\","
+        + "\"tool_calls\":[{\"function\":{\"name\":\"bash\",\"arguments\":{}}}]},"
+        + "\"done\":true}");
+
+    assertThat(starts(parse(stream, Set.of("read", "write", "bash"), false)))
+        .extracting(StreamEvent.ToolUseStart::id)
+        .containsExactly("provided", "call_ollama_0_1", "call_ollama_1_0");
+  }
+
+  @Test
   void nativeContentSalvageHonorsKnownToolsAndSwallowsFootguns() {
     var salvaged = parse(frame("{\"name\":\"write\",\"arguments\":{\"file_path\":\"/tmp/f\"}}")
         + done(), Set.of("write", "read"), false);
