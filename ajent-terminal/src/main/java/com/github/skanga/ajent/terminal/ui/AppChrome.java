@@ -32,14 +32,20 @@ public final class AppChrome {
   }
 
   public record Status(String title, String provider, Phase phase, String detail,
-                       int tokensIn, int contextMax, int queued, String banner, int width) {
+                       long elapsedMillis, int tokensIn, int contextMax, int queued,
+                       String banner, int width) {
+    public Status(String title, String provider, Phase phase, String detail,
+                  int tokensIn, int contextMax, int queued, String banner, int width) {
+      this(title, provider, phase, detail, -1, tokensIn, contextMax, queued, banner, width);
+    }
+
     public Status {
       title = Objects.requireNonNull(title, "title");
       provider = Objects.requireNonNull(provider, "provider");
       phase = Objects.requireNonNull(phase, "phase");
       detail = Objects.requireNonNull(detail, "detail");
       banner = Objects.requireNonNull(banner, "banner");
-      if (tokensIn < 0 || contextMax < 0 || queued < 0 || width < 1) {
+      if (elapsedMillis < -1 || tokensIn < 0 || contextMax < 0 || queued < 0 || width < 1) {
         throw new IllegalArgumentException("negative status value or invalid width");
       }
     }
@@ -54,6 +60,15 @@ public final class AppChrome {
       if (cursor < 0 || cursor > text.length() || queued < 0 || width < 8) {
         throw new IllegalArgumentException("invalid composer state or width");
       }
+    }
+  }
+
+  public record Permission(String toolName, String description, boolean showAlwaysAllow,
+                           int width) {
+    public Permission {
+      toolName = Objects.requireNonNull(toolName, "toolName");
+      description = Objects.requireNonNull(description, "description");
+      if (width < 8) throw new IllegalArgumentException("permission width must be at least eight");
     }
   }
 
@@ -180,6 +195,27 @@ public final class AppChrome {
         row(rule, phaseTone(config.phase())));
   }
 
+  /** Maya's six-row bordered permission card. */
+  public static List<Row> permission(Permission config) {
+    Objects.requireNonNull(config, "config");
+    String title = " ⚠ Permission Required ";
+    String top = "╭" + title
+        + "─".repeat(Math.max(0, config.width() - columns(title) - 2)) + "╮";
+    String verb = switch (config.toolName().toLowerCase(Locale.ROOT)) {
+      case "read" -> "wants to read:";
+      case "edit", "write" -> "wants to edit:";
+      default -> "wants to execute:";
+    };
+    String hints = "[y] allow  [n] deny"
+        + (config.showAlwaysAllow() ? "  [a] always" : "") + "  ";
+    return List.of(row(fit(top, config.width()), Tone.WARNING),
+        permissionBody(config.toolName() + " " + verb, config.width()),
+        permissionBody(config.description(), config.width()),
+        permissionBody("", config.width()),
+        permissionBody(hints, config.width()),
+        row("╰" + "─".repeat(config.width() - 2) + "╯", Tone.WARNING));
+  }
+
   public static List<Row> changes(List<Change> changes, int width) {
     List<Change> values = List.copyOf(Objects.requireNonNull(changes, "changes"));
     if (values.isEmpty()) return List.of();
@@ -219,19 +255,41 @@ public final class AppChrome {
     return "";
   }
 
+  private static Row permissionBody(String content, int width) {
+    return row("│ " + fit(content, width - 4) + " │", Tone.NORMAL);
+  }
+
   private static String phase(Status config) {
-    return switch (config.phase()) {
-      case AWAITING_PERMISSION -> "⚠ " + (config.detail().isBlank()
-          ? "approve?" : "approve " + config.detail());
-      case COMPACTING -> "◐ compacting";
-      case RETRYING -> "◐ retrying";
-      case STALLED -> "◐ stalled";
-      case EXECUTING_TOOL -> "◐ " + (config.detail().isBlank() ? "running" : config.detail());
-      case STREAMING -> "◐ Streaming";
-      case AUTHENTICATING -> "◐ auth…";
-      case LOADING -> "◐ loading…";
-      case IDLE -> config.queued() > 0 ? "▸ +" + config.queued() + " queued" : "● Ready";
-    };
+    String glyph;
+    String verb;
+    boolean active;
+    switch (config.phase()) {
+      case AWAITING_PERMISSION -> {
+        glyph = "⚠";
+        verb = config.detail().isBlank() ? "approve?" : "approve " + config.detail();
+        active = true;
+      }
+      case COMPACTING -> { glyph = "◐"; verb = "compacting"; active = true; }
+      case RETRYING -> { glyph = "◐"; verb = "retrying"; active = true; }
+      case STALLED -> { glyph = "◐"; verb = "stalled"; active = true; }
+      case EXECUTING_TOOL -> {
+        glyph = "◐";
+        verb = config.detail().isBlank() ? "running" : config.detail();
+        active = true;
+      }
+      case STREAMING -> { glyph = "◐"; verb = "Streaming"; active = true; }
+      case AUTHENTICATING -> { glyph = "◐"; verb = "auth…"; active = false; }
+      case LOADING -> { glyph = "◐"; verb = "loading…"; active = false; }
+      case IDLE -> {
+        glyph = config.queued() > 0 ? "▸" : "●";
+        verb = config.queued() > 0 ? "+" + config.queued() + " queued" : "Ready";
+        active = false;
+      }
+      default -> throw new IllegalStateException("unexpected phase: " + config.phase());
+    }
+    String value = glyph + " " + fit(verb, 10);
+    return active && config.elapsedMillis() >= 0
+        ? value + " " + formatElapsed5(config.elapsedMillis()) : value;
   }
 
   private static String fitStatusActivity(Status config, String banner) {
@@ -239,23 +297,56 @@ public final class AppChrome {
       return fit(banner, config.width());
     }
     String phase = phase(config);
-    String phaseSlot = fit(phase, 12);
+    int gaugeCells = 10;
+    String right = statusRight(config, gaugeCells);
+    String left = "▌ " + phase;
+    int fixed = 3 + columns(phase) + columns(right);
+    int leftover = config.width() - fixed - 7;
+    String title = config.title().isBlank() || leftover < 14 ? ""
+        : "▎ " + truncate(config.title(), Math.min(leftover, 28)) + "   ·   ";
+    int used = 1 + columns(title) + columns(left) + columns(right);
+
+    // Maya measures the fixed groups before admitting the breadcrumb. A short title can then
+    // consume one more cell than its measured leftover (the edge glyph and its space), and the
+    // flex row takes that cell from the context bar while preserving its percentage suffix.
+    if (used > config.width() && config.contextMax() > 0) {
+      gaugeCells = Math.max(0, gaugeCells - (used - config.width()));
+      right = statusRight(config, gaugeCells);
+      used = 1 + columns(title) + columns(left) + columns(right);
+    }
+    int spaces = Math.max(0, config.width() - used);
+    return fit(" " + title + left + " ".repeat(spaces) + right, config.width());
+  }
+
+  private static String statusRight(Status config, int gaugeCells) {
     String right = "● " + config.provider();
     if (config.contextMax() > 0) right += " · "
-        + compactNativeContextGauge(config.tokensIn(), config.contextMax());
-    String left = "▌ " + phaseSlot;
-    String title = config.title().isBlank() ? "" : "▎ " + config.title() + "   ·   ";
-    int spaces = Math.max(1, config.width() - columns(title) - columns(left) - columns(right) - 2);
-    return fit(" " + title + left + " ".repeat(spaces) + right + " ", config.width());
+        + compactNativeContextGauge(config.tokensIn(), config.contextMax(), gaugeCells);
+    return right + " ";
+  }
+
+  private static String formatElapsed5(long millis) {
+    double seconds = millis / 1_000.0;
+    if (seconds < 100) return String.format(Locale.ROOT, "%4.1fs", seconds);
+    if (seconds < 600) return String.format(Locale.ROOT, "%4ds", (long) seconds);
+    if (seconds < 3_600) {
+      long minutes = (long) seconds / 60;
+      return String.format(Locale.ROOT, "%dm%02ds", minutes, (long) seconds - minutes * 60);
+    }
+    return " >1hr";
   }
 
   private static String compactNativeContextGauge(int used, int maximum) {
+    return compactNativeContextGauge(used, maximum, 10);
+  }
+
+  private static String compactNativeContextGauge(int used, int maximum, int cells) {
     if (maximum <= 0) return "";
     int percent = used <= 0 ? 0 : Math.min(100, used * 100 / maximum);
-    int eighths = percent * 80 / 100;
+    int eighths = percent * cells * 8 / 100;
     String[] partials = {"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"};
     var bar = new StringBuilder();
-    for (int cell = 0; cell < 10; cell++) {
+    for (int cell = 0; cell < cells; cell++) {
       int filled = Math.max(0, eighths - cell * 8);
       bar.append(filled >= 8 ? "█" : filled > 0 ? partials[filled] : "░");
     }

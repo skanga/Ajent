@@ -1191,6 +1191,7 @@ final class InteractiveCommand {
                 loop.dispatch(new RuntimeMessage.ReplaceQueued(queued));
               }
               clearComposer();
+              uiStatus = "";
               loop.dispatch(new RuntimeMessage.Submit(submitted, List.of(), attachments));
             }
           }
@@ -2977,9 +2978,9 @@ final class InteractiveCommand {
             Style.NORMAL);
       }
       if (permission != null) {
-        output.add(new StyledLine("", Style.NORMAL));
-        output.add(new StyledLine("Allow tool: " + permission.name().value() + "?", Style.DANGER));
-        output.add(new StyledLine("[y] allow  [a] always  [n/Esc] reject", Style.MUTED));
+        appendConversationChrome(output, AppChrome.permission(new AppChrome.Permission(
+            permission.name().value(), permissionDescription(permission), true,
+            Math.max(8, width - 4))));
       }
       List<AppChrome.Change> changes = pendingChanges.get().stream()
           .map(change -> new AppChrome.Change(change.path(), change.before().isEmpty(),
@@ -2997,8 +2998,8 @@ final class InteractiveCommand {
       String banner = !uiStatus.isEmpty() ? uiStatus : state.status();
       appendInsetChrome(output, AppChrome.statusPanel(new AppChrome.Status(
           state.thread().title(), providerLabel(providerId), chromePhase(state),
-          chromePhaseDetail(state, permission), state.tokensIn(), effectiveContextMax(),
-          state.queued().size(), banner, chromeWidth)));
+          chromePhaseDetail(state, permission), phaseElapsedMillis(state, nowNanos),
+          state.tokensIn(), effectiveContextMax(), state.queued().size(), banner, chromeWidth)));
       var text = new StringBuilder();
       for (StyledLine line : output) text.append(line.text()).append('\n');
       renderedText = text.toString();
@@ -3019,6 +3020,36 @@ final class InteractiveCommand {
       for (AppChrome.Row row : rows) {
         appendChrome(output, List.of(new AppChrome.Row(" " + row.text(), row.tone())));
       }
+    }
+
+    private static void appendConversationChrome(
+        List<StyledLine> output, List<AppChrome.Row> rows) {
+      for (AppChrome.Row row : rows) {
+        appendChrome(output, List.of(new AppChrome.Row("  " + row.text(), row.tone())));
+      }
+    }
+
+    static String permissionDescription(ToolUse tool) {
+      Map<String, Object> arguments = tool.arguments();
+      String name = tool.name().value();
+      return switch (name) {
+        case "bash", "diagnostics" -> argument(arguments, "command");
+        case "read", "edit", "write", "list_dir" ->
+            argument(arguments, "path", "file_path", "filepath", "filename");
+        case "web_fetch" -> argument(arguments, "url");
+        case "web_search" -> argument(arguments, "query");
+        case "git_commit" -> argument(arguments, "message");
+        case "find_definition" -> argument(arguments, "symbol");
+        default -> arguments.toString();
+      };
+    }
+
+    private static String argument(Map<String, Object> arguments, String... names) {
+      for (String name : names) {
+        Object value = arguments.get(name);
+        if (value instanceof String text && !text.isEmpty()) return text;
+      }
+      return "";
     }
 
     private static int displayedComposerCursor(
@@ -3065,6 +3096,12 @@ final class InteractiveCommand {
         }
       }
       return "";
+    }
+
+    private static long phaseElapsedMillis(AgentState state, long nowNanos) {
+      return state.phase().active().filter(active -> active.startedNanos() > 0)
+          .map(active -> Math.max(0, nowNanos - active.startedNanos()) / 1_000_000L)
+          .orElse(-1L);
     }
 
     private int effectiveContextMax() {
@@ -3201,6 +3238,8 @@ final class InteractiveCommand {
               output.add(turnHeader(header));
               output.add(new StyledLine("", Style.NORMAL));
             });
+      } else if (message.role() == Role.ASSISTANT) {
+        output.add(new StyledLine("", Style.NORMAL));
       }
       int bodyStart = output.size();
       String text = AttachmentText.display(message.text(), message.attachments());

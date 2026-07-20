@@ -78,13 +78,17 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   including fragmented OpenAI-compatible SSE, conversation insets and rails,
   turn separators, header alignment, assistant Markdown padding, first-message
   title derivation, the title-chip edge, and bottom chrome placement.
+- Matched AgenTTY's executable Ask-profile permission flow cell-for-cell,
+  including the six-row permission card, native argument descriptions, running
+  and completed Bash action timelines, phase elapsed slot, assistant
+  continuation seam, completed output, and measured idle-status degradation.
 
 ### Known limitations
 
-- Animated wordmark-frame and richer tool, permission, picker, review, thread,
-  resize, and scrollback terminal differentials remain under parity work;
-  startup, composer interactions, and a settled streamed provider turn now
-  compare cell-for-cell.
+- Animated wordmark-frame and richer picker, review, thread, resize, attachment,
+  queue, and scrollback terminal differentials remain under parity work;
+  startup, composer interactions, a settled streamed provider turn, and a live
+  permissioned Bash-tool turn now compare cell-for-cell.
 - OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's
   OpenAI-compatible transport uses Chat Completions and API keys.
 - The pinned AgenTTY 0.2.8 Windows binary has a positive `find_definition`

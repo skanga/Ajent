@@ -1541,6 +1541,31 @@ final class InteractiveCommandTest {
     assertThat(changes.get()).isPositive();
   }
 
+  @Test void permissionDescriptionsMatchTheNativeToolArgumentTable() {
+    assertThat(permissionDescription("bash", Map.of("command", "mvn test")))
+        .isEqualTo("mvn test");
+    assertThat(permissionDescription("diagnostics", Map.of("command", "javac")))
+        .isEqualTo("javac");
+    assertThat(permissionDescription("read", Map.of("path", "Read.java")))
+        .isEqualTo("Read.java");
+    assertThat(permissionDescription("edit", Map.of("file_path", "Edit.java")))
+        .isEqualTo("Edit.java");
+    assertThat(permissionDescription("write", Map.of("filepath", "Write.java")))
+        .isEqualTo("Write.java");
+    assertThat(permissionDescription("list_dir", Map.of("filename", "src")))
+        .isEqualTo("src");
+    assertThat(permissionDescription("web_fetch", Map.of("url", "https://example.test")))
+        .isEqualTo("https://example.test");
+    assertThat(permissionDescription("web_search", Map.of("query", "Ajent")))
+        .isEqualTo("Ajent");
+    assertThat(permissionDescription("git_commit", Map.of("message", "finish port")))
+        .isEqualTo("finish port");
+    assertThat(permissionDescription("find_definition", Map.of("symbol", "AgentLoop")))
+        .isEqualTo("AgentLoop");
+    assertThat(permissionDescription("custom", Map.of("value", "x"))).isEqualTo("{value=x}");
+    assertThat(permissionDescription("write", Map.of("path", 42))).isEmpty();
+  }
+
   @Test void renderingCoversTranscriptToolsErrorsStatusAndNarrowWrapping() {
     ToolUse tool = tool("failed output");
     Message assistant = new Message(com.github.skanga.ajent.domain.MessageId.random(),
@@ -2072,6 +2097,11 @@ final class InteractiveCommandTest {
   private static ToolUse tool(String output) {
     return new ToolUse(new ToolCallId("call"), new ToolName("bash"), Map.of(),
         new ToolStatus.Failed(0, 100_000_000, output));
+  }
+
+  private static String permissionDescription(String name, Map<String, Object> arguments) {
+    return InteractiveCommand.Ui.permissionDescription(new ToolUse(
+        new ToolCallId("permission"), new ToolName(name), arguments, new ToolStatus.Pending()));
   }
 
   private static int count(String source, String needle) {

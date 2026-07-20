@@ -99,9 +99,34 @@ final class AppChromeTest {
         "", "OpenAI", AppChrome.Phase.AWAITING_PERMISSION, "bash",
         1_000, 0, 2, "awaiting approval", 34);
     List<AppChrome.Row> narrow = AppChrome.status(approval);
-    assertThat(narrow.getFirst().text()).isEqualTo("⚠ approve bash  ·  OpenAI");
+    assertThat(narrow.getFirst().text()).isEqualTo("⚠ approve b…  ·  OpenAI");
     assertThat(narrow.getLast().text()).startsWith("⚠  awaiting approval").hasSize(34);
     assertThat(narrow.getLast().tone()).isEqualTo(AppChrome.Tone.WARNING);
+  }
+
+  @Test
+  void rendersTheNativePermissionCard() {
+    List<AppChrome.Row> rows = AppChrome.permission(new AppChrome.Permission(
+        "write", "parity.txt", true, 76));
+
+    assertThat(rows).hasSize(6).allSatisfy(row -> assertThat(row.text()).hasSize(76));
+    assertThat(rows.getFirst().text()).startsWith("╭ ⚠ Permission Required ").endsWith("╮");
+    assertThat(rows.get(1).text()).startsWith("│ write wants to edit:");
+    assertThat(rows.get(2).text()).startsWith("│ parity.txt");
+    assertThat(rows.get(3).text()).isEqualTo("│" + " ".repeat(74) + "│");
+    assertThat(rows.get(4).text()).contains("[y] allow  [n] deny  [a] always");
+    assertThat(rows.getLast().text()).isEqualTo("╰" + "─".repeat(74) + "╯");
+  }
+
+  @Test
+  void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
+    AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
+        AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);
+
+    String row = AppChrome.statusPanel(status).get(1).text();
+    assertThat(row).startsWith(" ▌ ⚠ approve w…  0.2s")
+        .doesNotContain("test permission")
+        .contains("● 127.0.0.1:10501 · CTX");
   }
 
   @Test

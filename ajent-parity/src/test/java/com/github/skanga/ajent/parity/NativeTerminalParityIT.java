@@ -231,6 +231,45 @@ final class NativeTerminalParityIT {
     }
   }
 
+  @Test
+  void permissionAndCompletedToolCardMatchTheNativeViewport(@TempDir Path root)
+      throws Exception {
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    HttpServer provider = permissionProvider(requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      Path repository = repositoryRoot();
+      Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+      Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+      Path javaHome = Files.createDirectories(root.resolve("java-home"));
+      Path nativeWorkspace = Files.createDirectories(root.resolve("native-workspace"));
+      Path javaWorkspace = Files.createDirectories(root.resolve("java-workspace"));
+      Path nativeLauncher = launcher(root.resolve("native-permission.cmd"),
+          List.of(nativeBinary.toString()));
+
+      StagedCapture nativeCapture = capturePermission(
+          List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+          nativeWorkspace, nativeHome, endpoint);
+      StagedCapture javaCapture = capturePermissionPiped(List.of(javaExecutable(),
+              "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+              "-Dajent.terminal.fixedSize=" + COLUMNS + "x" + ROWS,
+              "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+          javaWorkspace, javaHome, endpoint);
+
+      assertCleanExit(nativeCapture.exitCode(), nativeCapture.output(), "native");
+      assertCleanExit(javaCapture.exitCode(), javaCapture.output(), "Java");
+      assertThat(requests).hasSize(4);
+
+      assertMatchingRegion(nativeCapture.permissionFrame(), javaCapture.permissionFrame(),
+          "E X E C U T E 1", "permission viewport");
+      assertMatchingRegion(nativeCapture.finalFrame(), javaCapture.finalFrame(),
+          "Bash  echo terminal parity", "completed tool viewport");
+    } finally {
+      provider.stop(0);
+    }
+  }
+
   private static Capture capture(List<String> executable, Path workspace, Path home,
                                  String interaction, String expected)
       throws Exception {
@@ -355,6 +394,97 @@ final class NativeTerminalParityIT {
     return new Capture(process.exitValue(), text(output), frame);
   }
 
+  private static StagedCapture capturePermission(List<String> executable, Path workspace,
+                                                  Path home, String provider)
+      throws Exception {
+    var command = new ArrayList<>(executable);
+    command.addAll(List.of("--provider", provider, "--model", "parity-model",
+        "--workspace", workspace.toString()));
+    Map<String, String> environment = terminalEnvironment(home);
+    PtyProcess process = new PtyProcessBuilder(command.toArray(String[]::new))
+        .setDirectory(workspace.toString()).setEnvironment(environment)
+        .setInitialColumns(COLUMNS).setInitialRows(ROWS).setConsole(false)
+        .setRedirectErrorStream(true).start();
+    var output = new ByteArrayOutputStream();
+    var error = new ByteArrayOutputStream();
+    Thread reader = startDrain(process.getInputStream(), output);
+    Thread errorReader = startDrain(process.getErrorStream(), error);
+    return drivePermission(process, output, error, reader, errorReader, false);
+  }
+
+  private static StagedCapture capturePermissionPiped(List<String> executable, Path workspace,
+                                                       Path home, String provider)
+      throws Exception {
+    var command = new ArrayList<>(executable);
+    command.addAll(List.of("--provider", provider, "--model", "parity-model",
+        "--workspace", workspace.toString()));
+    ProcessBuilder builder = new ProcessBuilder(command).directory(workspace.toFile())
+        .redirectErrorStream(true);
+    builder.environment().putAll(terminalEnvironment(home));
+    Process process = builder.start();
+    var output = new ByteArrayOutputStream();
+    var error = new ByteArrayOutputStream();
+    Thread reader = startDrain(process.getInputStream(), output);
+    return drivePermission(process, output, error, reader, null, true);
+  }
+
+  private static StagedCapture drivePermission(Process process, ByteArrayOutputStream output,
+      ByteArrayOutputStream error, Thread reader, Thread errorReader, boolean enhancedControlC)
+      throws Exception {
+    awaitWelcome(output, error, Duration.ofSeconds(8));
+    awaitStableChrome(output, error, Duration.ofSeconds(5));
+    process.getOutputStream().write("\u001b[Z".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "A S K", Duration.ofSeconds(5));
+    process.getOutputStream().write("test permission\r".getBytes(StandardCharsets.UTF_8));
+    process.getOutputStream().flush();
+    awaitAnyViewportText(output, error, List.of("Permission Required", "Allow tool:"),
+        Duration.ofSeconds(8));
+    String permissionFrame = combined(output, error);
+    process.getOutputStream().write('y');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "permission parity complete", Duration.ofSeconds(8));
+    String finalFrame = combined(output, error);
+    if (process.isAlive()) {
+      byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
+          : new byte[] {3};
+      process.getOutputStream().write(quit);
+      process.getOutputStream().flush();
+      Thread.sleep(200);
+      if (!enhancedControlC && process.isAlive()) {
+        process.getOutputStream().write("Y\r".getBytes(StandardCharsets.US_ASCII));
+        process.getOutputStream().flush();
+      }
+    }
+    if (!process.waitFor(8, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      process.waitFor(3, TimeUnit.SECONDS);
+    }
+    reader.join(Duration.ofSeconds(3));
+    if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
+    return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
+        finalFrame);
+  }
+
+  private static Map<String, String> terminalEnvironment(Path home) {
+    Map<String, String> environment = new HashMap<>(System.getenv());
+    environment.put("APPDATA", home.toString());
+    environment.put("LOCALAPPDATA", home.toString());
+    environment.put("USERPROFILE", home.toString());
+    environment.put("HOME", home.toString());
+    environment.put("TERM", "xterm-256color");
+    environment.put("COLUMNS", Integer.toString(COLUMNS));
+    environment.put("LINES", Integer.toString(ROWS));
+    return environment;
+  }
+
+  private static Thread startDrain(java.io.InputStream input, ByteArrayOutputStream output) {
+    return Thread.startVirtualThread(() -> {
+      try { drain(input, output); }
+      catch (java.io.IOException ignored) { }
+    });
+  }
+
   private static void awaitWelcome(ByteArrayOutputStream output, ByteArrayOutputStream error,
                                    Duration timeout)
       throws InterruptedException {
@@ -401,6 +531,22 @@ final class NativeTerminalParityIT {
     }
   }
 
+  private static void awaitAnyViewportText(ByteArrayOutputStream output,
+      ByteArrayOutputStream error, List<String> expected, Duration timeout)
+      throws InterruptedException {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    while (System.nanoTime() < deadline) {
+      var viewport = new AnsiViewport(COLUMNS, ROWS);
+      viewport.feed(combined(output, error));
+      if (viewport.lines().stream().anyMatch(
+          line -> expected.stream().anyMatch(line::contains))) {
+        Thread.sleep(150);
+        return;
+      }
+      Thread.sleep(20);
+    }
+  }
+
   private static String combined(ByteArrayOutputStream output, ByteArrayOutputStream error) {
     return text(output) + text(error);
   }
@@ -426,10 +572,14 @@ final class NativeTerminalParityIT {
   }
 
   private static void assertCleanExit(Capture capture, String label) {
+    assertCleanExit(capture.exitCode(), capture.output(), label);
+  }
+
+  private static void assertCleanExit(int exitCode, String output, String label) {
     int windowsControlC = 0xc000013a;
-    assertThat(capture.exitCode()).as("%s output:%n%s", label, capture.output())
+    assertThat(exitCode).as("%s output:%n%s", label, output)
         .isIn(0, 130, windowsControlC);
-    assertThat(capture.output()).doesNotContain("failed to initialize terminal");
+    assertThat(output).doesNotContain("failed to initialize terminal");
   }
 
   private static HttpServer streamedTextProvider(List<String> requests) throws Exception {
@@ -450,6 +600,36 @@ final class NativeTerminalParityIT {
           exchange.getResponseBody().write(bytes, offset, Math.min(11, bytes.length - offset));
           exchange.getResponseBody().flush();
         }
+      }
+    });
+    return server;
+  }
+
+  private static HttpServer permissionProvider(List<String> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        String request = new String(exchange.getRequestBody().readAllBytes(),
+            StandardCharsets.UTF_8);
+        requests.add(request);
+        String body;
+        if (request.contains("\"role\":\"tool\"")) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":"
+              + "\"permission parity complete\"}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else {
+          body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
+              + "\"id\":\"tc_bash_permission\",\"type\":\"function\",\"function\":{"
+              + "\"name\":\"bash\",\"arguments\":"
+              + "\"{\\\"command\\\":\\\"echo terminal parity\\\"}\"}}]}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
       }
     });
     return server;
@@ -514,6 +694,37 @@ final class NativeTerminalParityIT {
     return lines.subList(start, end);
   }
 
+  private static void assertMatchingRegion(String nativeFrame, String javaFrame,
+                                           String anchor, String description) {
+    var nativeViewport = new AnsiViewport(COLUMNS, ROWS);
+    nativeViewport.feed(nativeFrame);
+    var javaViewport = new AnsiViewport(COLUMNS, ROWS);
+    javaViewport.feed(javaFrame);
+    assertThat(normalizeDynamicCells(regionFrom(javaViewport.lines(), anchor))).as(
+            "%s native viewport:%n%s%nJava viewport:%n%s", description,
+            numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+        .containsExactlyElementsOf(normalizeDynamicCells(
+            regionFrom(nativeViewport.lines(), anchor)));
+  }
+
+  private static List<String> normalizeDynamicCells(List<String> lines) {
+    String[] spinner = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+    return lines.stream().map(line -> {
+      String normalized = line;
+      if (line.contains("R U N N I N G")) {
+        for (String frame : spinner) normalized = normalized.replace(frame, "⣿");
+      }
+      if (line.contains("approve ")) {
+        normalized = normalized.replaceFirst("\\d+\\.\\ds", "#.#s");
+      }
+      if (line.contains("D O N E")) {
+        normalized = normalized.replaceFirst(
+            "\\d+(?:\\.\\d+)?(?:ms|s)\\s+(?=│$)", "#time ");
+      }
+      return normalized;
+    }).toList();
+  }
+
   private static int taglineRow(List<String> lines) {
     for (int index = 0; index < lines.size(); index++) {
       if (lines.get(index).contains(TAGLINE)) return index;
@@ -528,4 +739,6 @@ final class NativeTerminalParityIT {
   }
 
   private record Capture(int exitCode, String output, String frame) {}
+  private record StagedCapture(int exitCode, String output, String permissionFrame,
+                               String finalFrame) {}
 }
