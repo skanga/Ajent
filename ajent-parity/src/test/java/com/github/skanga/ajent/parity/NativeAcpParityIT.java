@@ -290,6 +290,96 @@ final class NativeAcpParityIT {
   }
 
   @Test
+  void rateLimitedHttpErrorDoesNotRetryInAcpLikePinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-retry-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-retry-workspace"));
+    var attempts = new java.util.concurrent.atomic.AtomicInteger();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = retryingProvider(attempts, requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-retry-home"), false)) {
+        nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "please recover");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      assertThat(attempts).hasValue(1);
+      requests.clear();
+      attempts.set(0);
+
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-retry-home"), true)) {
+        javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "please recover");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+      assertThat(attempts).hasValue(1);
+
+      assertThat(nativeRequests).hasSize(1);
+      assertThat(javaRequests).hasSize(1);
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("refusal");
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void terminalHttpErrorMapsToRefusalLikePinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-http-error-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-http-error-workspace"));
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = terminalErrorProvider(requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-http-error-home"), false)) {
+        nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "fail once");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-http-error-home"), true)) {
+        javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "fail once");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+
+      assertThat(nativeRequests).hasSize(1);
+      assertThat(javaRequests).hasSize(1);
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("refusal");
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void cancellationOfStalledProviderTurnMatchesPinnedExecutable(@TempDir Path root)
       throws Exception {
     Path repository = repositoryRoot();
@@ -516,6 +606,15 @@ final class NativeAcpParityIT {
         agent.callWithPermission("session/prompt", params, permissionOption)));
   }
 
+  private static Transcript exercisePlainPrompt(
+      AgentProcess agent, Path workspace, String text) throws Exception {
+    agent.call("initialize", initializeWithClientCallbacks());
+    List<JsonNode> created = agent.call("session/new", JSON.createObjectNode()
+        .put("cwd", workspace.toString()).set("mcpServers", JSON.createArrayNode()));
+    String sessionId = response(created).path("result").path("sessionId").textValue();
+    return new Transcript(sessionId, List.of(agent.call("session/prompt", prompt(sessionId, text))));
+  }
+
   private static HttpServer scriptedProvider(
       AtomicReference<Path> target, List<JsonNode> requests) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -675,6 +774,52 @@ final class NativeAcpParityIT {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
         exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static HttpServer retryingProvider(
+      java.util.concurrent.atomic.AtomicInteger attempts, List<JsonNode> requests)
+      throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        requests.add(JSON.readTree(exchange.getRequestBody()).deepCopy());
+        if (attempts.incrementAndGet() == 1) {
+          byte[] bytes = "{\"error\":{\"message\":\"slow down\","
+              .concat("\"type\":\"rate_limit\"}}")
+              .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.getResponseHeaders().set("Retry-After", "1");
+          exchange.sendResponseHeaders(429, bytes.length);
+          exchange.getResponseBody().write(bytes);
+          return;
+        }
+        String body = "data: {\"choices\":[{\"delta\":{\"content\":\"Recovered.\"}}]}\n\n"
+            + "data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":2},"
+            + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+            + "data: [DONE]\n\n";
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static HttpServer terminalErrorProvider(List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        requests.add(JSON.readTree(exchange.getRequestBody()).deepCopy());
+        byte[] bytes = "{\"error\":{\"message\":\"invalid request\","
+            .concat("\"type\":\"invalid_request_error\"}}")
+            .getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(400, bytes.length);
         exchange.getResponseBody().write(bytes);
       }
     });

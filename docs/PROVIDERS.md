@@ -33,6 +33,10 @@ same-path batch in order, and compares the canonical two-result continuation.
 For a weak `qwen2.5-coder:7b` model, it additionally streams a bare JSON call
 through `delta.content` with `finish_reason: stop`, then proves identical
 salvage, one execution, synthetic call identity, and structured continuation.
+The same gate proves the native ACP-specific error policy: `429` is one-shot
+even with `Retry-After`, and a terminal `400` becomes the same refusal with
+exact error metadata. The interactive reducer separately retains AgenTTY's
+transient/rate-limit retry ladders; provider recovery is surface-specific.
 This covers the native 22-tool provider subset and recall-biased order,
 system/user messages, output controls, tool-call replay, canonical argument
 encoding, and usage/stop stream handling without sending traffic to an external

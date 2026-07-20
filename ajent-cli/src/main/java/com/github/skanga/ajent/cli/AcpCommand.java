@@ -125,7 +125,8 @@ final class AcpCommand {
           providerConfiguration.contextWindow(), providerConfiguration.environment(),
           providerConfiguration.additionalTools()));
       var sessions = new AgentSessionFactory(
-          tools, providerConfiguration, client, dataDirectory);
+          tools, providerConfiguration, client, dataDirectory,
+          com.github.skanga.ajent.runtime.AgentReducer.ProviderRetryMode.FAIL_FAST);
       boolean keylessLocal = !provider.equals("anthropic")
           && !Endpoint.fromSpec(provider).useTls();
       var server = new AcpJsonRpcServer(

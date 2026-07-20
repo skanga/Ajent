@@ -41,6 +41,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /** Pure headless agent reducer: {@code (state, message) -> (state, effects)}. */
 public final class AgentReducer {
+  public enum ProviderRetryMode { RETRY, FAIL_FAST }
+
   private static final int MAX_STREAMING_BYTES = 8 * 1024 * 1024;
   private static final int MAX_TRUNCATION_RETRIES = 2;
   private static final long TOOL_PREVIEW_INTERVAL_NANOS = Duration.ofMillis(120).toNanos();
@@ -69,7 +71,19 @@ public final class AgentReducer {
                         IntSupplier contextMax,
                         Supplier<Optional<String>> oauthRefreshToken,
                         Supplier<Optional<CheckpointId>> checkpointIds,
-                        AttachmentContentPort attachmentContent) {
+                        AttachmentContentPort attachmentContent,
+                        ProviderRetryMode providerRetryMode) {
+    public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
+                   Supplier<MessageId> messageIds,
+                   Function<ToolUse, PermissionVerdict> permissions,
+                   DoubleSupplier retryJitter, IntSupplier contextMax,
+                   Supplier<Optional<String>> oauthRefreshToken,
+                   Supplier<Optional<CheckpointId>> checkpointIds,
+                   AttachmentContentPort attachmentContent) {
+      this(nanoClock, wallClock, messageIds, permissions, retryJitter, contextMax,
+          oauthRefreshToken, checkpointIds, attachmentContent, ProviderRetryMode.RETRY);
+    }
+
     public Context(LongSupplier nanoClock, Supplier<Instant> wallClock,
                    Supplier<MessageId> messageIds,
                    Function<ToolUse, PermissionVerdict> permissions) {
@@ -123,6 +137,7 @@ public final class AgentReducer {
       Objects.requireNonNull(oauthRefreshToken, "oauthRefreshToken");
       Objects.requireNonNull(checkpointIds, "checkpointIds");
       Objects.requireNonNull(attachmentContent, "attachmentContent");
+      Objects.requireNonNull(providerRetryMode, "providerRetryMode");
     }
   }
 
@@ -764,7 +779,8 @@ public final class AgentReducer {
     if (active.lastFailureNanos() != 0
         && now - active.lastFailureNanos() >= ProviderErrorPolicy.RETRY_DECAY.toNanos())
       priorTransient = 0;
-    if (errorClass == ErrorClass.AUTH && !committed && !state.oauthRefreshInFlight()
+    if (context.providerRetryMode() == ProviderRetryMode.RETRY
+        && errorClass == ErrorClass.AUTH && !committed && !state.oauthRefreshInFlight()
         && priorTransient < ProviderErrorPolicy.MAX_RETRIES) {
       Optional<String> refreshToken = context.oauthRefreshToken().get()
           .filter(token -> !token.isEmpty());
@@ -785,7 +801,8 @@ public final class AgentReducer {
         || active.firstDeltaNanos() != 0;
     int retryCap = ProviderErrorPolicy.maxRetries(errorClass, midStream);
     int priorBudget = midStream ? active.midStreamFailures() : priorTransient;
-    boolean canRetry = (errorClass == ErrorClass.TRANSIENT
+    boolean canRetry = context.providerRetryMode() == ProviderRetryMode.RETRY
+        && (errorClass == ErrorClass.TRANSIENT
         || errorClass == ErrorClass.RATE_LIMIT) && priorBudget < retryCap && !committed;
     if (canRetry) {
       ErrorClass retryClass = errorClass;
@@ -827,7 +844,8 @@ public final class AgentReducer {
     if (active.lastFailureNanos() != 0
         && now - active.lastFailureNanos() >= ProviderErrorPolicy.RETRY_DECAY.toNanos())
       prior = 0;
-    boolean canRetry = (errorClass == ErrorClass.TRANSIENT
+    boolean canRetry = context.providerRetryMode() == ProviderRetryMode.RETRY
+        && (errorClass == ErrorClass.TRANSIENT
         || errorClass == ErrorClass.RATE_LIMIT) && prior < ProviderErrorPolicy.MAX_RETRIES;
     if (canRetry) {
       ErrorClass retryClass = errorClass;

@@ -52,6 +52,12 @@ Prompt completion maps normal end, maximum tokens, refusal, cancellation, and
 errors to the corresponding ACP stop reason. Cancellation is scoped to the
 session and does not stop another concurrent session.
 
+ACP provider failures are fail-fast, matching AgenTTY's direct ACP stream
+loop: a transient or rate-limited HTTP response completes that prompt as a
+refusal and is not retried, even when it includes `Retry-After`. This differs
+intentionally from the interactive agent loop, whose native behavior includes
+bounded transient and rate-limit retries.
+
 ### Protocol safety
 
 Parse error, invalid request, invalid params, method not found, authentication,

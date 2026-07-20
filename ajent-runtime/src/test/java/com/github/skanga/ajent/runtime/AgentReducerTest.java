@@ -550,6 +550,25 @@ final class AgentReducerTest {
     assertThat(retry.effects()).singleElement().isInstanceOf(RuntimeEffect.StartStream.class);
   }
 
+  @Test void failFastProviderModeDoesNotScheduleTransientRecovery() {
+    var reducer = new AgentReducer(new AgentReducer.Context(System::nanoTime, Instant::now,
+        MessageId::random, ignored -> PermissionVerdict.ALLOW, () -> 1.0, () -> 200_000,
+        java.util.Optional::empty, java.util.Optional::empty, AttachmentContentPort.inline(),
+        AgentReducer.ProviderRetryMode.FAIL_FAST));
+    AgentState streaming = reducer.update(AgentState.initial(thread()),
+        new RuntimeMessage.Submit("hello", List.of())).state();
+
+    AgentReducer.Step failed = reducer.update(streaming,
+        new RuntimeMessage.ProviderEvent(streaming.activeTurnId(), new StreamEvent.Error(
+            "HTTP 429: slow down", Optional.of(Duration.ofSeconds(1)),
+            ErrorClass.RATE_LIMIT, false)));
+
+    assertThat(failed.state().phase()).isInstanceOf(SessionPhase.Idle.class);
+    assertThat(failed.effects()).noneMatch(RuntimeEffect.Schedule.class::isInstance);
+    assertThat(failed.state().thread().messages().getLast().error())
+        .contains("HTTP 429: slow down");
+  }
+
   @Test void tickTripsTheNativeStreamStallWatchdogExactlyOnce() {
     var clock = new java.util.concurrent.atomic.AtomicLong(1_000L);
     AgentReducer reducer = reducer(PermissionVerdict.ALLOW, clock::get);

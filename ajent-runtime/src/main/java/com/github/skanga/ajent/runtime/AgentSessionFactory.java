@@ -31,6 +31,7 @@ public final class AgentSessionFactory {
   private final CheckpointPort checkpoints;
   private final AttachmentContentPort attachmentContent;
   private final Supplier<Set<String>> initialGrants;
+  private final AgentReducer.ProviderRetryMode providerRetryMode;
 
   public AgentSessionFactory(
       ToolRuntimeFactory.Components tools,
@@ -38,7 +39,18 @@ public final class AgentSessionFactory {
       HttpClient client,
       Path dataDirectory) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create,
-        CheckpointPort.disabled(), AttachmentContentPort.inline(), Set::of);
+        CheckpointPort.disabled(), AttachmentContentPort.inline(), Set::of,
+        AgentReducer.ProviderRetryMode.RETRY);
+  }
+
+  public AgentSessionFactory(
+      ToolRuntimeFactory.Components tools,
+      LiveProviderFactory.Configuration baseProvider,
+      HttpClient client,
+      Path dataDirectory,
+      AgentReducer.ProviderRetryMode providerRetryMode) {
+    this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create,
+        CheckpointPort.disabled(), AttachmentContentPort.inline(), Set::of, providerRetryMode);
   }
 
   public AgentSessionFactory(
@@ -48,7 +60,7 @@ public final class AgentSessionFactory {
       Path dataDirectory,
       CheckpointPort checkpoints) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
-        AttachmentContentPort.inline(), Set::of);
+        AttachmentContentPort.inline(), Set::of, AgentReducer.ProviderRetryMode.RETRY);
   }
 
   public AgentSessionFactory(
@@ -59,7 +71,7 @@ public final class AgentSessionFactory {
       CheckpointPort checkpoints,
       AttachmentContentPort attachmentContent) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
-        attachmentContent, Set::of);
+        attachmentContent, Set::of, AgentReducer.ProviderRetryMode.RETRY);
   }
 
   public AgentSessionFactory(
@@ -71,7 +83,7 @@ public final class AgentSessionFactory {
       AttachmentContentPort attachmentContent,
       Supplier<Set<String>> initialGrants) {
     this(tools, baseProvider, client, dataDirectory, LiveProviderFactory::create, checkpoints,
-        attachmentContent, initialGrants);
+        attachmentContent, initialGrants, AgentReducer.ProviderRetryMode.RETRY);
   }
 
   AgentSessionFactory(
@@ -81,7 +93,7 @@ public final class AgentSessionFactory {
       Path dataDirectory,
       BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers) {
     this(tools, baseProvider, client, dataDirectory, providers, CheckpointPort.disabled(),
-        AttachmentContentPort.inline(), Set::of);
+        AttachmentContentPort.inline(), Set::of, AgentReducer.ProviderRetryMode.RETRY);
   }
 
   private AgentSessionFactory(
@@ -92,7 +104,8 @@ public final class AgentSessionFactory {
       BiFunction<LiveProviderFactory.Configuration, HttpClient, ProviderPort> providers,
       CheckpointPort checkpoints,
       AttachmentContentPort attachmentContent,
-      Supplier<Set<String>> initialGrants) {
+      Supplier<Set<String>> initialGrants,
+      AgentReducer.ProviderRetryMode providerRetryMode) {
     this.tools = Objects.requireNonNull(tools, "tools");
     this.baseProvider = Objects.requireNonNull(baseProvider, "baseProvider");
     this.client = Objects.requireNonNull(client, "client");
@@ -102,6 +115,7 @@ public final class AgentSessionFactory {
     this.checkpoints = Objects.requireNonNull(checkpoints, "checkpoints");
     this.attachmentContent = Objects.requireNonNull(attachmentContent, "attachmentContent");
     this.initialGrants = Objects.requireNonNull(initialGrants, "initialGrants");
+    this.providerRetryMode = Objects.requireNonNull(providerRetryMode, "providerRetryMode");
   }
 
   public AgentLoop create(
@@ -155,7 +169,7 @@ public final class AgentSessionFactory {
         () -> checkpoints.enabled()
             ? java.util.Optional.of(new com.github.skanga.ajent.domain.CheckpointId(
                 MessageId.random().value())) : java.util.Optional.empty(),
-        attachmentContent));
+        attachmentContent, providerRetryMode));
     ProviderPort provider = (turnId, messages, cancellation, sink) ->
         providers.apply(Objects.requireNonNull(configuration.get(), "provider configuration"), client)
             .stream(turnId, messages, cancellation, sink);
