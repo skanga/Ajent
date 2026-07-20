@@ -245,8 +245,8 @@ public final class OllamaWire {
     }
     for (ToolUse tool : message.toolCalls()) {
       ObjectNode callObject = JSON.createObjectNode();
+      callObject.set("tool_args", sortedObjectKeys(JSON.valueToTree(tool.arguments())));
       callObject.put("tool_name", tool.name().value());
-      callObject.set("tool_args", JSON.valueToTree(tool.arguments()));
       ObjectNode callMessage = result.addObject();
       callMessage.put("role", "assistant");
       try {
@@ -258,6 +258,23 @@ public final class OllamaWire {
       toolResult.put("role", "user");
       toolResult.put("content", "TOOL RESULT (" + tool.name().value() + "):\n" + toolOutput(tool));
     }
+  }
+
+  private static JsonNode sortedObjectKeys(JsonNode value) {
+    if (value.isObject()) {
+      ObjectNode sorted = JSON.createObjectNode();
+      var names = new java.util.ArrayList<String>();
+      value.fieldNames().forEachRemaining(names::add);
+      names.sort(String::compareTo);
+      for (String name : names) sorted.set(name, sortedObjectKeys(value.get(name)));
+      return sorted;
+    }
+    if (value.isArray()) {
+      ArrayNode sorted = JSON.createArrayNode();
+      value.forEach(item -> sorted.add(sortedObjectKeys(item)));
+      return sorted;
+    }
+    return value.deepCopy();
   }
 
   private static String jsonProtocolAddendum(List<ToolSpecification> tools) {
@@ -288,7 +305,7 @@ public final class OllamaWire {
       result.append("- ").append(tool.name());
       if (!tool.description().isEmpty()) {
         String description = tool.description().lines().findFirst().orElse("");
-        result.append(": ").append(description, 0, Math.min(160, description.length()));
+        result.append(": ").append(truncateUtf8(description, 160));
       }
       JsonNode properties = tool.inputSchema().path("properties");
       if (properties.isObject() && !properties.isEmpty()) {
@@ -299,6 +316,20 @@ public final class OllamaWire {
       result.append('\n');
     }
     return result.toString();
+  }
+
+  private static String truncateUtf8(String value, int maxBytes) {
+    int bytes = 0;
+    int end = 0;
+    while (end < value.length()) {
+      int codePoint = value.codePointAt(end);
+      int width = new String(Character.toChars(codePoint))
+          .getBytes(StandardCharsets.UTF_8).length;
+      if (bytes + width > maxBytes) break;
+      bytes += width;
+      end += Character.charCount(codePoint);
+    }
+    return value.substring(0, end);
   }
 
   private static ObjectNode jsonProtocolSchema(List<ToolSpecification> tools) {

@@ -108,6 +108,54 @@ final class NativeAcpParityIT {
   }
 
   @Test
+  void nativeOllamaReloadedImageRequestMatchesPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-ollama-image-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-ollama-image-workspace"));
+    Path nativeHome = root.resolve("native-ollama-image-home");
+    Path javaHome = root.resolve("java-ollama-image-home");
+    writeImageThread(nativeHome);
+    writeImageThread(javaHome);
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedOllamaProvider(requests);
+    provider.start();
+    Map<String, String> environment = Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + provider.getAddress().getPort());
+    try {
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace),
+          nativeHome, false, environment)) {
+        nativeTranscript = exerciseReloadedPrompt(agent, nativeWorkspace, "image-thread");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace),
+          javaHome, true, environment)) {
+        javaTranscript = exerciseReloadedPrompt(agent, javaWorkspace, "image-thread");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+
+      assertThat(nativeRequests).hasSize(1);
+      assertThat(javaRequests).hasSize(1);
+      assertThat(nativeRequests.getFirst().at("/messages/1/images/0").textValue())
+          .isEqualTo("YWJj");
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void nativeOllamaToolCallAndContinuationMatchPinnedExecutable(@TempDir Path root)
       throws Exception {
     Path repository = repositoryRoot();
@@ -145,6 +193,58 @@ final class NativeAcpParityIT {
 
       assertThat(nativeRequests).hasSize(2);
       assertThat(javaRequests).hasSize(2);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void nativeOllamaWeakModelJsonToolCallMatchesPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-ollama-json-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-ollama-json-workspace"));
+    var target = new AtomicReference<Path>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedOllamaJsonProtocolProvider(target, requests);
+    provider.start();
+    Map<String, String> environment = Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + provider.getAddress().getPort());
+    String model = "qwen2.5-coder:7b";
+    try {
+      Path nativeTarget = nativeWorkspace.resolve("ollama-json-tool.txt");
+      target.set(nativeTarget);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, "ollama", model),
+          root.resolve("native-ollama-json-home"), false, environment)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace, "allow_always");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+      assertThat(nativeTarget).hasContent("written by weak ollama\n");
+
+      Path javaTarget = javaWorkspace.resolve("ollama-json-tool.txt");
+      target.set(javaTarget);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, "ollama", model),
+          root.resolve("java-ollama-json-home"), true, environment)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace, "allow_always");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+      assertThat(javaTarget).hasContent("written by weak ollama\n");
+
+      assertThat(nativeRequests).hasSize(2);
+      assertThat(javaRequests).hasSize(2);
+      assertThat(nativeRequests.getFirst().has("format")).isTrue();
+      assertThat(nativeRequests.getFirst().has("tools")).isFalse();
       assertThat(firstDifference(
           normalizePrompt(nativeTranscript, nativeWorkspace, true),
           normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
@@ -195,6 +295,62 @@ final class NativeAcpParityIT {
           normalizeRequests(nativeRequests, nativeWorkspace, true),
           normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
     } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void nativeOllamaCancellationMatchesPinnedExecutable(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-ollama-cancel-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-ollama-cancel-workspace"));
+    var activeGate = new AtomicReference<CancelGate>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = stalledOllamaProvider(activeGate, requests);
+    provider.start();
+    Map<String, String> environment = Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + provider.getAddress().getPort());
+    try {
+      CancelGate nativeGate = new CancelGate();
+      activeGate.set(nativeGate);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace),
+          root.resolve("native-ollama-cancel-home"), false, environment)) {
+        nativeTranscript = exerciseCancellation(agent, nativeWorkspace, nativeGate);
+        nativeGate.release().set(true);
+        assertThat(nativeGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      } finally {
+        nativeGate.release().set(true);
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+
+      CancelGate javaGate = new CancelGate();
+      activeGate.set(javaGate);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace),
+          root.resolve("java-ollama-cancel-home"), true, environment)) {
+        javaTranscript = exerciseCancellation(agent, javaWorkspace, javaGate);
+        javaGate.release().set(true);
+        assertThat(javaGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      } finally {
+        javaGate.release().set(true);
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("cancelled");
+    } finally {
+      CancelGate gate = activeGate.get();
+      if (gate != null) gate.release().set(true);
       provider.stop(0);
     }
   }
@@ -878,6 +1034,25 @@ final class NativeAcpParityIT {
     return new Transcript(sessionId, List.of(agent.call("session/prompt", prompt(sessionId, text))));
   }
 
+  private static Transcript exerciseReloadedPrompt(
+      AgentProcess agent, Path workspace, String sessionId) throws Exception {
+    agent.call("initialize", initializeWithClientCallbacks());
+    agent.call("session/load", session(sessionId).put("cwd", workspace.toString())
+        .set("mcpServers", JSON.createArrayNode()));
+    return new Transcript(sessionId, List.of(
+        agent.call("session/prompt", prompt(sessionId, "describe the prior image"))));
+  }
+
+  private static void writeImageThread(Path home) throws Exception {
+    Path threads = Files.createDirectories(home.resolve(".agentty/threads"));
+    Files.writeString(threads.resolve("image-thread.json"), """
+        {"id":"image-thread","title":"Image parity","created_at":1,"updated_at":1,
+         "messages":[{"id":"image-message","role":"user","text":"prior image",
+          "timestamp":1,"tool_calls":[],"images":[
+            {"media_type":"image/png","data":"YWJj"}]}],"compactions":[]}
+        """, StandardCharsets.UTF_8);
+  }
+
   private static HttpServer scriptedProvider(
       AtomicReference<Path> target, List<JsonNode> requests) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -994,6 +1169,61 @@ final class NativeAcpParityIT {
     return server;
   }
 
+  private static HttpServer scriptedOllamaJsonProtocolProvider(
+      AtomicReference<Path> target, List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/api/show", exchange -> {
+      try (exchange) {
+        byte[] bytes = "{\"model_info\":{\"qwen2.context_length\":32768},"
+            .concat("\"capabilities\":[\"tools\"]}").getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.createContext("/api/chat", exchange -> {
+      try (exchange) {
+        JsonNode request = JSON.readTree(exchange.getRequestBody());
+        requests.add(request.deepCopy());
+        boolean continuation = requests.size() % 2 == 0;
+        List<String> chunks;
+        if (continuation) {
+          chunks = List.of("{\"tool_name\":\"response\",",
+              "\"tool_args\":{\"text\":\"Weak tool complete.\"}}");
+        } else {
+          ObjectNode tool = JSON.createObjectNode();
+          tool.putArray("thoughts").add("write the requested file");
+          tool.put("tool_name", "write");
+          tool.putObject("tool_args").put("file_path", target.get().toString())
+              .put("content", "written by weak ollama\n");
+          String payload = JSON.writeValueAsString(tool);
+          int first = payload.length() / 3;
+          int second = first * 2;
+          chunks = List.of(payload.substring(0, first), payload.substring(first, second),
+              payload.substring(second));
+        }
+        var body = new StringBuilder();
+        for (String chunk : chunks) {
+          ObjectNode frame = JSON.createObjectNode().put("model", "qwen2.5-coder:7b");
+          frame.putObject("message").put("role", "assistant").put("content", chunk);
+          frame.put("done", false);
+          body.append(JSON.writeValueAsString(frame)).append('\n');
+        }
+        ObjectNode done = JSON.createObjectNode().put("model", "qwen2.5-coder:7b");
+        done.putObject("message").put("role", "assistant").put("content", "");
+        done.put("done", true).put("done_reason", "stop")
+            .put("prompt_eval_count", continuation ? 480 : 410)
+            .put("eval_count", continuation ? 9 : 15);
+        body.append(JSON.writeValueAsString(done)).append('\n');
+        byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/x-ndjson");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
   private static HttpServer ollamaErrorProvider(List<JsonNode> requests) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/api/show", exchange -> {
@@ -1013,6 +1243,43 @@ final class NativeAcpParityIT {
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(404, bytes.length);
         exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static HttpServer stalledOllamaProvider(
+      AtomicReference<CancelGate> activeGate, List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+    server.createContext("/api/show", exchange -> {
+      try (exchange) {
+        byte[] bytes = "{\"model_info\":{\"qwen3.context_length\":32768},"
+            .concat("\"capabilities\":[\"tools\"]}").getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    server.createContext("/api/chat", exchange -> {
+      CancelGate gate = activeGate.get();
+      try (exchange) {
+        requests.add(JSON.readTree(exchange.getRequestBody()).deepCopy());
+        exchange.getResponseHeaders().set("Content-Type", "application/x-ndjson");
+        exchange.sendResponseHeaders(200, 0);
+        String heartbeat = "{\"model\":\"qwen3:14b\",\"message\":{"
+            + "\"role\":\"assistant\",\"content\":\"\"},\"done\":false}\n";
+        exchange.getResponseBody().write(heartbeat.repeat(128).getBytes(StandardCharsets.UTF_8));
+        exchange.getResponseBody().flush();
+        gate.started().countDown();
+        while (!gate.release().get()) {
+          java.util.concurrent.locks.LockSupport.parkNanos(10_000_000);
+        }
+      } catch (java.io.IOException ignored) {
+        // Cancellation closes the response stream.
+      } finally {
+        gate.started().countDown();
+        gate.finished().countDown();
       }
     });
     return server;

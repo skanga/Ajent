@@ -41,6 +41,20 @@ class OllamaRequestBodyTest {
     assertThat(body.at("/options/temperature").doubleValue()).isEqualTo(0.2);
   }
 
+  @Test
+  void jsonProtocolTruncatesCatalogDescriptionsByUtf8BytesLikeNative() {
+    ChatRequest base = request(true);
+    var request = new ChatRequest(base.model(), base.systemPrompt(), base.messages(),
+        List.of(new ToolSpecification("bash", "é".repeat(100),
+            JSON.createObjectNode().put("type", "object"), false)),
+        base.maxTokens(), base.auth(), base.endpoint(), base.contextWindow(), true);
+
+    String prompt = OllamaWire.buildRequestBody(request).at("/messages/0/content").textValue();
+
+    assertThat(prompt).contains("- bash: " + "é".repeat(80) + "\n")
+        .doesNotContain("é".repeat(81));
+  }
+
   private static ChatRequest request(boolean jsonProtocol) {
     return new ChatRequest(
         "qwen", "system", List.of(new Message(Role.USER, "hi", List.of(), List.of())),

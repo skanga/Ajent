@@ -24,7 +24,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Native-executable standalone MCP characterization that executes every one of
   the 22 published tool families against paired deterministic workspaces.
 - Native-executable Ollama characterization for `/api/chat` request bodies,
-  fragmented NDJSON, tool execution/continuation, and HTTP errors.
+  fragmented NDJSON, persisted images, native and weak-model JSON-protocol tool
+  execution/continuation, HTTP errors, and live cancellation.
 
 ### Changed
 
@@ -46,6 +47,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   output, application-data paths, and unavailable `task` behavior.
 - Matched Ollama's synthetic missing tool-call ids and model-specific HTTP 404
   recovery hint.
+- Matched Ollama's UTF-8-byte tool-description truncation and recursively
+  canonical JSON-protocol continuation history.
 
 ### Known limitations
 

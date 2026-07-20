@@ -67,12 +67,27 @@ class OllamaWireTest {
     assertThat(messages).hasSize(2);
     assertThat(messages.at("/0/role").textValue()).isEqualTo("assistant");
     assertThat(messages.at("/0/tool_calls").isMissingNode()).isTrue();
+    assertThat(messages.at("/0/content").textValue())
+        .isEqualTo("{\"tool_args\":{\"command\":\"ls -la\"},\"tool_name\":\"bash\"}");
     var object = JSON.readTree(messages.at("/0/content").textValue());
     assertThat(object.path("tool_name").textValue()).isEqualTo("bash");
     assertThat(object.at("/tool_args/command").textValue()).isEqualTo("ls -la");
     assertThat(messages.at("/1/role").textValue()).isEqualTo("user");
     assertThat(messages.at("/1/content").textValue())
         .contains("TOOL RESULT (bash)", "file1");
+  }
+
+  @Test
+  void jsonProtocolCanonicalizesNestedToolArgumentKeysLikeNativeJson() {
+    var call = doneCall("call_1", "write",
+        Map.of("file_path", "x.txt", "content", "body"), "ok");
+
+    var messages = OllamaWire.buildMessages(List.of(
+        new Message(Role.ASSISTANT, "", List.of(), List.of(call))), true);
+
+    assertThat(messages.at("/0/content").textValue()).isEqualTo(
+        "{\"tool_args\":{\"content\":\"body\",\"file_path\":\"x.txt\"},"
+            + "\"tool_name\":\"write\"}");
   }
 
   @Test

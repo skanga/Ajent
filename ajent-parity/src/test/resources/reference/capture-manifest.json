@@ -73,15 +73,15 @@
     },
     {
       "id": "provider-ollama",
-      "status": "partial-native-executable-green",
+      "status": "native-executable-green",
       "sources": ["agentty/src/provider/ollama/transport.cpp", "agentty/tests/ollama_transport_test.cpp"],
-      "cases": ["native request", "NDJSON fragmentation", "images", "tool calls", "errors", "no-key behavior"],
+      "cases": ["native request", "NDJSON fragmentation", "images", "native tool calls", "JSON-protocol tool calls", "errors", "live cancellation", "no-key behavior"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeAcpParityIT",
-        "mvn -q verify -Pcharacterization: exact native Ollama /api/chat request bodies, fragmented NDJSON text/usage/stop, structured tool execution and continuation, local no-key behavior, and HTTP 404 model diagnostics against the pinned Windows executable"
+        "mvn -q verify -Pcharacterization: exact native Ollama /api/chat request bodies, persisted image replay, fragmented NDJSON text/usage/stop, structured and weak-model JSON-protocol tool execution/continuation, local no-key behavior, HTTP 404 model diagnostics, and blocked-body cancellation against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["native /api/chat request", "fragmented NDJSON", "text", "usage", "stop reason", "structured tool call without an id", "native synthetic tool-call id", "permissioned write execution", "role:tool continuation request", "no-key behavior", "HTTP 404 refusal", "model-specific ollama pull hint"],
-      "remainingExecutableCases": ["images", "JSON-protocol leaked-call salvage", "live cancellation"]
+      "coveredExecutableCases": ["native /api/chat request", "fragmented NDJSON", "text", "usage", "stop reason", "persisted user image reload", "base64 images array", "structured tool call without an id", "native synthetic tool-call id", "permissioned write execution", "role:tool continuation request", "weak-model format schema", "weak-model native-tools omission", "UTF-8-byte catalog truncation", "fragmented JSON-protocol call salvage", "argument alias repair", "canonical JSON-protocol history", "JSON response pseudo-tool", "blocked-body cancellation and exact error", "no-key behavior", "HTTP 404 refusal", "model-specific ollama pull hint"],
+      "remainingExecutableCases": []
     },
     {
       "id": "native-tools",
