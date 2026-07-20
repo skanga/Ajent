@@ -30,6 +30,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   fragmented SSE, tool execution/continuation, HTTP errors, and cancellation.
 - Native-executable persistence characterization for settings save ordering,
   complete ACP thread/session-index JSON, atomic cleanup, and shutdown flush.
+- Native-executable tool edge characterization for validation, workspace
+  recovery guidance, timeout, cancellation, large implicit reads, UTF-8-safe
+  truncation, and structured changes.
 
 ### Changed
 
@@ -58,6 +61,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   downloaded 0.2.8 binary.
 - Matched native pre-validation model persistence and ACP title derivation from
   the newline-terminated stored user message.
+- Matched native large-file read outlining/leading slices, inclusive
+  `end_line`, workspace recovery guidance, and the provider-plus-dispatcher
+  two-stage output budget.
 
 ### Known limitations
 

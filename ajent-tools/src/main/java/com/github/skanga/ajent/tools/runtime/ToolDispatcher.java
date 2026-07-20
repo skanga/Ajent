@@ -95,7 +95,16 @@ public final class ToolDispatcher {
           ? failed.error().detail() : failed.error().render();
       result = failure(ToolErrorKind.UNKNOWN, detail);
     }
-    return applyBudget(spec, result);
+    return applyBudget(spec, applyProviderBudget(spec, result));
+  }
+
+  static ToolResult applyProviderBudget(ToolSpec spec, ToolResult result) {
+    if (!(result instanceof ToolResult.Success success) || spec.maxOutputCharacters() <= 0)
+      return result;
+    ToolOutput output = success.output();
+    String bounded = OutputBudget.applyProvider(output.text(), spec.maxOutputCharacters());
+    if (bounded.equals(output.text())) return result;
+    return new ToolResult.Success(new ToolOutput(bounded, output.change()));
   }
 
   static ToolResult applyBudget(ToolSpec spec, ToolResult result) {

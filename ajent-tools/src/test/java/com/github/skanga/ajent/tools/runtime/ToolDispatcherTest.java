@@ -131,11 +131,13 @@ class ToolDispatcherTest {
     String content = "HEAD_SENTINEL" + "x".repeat(85_000) + "TAIL_SENTINEL";
     Files.writeString(root.resolve("oversized.txt"), content);
 
-    ToolResult.Success result = (ToolResult.Success) dispatcher(root).execute(
-        "read", JSON.createObjectNode().put("path", "oversized.txt"));
+    ToolDispatcher dispatcher = dispatcher(root);
+    ToolResult.Success result = (ToolResult.Success) dispatcher.execute(
+        "read", JSON.createObjectNode().put("path", "oversized.txt")
+            .put("offset", 1).put("limit", 2_000));
 
     assertThat(result.output().text()).startsWith("HEAD_SENTINEL")
-        .contains("output exceeded tool's budget")
+        .contains("[... 29 chars elided", "output exceeded tool's budget")
         .doesNotContain("TAIL_SENTINEL");
     assertThat(result.output().text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
         .isLessThan(81_000);

@@ -39,6 +39,15 @@ public final class OutputBudget {
     };
   }
 
+  /** mcp-cpp provider-layer cap applied before AgenTTY's strategy-aware dispatch cap. */
+  public static String applyProvider(String text, int budget) {
+    if (budget <= 0) return text;
+    byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+    if (bytes.length <= budget) return text;
+    int cut = safeFloor(bytes, budget);
+    return slice(bytes, 0, cut) + "\n\n[... " + (bytes.length - cut) + " chars elided ...]";
+  }
+
   private static int safeFloor(byte[] value, int index) {
     if (index >= value.length) return value.length;
     for (int back = 0; back < 4 && index > 0; back++, index--) {

@@ -27,11 +27,22 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /** AgenTTY-compatible read/write/edit/list_dir implementations. */
 public final class FileTools {
   private static final long MAX_READ_BYTES = 1024L * 1024L;
   private static final long MAX_WRITE_BYTES = 5L * 1024L * 1024L;
+  private static final int AUTO_OUTLINE_BYTES = 32 * 1024;
+  private static final int MAX_OUTLINE_ENTRIES = 250;
+  private static final Pattern OUTLINE_PATTERN = Pattern.compile(
+      "^(?:#{1,6}\\s+\\S.*|(?:(?:pub|public|private|protected|static|inline|virtual|async|"
+          + "export(?:\\s+default)?|extern(?:\\s+\"[^\"]*\")?|template\\s*<[^>]*>)\\s+)*"
+          + "(?:fn|def|class|struct|enum|impl|trait|interface|namespace|function|module|"
+          + "component|service|directive)\\b[^=]*|(?:const|let|var)\\s+\\w+\\s*(?:=|:)|"
+          + "\\w+\\s*=\\s*(?:async\\s+)?(?:function|\\([^)]*\\)\\s*=>)|"
+          + "(?:[\\w:~<>\\[\\]&*\\s,]+\\s+)?\\w+\\s*\\([^)]*\\)\\s*"
+          + "(?:const\\s*)?\\{?\\s*)$");
   private static final String STALE_READ = "File unchanged since last read. The content from the "
       + "earlier Read tool_result in this conversation is still current — refer to that instead "
       + "of re-reading.";
@@ -83,7 +94,13 @@ public final class FileTools {
         "not a regular file: " + path);
     int offset = Math.max(1, args.integer("offset", 1));
     int limit = args.integer("limit", 2000);
+    if (hasExact(arguments, "end_line") && !hasExact(arguments, "limit")) {
+      int endLine = args.integer("end_line", 0);
+      if (endLine >= offset) limit = endLine - offset + 1;
+    }
     if (limit <= 0) limit = 2000;
+    boolean explicitRange = hasAnyExact(arguments,
+        "offset", "limit", "start_line", "end_line");
     FileTime modified = Files.getLastModifiedTime(path);
     ReadKey key = new ReadKey(path.toRealPath(), offset, limit);
     if (modified.equals(READ_CACHE.get(key))) return success(STALE_READ);
@@ -97,6 +114,14 @@ public final class FileTools {
         "cannot read binary file: " + path + " (" + size
             + " bytes). Use the bash tool with `file`, `hexdump`, or similar.");
     String content = new String(bytes, StandardCharsets.UTF_8);
+    if (!explicitRange && bytes.length > AUTO_OUTLINE_BYTES) {
+      String outlined = autoOutline(path, content, bytes.length);
+      String description = args.string("display_description", "");
+      if (!description.isEmpty()) outlined = description + "\n" + outlined;
+      READ_CACHE.put(key, modified);
+      recordSnapshot(path, modified, bytes);
+      return success(outlined);
+    }
     List<String> lines = lines(content);
     var output = new StringBuilder();
     int start = Math.min(offset - 1, lines.size());
@@ -117,6 +142,71 @@ public final class FileTools {
     READ_CACHE.put(key, modified);
     recordSnapshot(path, modified, bytes);
     return success(output.toString());
+  }
+
+  private static String autoOutline(Path path, String content, int byteLength) {
+    int kibibytes = byteLength / 1024;
+    String outline = renderOutline(content);
+    if (!outline.isEmpty()) {
+      return "SUCCESS: File outline retrieved. This file is " + kibibytes + " KiB "
+          + "and was returned as a structural overview instead of full content to save context.\n\n"
+          + "IMPORTANT: Do NOT retry this read without a line range — you will get the exact "
+          + "same outline back and waste a turn. To see real file content you MUST pass "
+          + "start_line + end_line (or offset + limit).\n\n# Outline of " + path + "\n\n"
+          + outline + "\nNEXT STEPS: to read a specific symbol's body, call read again with "
+          + "this path plus start_line and end_line covering the lines around the symbol "
+          + "(e.g. for `[L120] fn foo()`, try start_line=120, end_line=180).";
+    }
+    String peek = utf8Prefix(content, 1024);
+    int newline = peek.lastIndexOf('\n');
+    if (newline > 0) peek = peek.substring(0, newline + 1);
+    int totalLines = content.isEmpty() ? 0 : 1;
+    for (int index = 0; index < content.length(); index++) {
+      if (content.charAt(index) == '\n') totalLines++;
+    }
+    if (content.endsWith("\n")) totalLines--;
+    return "SUCCESS: First 1 KiB of a " + kibibytes + " KiB file with no recognisable code "
+        + "structure (README / log / data dump). Returned a leading slice instead of the full "
+        + "body to save context.\n\nIMPORTANT: Do NOT retry this read without a line range — "
+        + "you will get the exact same slice back. To see more, pass start_line + end_line "
+        + "(or offset + limit); the file has " + totalLines + " lines total.\n\n"
+        + "# First 1 KiB of " + path + "\n\n" + peek;
+  }
+
+  private static String renderOutline(String content) {
+    var outline = new StringBuilder();
+    String[] lines = content.split("\\n", -1);
+    int emitted = 0;
+    for (int index = 0; index < lines.length && emitted < MAX_OUTLINE_ENTRIES; index++) {
+      String line = lines[index].strip();
+      if (line.isEmpty() || line.startsWith("}") || line.startsWith(")")
+          || line.startsWith("]") || line.startsWith(";") || line.startsWith("/")) continue;
+      if (OUTLINE_PATTERN.matcher(line).matches()) {
+        outline.append("[L").append(index + 1).append("] ").append(line).append('\n');
+        emitted++;
+      }
+    }
+    if (emitted >= MAX_OUTLINE_ENTRIES) {
+      outline.append("\n[outline truncated at 250 entries; use start_line/end_line to read "
+          + "specific regions]\n");
+    }
+    return outline.toString();
+  }
+
+  private static String utf8Prefix(String value, int maximumBytes) {
+    byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+    int length = Math.min(maximumBytes, bytes.length);
+    while (length > 0 && length < bytes.length && (bytes[length] & 0xc0) == 0x80) length--;
+    return new String(bytes, 0, length, StandardCharsets.UTF_8);
+  }
+
+  private static boolean hasExact(JsonNode arguments, String field) {
+    return arguments != null && arguments.isObject() && arguments.has(field);
+  }
+
+  private static boolean hasAnyExact(JsonNode arguments, String... fields) {
+    for (String field : fields) if (hasExact(arguments, field)) return true;
+    return false;
   }
 
   private ToolResult write(JsonNode arguments) throws IOException {
@@ -290,7 +380,8 @@ public final class FileTools {
     if (sandbox.isReadable(path)) return null;
     return failure(ToolErrorKind.OUT_OF_WORKSPACE, "tool '" + tool + "' refused: '" + path
         + "' is outside the workspace root '" + sandbox.workspaceRoot()
-        + "' and not under any skill directory.");
+        + "' and not under any skill directory. Restart ajent in a parent directory or pass "
+        + "--workspace <dir> to widen the scope.");
   }
 
   private ToolResult requireWritable(Path path, String tool) {

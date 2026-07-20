@@ -29,6 +29,13 @@ Edit matching supports exact and fuzzy recovery plus parameter-tag repair.
 File snapshots track mtime, size, and fingerprint so an external modification
 between observation and mutation is reported rather than overwritten.
 
+An implicit read of a file larger than 32 KiB returns a structural outline with
+line anchors. If no recognizable code structure exists, it returns a UTF-8-safe
+leading 1 KiB slice and the total line count. A caller must then provide
+`start_line` plus inclusive `end_line`, or `offset` plus `limit`, to retrieve
+real content. This matches the native context-saving behavior and prevents an
+unchanged unbounded retry from consuming another turn.
+
 ### Search and repository map
 
 Literal/regex grep, glob/path discovery, symbol context, and PageRank-style
@@ -116,10 +123,12 @@ order. Cancellation and late results are checked against the active turn.
 
 ## Output budgets
 
-Each tool has a UTF-8-safe conversation budget. Depending on the catalog
-policy, output keeps a head, tail, or structured head/tail with a marker.
-Structured file changes are preserved independently from display truncation.
-A zero budget follows the native bypass meaning.
+Each tool has a UTF-8-safe conversation budget. AgenTTY applies it twice: the
+native provider layer first performs a head-only byte cap, then dynamic dispatch
+applies the catalog's head, tail, or structured head/tail policy. Ajent preserves
+both stages and their distinct elision markers. Structured file changes remain
+independent from display truncation. A zero budget follows the native bypass
+meaning.
 
 Raw implementations also bound memory/disk/network capture. These two layers
 solve different problems: adapter safety and model-context safety.
@@ -174,5 +183,11 @@ At minimum cover:
 5. output budget and UTF-8 boundary;
 6. dispatcher integration and provider wire exposure;
 7. ACP/MCP exposure when applicable.
+
+`NativeMcpParityIT` additionally compares the full standalone catalog and all
+22 published tool families with the pinned executable. Its edge sweep covers
+validation, workspace refusal and recovery guidance, timeout, the native
+synchronous-cancellation limitation, large implicit reads, structured changes,
+and UTF-8-safe two-stage truncation.
 
 Run `mvn -q verify` from the reactor root.

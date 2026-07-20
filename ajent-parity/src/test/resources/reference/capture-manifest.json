@@ -18,6 +18,7 @@
   },
   "normalizationAllowlist": [
     "generated timestamps",
+    "generated elapsed-millisecond durations",
     "generated UUIDs and thread/tool/message identifiers",
     "declared program name: agentty versus ajent",
     "declared workspace and data-root prefixes"
@@ -101,9 +102,18 @@
     },
     {
       "id": "native-tools",
-      "status": "planned",
-      "sources": ["agentty/include/agentty/tool/spec.hpp", "agentty/tests/toolset_e2e_test.cpp"],
-      "cases": ["full catalog", "success", "validation error", "workspace refusal", "permission", "timeout", "cancel", "UTF-8 truncation", "change records"]
+      "status": "native-executable-green",
+      "sources": ["agentty/include/agentty/tool/spec.hpp", "agentty/tests/toolset_e2e_test.cpp", "agentty/mcp-cpp/src/tools", "agentty/mcp-cpp/src/provider.cpp"],
+      "cases": ["full catalog", "success", "validation error", "workspace refusal", "permission", "timeout", "cancel", "large implicit read", "UTF-8 truncation", "change records"],
+      "javaEvidence": [
+        "com.github.skanga.ajent.parity.NativeMcpParityIT",
+        "com.github.skanga.ajent.parity.NativeAcpParityIT",
+        "com.github.skanga.ajent.tools.runtime.ToolDispatcherTest",
+        "com.github.skanga.ajent.tools.fs.FileToolsTest",
+        "mvn -q verify -Pcharacterization: exact standalone MCP catalog and paired-workspace execution of all 22 published tool families plus validation, workspace recovery guidance, timeout, synchronous cancellation limitation, large implicit smart reads, UTF-8-safe two-stage truncation, structured changes, and ACP permission behavior against the pinned Windows executable"
+      ],
+      "coveredExecutableCases": ["full native-ordered 22-tool standalone catalog", "all 22 standalone tool families", "missing required argument validation", "workspace refusal and recovery guidance", "real filesystem success", "structured write/edit changes", "ACP allow-once, reject-once, and allow-always permission behavior", "direct process timeout", "synchronous direct-tool cancellation notification retains timeout outcome", "large implicit no-structure 1 KiB UTF-8-safe slice", "explicit UTF-8 range", "provider-layer head cap followed by strategy-aware dispatcher cap", "no replacement character at UTF-8 boundaries"],
+      "remainingExecutableCases": []
     },
     {
       "id": "reducer",

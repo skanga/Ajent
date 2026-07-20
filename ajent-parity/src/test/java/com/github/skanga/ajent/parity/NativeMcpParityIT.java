@@ -61,6 +61,69 @@ final class NativeMcpParityIT {
     assertThat(firstDifference(nativeNormalized, javaNormalized)).isEmpty();
   }
 
+  @Test
+  void nativeToolValidationWorkspaceTimeoutCancellationAndUtf8TruncationMatchPinnedExecutable(
+      @TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-edge-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-edge-workspace"));
+    Files.writeString(nativeWorkspace.resolve("large.txt"), "🙂".repeat(25_000));
+    Files.writeString(javaWorkspace.resolve("large.txt"), "🙂".repeat(25_000));
+
+    Transcript nativeTranscript;
+    try (var process = McpProcess.start(command(nativeBinary, nativeWorkspace),
+        root.resolve("native-edge-home"), false, toolEnvironment(nativeWorkspace))) {
+      nativeTranscript = exerciseNativeToolEdges(process, nativeWorkspace);
+    }
+    Transcript javaTranscript;
+    try (var process = McpProcess.start(javaCommand(ajentJar, javaWorkspace),
+        root.resolve("java-edge-home"), true, toolEnvironment(javaWorkspace))) {
+      javaTranscript = exerciseNativeToolEdges(process, javaWorkspace);
+    }
+
+    Transcript normalizedNative = normalize(nativeTranscript, nativeWorkspace, true);
+    Transcript normalizedJava = normalize(javaTranscript, javaWorkspace, false);
+    String recoveryHint = "Restart ajent in a parent directory or pass --workspace <dir> "
+        + "to widen the scope.";
+    assertThat(normalizedNative.frames().get(2).toString()).contains(recoveryHint);
+    assertThat(normalizedJava.frames().get(2).toString()).contains(recoveryHint);
+    assertThat(Files.readString(
+        repository.resolve("agentty/mcp-cpp/src/tools/util/fs_helpers.cpp")))
+        .contains("Restart agentty in a parent directory");
+    assertThat(firstDifference(normalizedNative, normalizedJava)).isEmpty();
+    String truncated = normalizedJava.frames().getLast().toString();
+    assertThat(truncated).contains("chars elided", "output exceeded tool's budget")
+        .doesNotContain("\uFFFD");
+  }
+
+  private static Transcript exerciseNativeToolEdges(McpProcess process, Path workspace)
+      throws Exception {
+    var exchanges = new ArrayList<JsonNode>();
+    exchanges.add(process.call("initialize", JSON.readTree("""
+        {"protocolVersion":"2025-11-25","capabilities":{},
+         "clientInfo":{"name":"ajent-parity","version":"1"}}
+        """)));
+    process.notify("notifications/initialized", JSON.createObjectNode());
+    exchanges.add(process.call("tools/call", toolCall("read")));
+    exchanges.add(process.call("tools/call", toolCall(
+        "read", "path", workspace.getParent().resolve("outside.txt").toString())));
+    ObjectNode timeout = toolCall("bash", "command", "Start-Sleep -Seconds 5");
+    timeout.withObject("arguments").put("timeout_ms", 100);
+    exchanges.add(process.call("tools/call", timeout));
+    ObjectNode cancelled = toolCall("bash", "command", "Start-Sleep -Seconds 5");
+    cancelled.withObject("arguments").put("timeout_ms", 1_000);
+    exchanges.add(process.callThenCancel("tools/call", cancelled));
+    exchanges.add(process.call("tools/call",
+        toolCall("read", "path", workspace.resolve("large.txt").toString())));
+    ObjectNode rangedRead = toolCall(
+        "read", "path", workspace.resolve("large.txt").toString());
+    rangedRead.withObject("arguments").put("offset", 1).put("limit", 1_999);
+    exchanges.add(process.call("tools/call", rangedRead));
+    return new Transcript(List.copyOf(exchanges));
+  }
+
   private static Transcript sortToolCatalog(Transcript transcript) {
     var frames = new ArrayList<JsonNode>();
     for (JsonNode original : transcript.frames()) {
@@ -589,6 +652,7 @@ final class NativeMcpParityIT {
     if (value.isIntegralNumber()) return JSON.getNodeFactory().numberNode(value.longValue());
     if (!value.isTextual()) return value.deepCopy();
     String text = value.textValue().replace(workspace, "<WORKSPACE>");
+    text = text.replaceAll("\\[elapsed: \\d+ ms]", "[elapsed: <MILLISECONDS>]");
     text = text.replaceAll("\\[[0-9a-fA-F]{8}]", "[<MEMORY-ID>]");
     text = text.replace(".agentty", ".<PROGRAM-DATA>");
     if (nativeProgram) text = text.replace("agentty", "ajent");

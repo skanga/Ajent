@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.tools.runtime.ToolErrorKind;
 import com.github.skanga.ajent.tools.runtime.ToolResult;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -70,8 +71,8 @@ class FileToolsTest {
 
     ToolResult.Success range = success(tools.execute("read", object()
         .put("file", text.toString()).put("start_line", "2").put("end_line", 3)));
-    assertThat(range.output().text()).startsWith("two\nthree\nfour\n")
-        .contains("showing lines 2-4 of 4");
+    assertThat(range.output().text()).startsWith("two\nthree\n")
+        .doesNotContain("four\n").contains("showing lines 2-3 of 4");
 
     assertThat(failure(tools.execute("read", object().put("path", directory.resolve("nope").toString())))
         .error().kind()).isEqualTo(ToolErrorKind.NOT_FOUND);
@@ -83,6 +84,26 @@ class FileToolsTest {
         .error().kind()).isEqualTo(ToolErrorKind.BINARY);
     assertThat(failure(tools.execute("read", object()))
         .error().kind()).isEqualTo(ToolErrorKind.INVALID_ARGS);
+  }
+
+  @Test
+  void largeImplicitReadsReturnNativeOutlineOrUtf8SafePeek(@TempDir Path directory)
+      throws Exception {
+    var tools = tools(directory);
+    Path dump = Files.writeString(directory.resolve("dump.txt"), "🙂".repeat(25_000));
+    String peek = success(tools.execute("read", object().put("path", dump.toString())))
+        .output().text();
+    assertThat(peek).contains("First 1 KiB of a 97 KiB file", "the file has 1 lines total")
+        .doesNotContain("�");
+    assertThat(peek.getBytes(StandardCharsets.UTF_8).length).isLessThan(2_000);
+
+    Path source = directory.resolve("large.java");
+    Files.writeString(source, "class LargeFile {\n  void usefulMethod() {\n  }\n}\n"
+        + "// padding\n".repeat(4_000));
+    String outline = success(tools.execute("read", object().put("path", source.toString())))
+        .output().text();
+    assertThat(outline).contains("File outline retrieved", "[L1] class LargeFile {",
+        "[L2] void usefulMethod() {", "NEXT STEPS");
   }
 
   @Test
@@ -170,6 +191,8 @@ class FileToolsTest {
     ToolResult.Failure escaped = failure(tools.execute(
         "read", object().put("path", directory.resolve("outside.txt").toString())));
     assertThat(escaped.error().kind()).isEqualTo(ToolErrorKind.OUT_OF_WORKSPACE);
+    assertThat(escaped.error().detail())
+        .contains("Restart ajent in a parent directory", "--workspace <dir>");
   }
 
   @Test
