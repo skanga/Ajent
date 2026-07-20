@@ -281,7 +281,7 @@ public final class ProviderHttpTransport {
 
   private static String baseCancelledMessage(HttpRequest request) {
     return "http: [cancelled] " + ("http".equalsIgnoreCase(request.uri().getScheme())
-        ? "h1 plain stream" : "stream aborted by caller");
+        ? "h1 plain stream" : "stream reset");
   }
 
   private static String openAiCancelledMessage(HttpRequest request) {

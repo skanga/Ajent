@@ -15,14 +15,30 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.security.KeyStore;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
+import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
+import org.eclipse.jetty.io.Content;
+import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.Request;
+import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.server.SecureRequestCustomizer;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.SslConnectionFactory;
+import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -425,6 +441,119 @@ final class NativeAcpParityIT {
       assertThat(firstJsonListDifference(
           normalizeRequests(nativeRequests, nativeWorkspace, true),
           normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+      assertThat(response(nativeTranscript.exchanges().getFirst())
+          .at("/result/stopReason").textValue()).isEqualTo("cancelled");
+    } finally {
+      CancelGate gate = activeGate.get();
+      if (gate != null) gate.release().set(true);
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void hostedPresetEndpointsAndHeadersMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    var captures = new java.util.concurrent.CopyOnWriteArrayList<HostedCapture>();
+    HostedH2Server provider = hostedProvider(captures);
+    provider.start();
+    Map<String, String> environment = hostedEnvironment(provider);
+    Map<String, String> paths = Map.of(
+        "openai", "/v1/chat/completions",
+        "groq", "/openai/v1/chat/completions",
+        "openrouter", "/api/v1/chat/completions",
+        "together", "/v1/chat/completions",
+        "cerebras", "/v1/chat/completions");
+    Map<String, String> hosts = Map.of(
+        "openai", "api.openai.com",
+        "groq", "api.groq.com",
+        "openrouter", "openrouter.ai",
+        "together", "api.together.xyz",
+        "cerebras", "api.cerebras.ai");
+    try {
+      for (String preset : List.of("openai", "groq", "openrouter", "together", "cerebras")) {
+        Path nativeWorkspace = Files.createDirectories(root.resolve("native-" + preset));
+        captures.clear();
+        Transcript nativeTranscript;
+        try (var agent = AgentProcess.start(
+            commandWithKey(nativeBinary, nativeWorkspace, preset),
+            root.resolve("native-" + preset + "-home"), false, environment)) {
+          nativeTranscript = exercisePlainPrompt(agent, nativeWorkspace, "hosted preset probe");
+        }
+        assertThat(captures).as("native %s transcript=%s", preset, nativeTranscript).hasSize(1);
+        HostedCapture nativeCapture = captures.getFirst();
+
+        Path javaWorkspace = Files.createDirectories(root.resolve("java-" + preset));
+        captures.clear();
+        Transcript javaTranscript;
+        try (var agent = AgentProcess.start(
+            javaCommandWithKey(ajentJar, javaWorkspace, preset),
+            root.resolve("java-" + preset + "-home"), true, environment)) {
+          javaTranscript = exercisePlainPrompt(agent, javaWorkspace, "hosted preset probe");
+        }
+        assertThat(captures).as("java %s transcript=%s", preset, javaTranscript).hasSize(1);
+        HostedCapture javaCapture = captures.getFirst();
+
+        assertThat(nativeCapture.path()).isEqualTo(paths.get(preset));
+        assertThat(javaCapture.path()).isEqualTo(paths.get(preset));
+        assertThat(nativeCapture.selectedHeaders()).containsEntry("host", hosts.get(preset));
+        assertThat(javaCapture.selectedHeaders()).containsEntry("host", hosts.get(preset));
+        assertThat(normalizeHostedCapture(nativeCapture, nativeWorkspace, true))
+            .as(preset).isEqualTo(normalizeHostedCapture(javaCapture, javaWorkspace, false));
+        assertThat(normalizePrompt(nativeTranscript, nativeWorkspace, true))
+            .isEqualTo(normalizePrompt(javaTranscript, javaWorkspace, false));
+      }
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
+  void hostedTlsCancellationMatchesPinnedExecutable(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-hosted-cancel"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-hosted-cancel"));
+    var activeGate = new AtomicReference<CancelGate>();
+    var captures = new java.util.concurrent.CopyOnWriteArrayList<HostedCapture>();
+    HostedH2Server provider = hostedStalledProvider(activeGate, captures);
+    provider.start();
+    Map<String, String> environment = hostedEnvironment(provider);
+    try {
+      CancelGate nativeGate = new CancelGate();
+      activeGate.set(nativeGate);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(commandWithKey(nativeBinary, nativeWorkspace, "openai"),
+          root.resolve("native-hosted-cancel-home"), false, environment)) {
+        nativeTranscript = exerciseCancellation(agent, nativeWorkspace, nativeGate);
+      } finally {
+        nativeGate.release().set(true);
+        assertThat(nativeGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      }
+      assertThat(captures).hasSize(1);
+      HostedCapture nativeCapture = captures.getFirst();
+
+      captures.clear();
+      CancelGate javaGate = new CancelGate();
+      activeGate.set(javaGate);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommandWithKey(ajentJar, javaWorkspace, "openai"),
+          root.resolve("java-hosted-cancel-home"), true, environment)) {
+        javaTranscript = exerciseCancellation(agent, javaWorkspace, javaGate);
+      } finally {
+        javaGate.release().set(true);
+        assertThat(javaGate.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      }
+      assertThat(captures).hasSize(1);
+      HostedCapture javaCapture = captures.getFirst();
+
+      assertThat(normalizeHostedCapture(nativeCapture, nativeWorkspace, true))
+          .isEqualTo(normalizeHostedCapture(javaCapture, javaWorkspace, false));
+      assertThat(normalizePrompt(nativeTranscript, nativeWorkspace, true))
+          .isEqualTo(normalizePrompt(javaTranscript, javaWorkspace, false));
       assertThat(response(nativeTranscript.exchanges().getFirst())
           .at("/result/stopReason").textValue()).isEqualTo("cancelled");
     } finally {
@@ -844,6 +973,92 @@ final class NativeAcpParityIT {
     return "data: " + JSON.writeValueAsString(frame) + "\n\n";
   }
 
+  private static HostedH2Server hostedProvider(List<HostedCapture> captures) throws Exception {
+    return new HostedH2Server((request, response, callback) -> {
+      captures.add(hostedCapture(request));
+      String body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hosted reply.\"}}]}\n\n"
+          + "data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":2},"
+          + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+          + "data: [DONE]\n\n";
+      response.setStatus(200);
+      response.getHeaders().put("content-type", "text/event-stream");
+      response.write(true, ByteBuffer.wrap(body.getBytes(StandardCharsets.UTF_8)), callback);
+    });
+  }
+
+  private static HostedH2Server hostedStalledProvider(
+      AtomicReference<CancelGate> activeGate, List<HostedCapture> captures) throws Exception {
+    return new HostedH2Server((request, response, callback) -> {
+      CancelGate gate = activeGate.get();
+      captures.add(hostedCapture(request));
+      response.setStatus(200);
+      response.getHeaders().put("content-type", "text/event-stream");
+      byte[] heartbeat = ": waiting\n\n".getBytes(StandardCharsets.UTF_8);
+      response.write(false, ByteBuffer.wrap(heartbeat), Callback.from(
+          gate.started()::countDown,
+          failure -> {
+            gate.started().countDown();
+            gate.finished().countDown();
+            callback.failed(failure);
+          }));
+      java.lang.Thread.startVirtualThread(() -> {
+        while (!gate.release().get()) {
+          java.util.concurrent.locks.LockSupport.parkNanos(10_000_000);
+        }
+        response.write(true, ByteBuffer.allocate(0), Callback.from(
+            () -> {
+              gate.finished().countDown();
+              callback.succeeded();
+            },
+            failure -> {
+              gate.finished().countDown();
+              callback.failed(failure);
+            }));
+      });
+    });
+  }
+
+  private static KeyStore tlsKeys() throws Exception {
+    byte[] encoded = Base64.getMimeDecoder().decode(Files.readAllBytes(repositoryRoot().resolve(
+        "ajent-provider/src/test/resources/insecure-test.p12.b64")));
+    char[] password = "changeit".toCharArray();
+    KeyStore keys = KeyStore.getInstance("PKCS12");
+    keys.load(new java.io.ByteArrayInputStream(encoded), password);
+    return keys;
+  }
+
+  private static HostedCapture hostedCapture(Request request) throws IOException {
+    JsonNode body = JSON.readTree(Content.Source.asString(request));
+    Map<String, String> headers = Map.of(
+        "accept", header(request, "accept"),
+        "authorization", header(request, "authorization"),
+        "content-type", header(request, "content-type"),
+        "host", request.getHttpURI().getAuthority(),
+        "user-agent", header(request, "user-agent"));
+    return new HostedCapture(request.getHttpURI().getPath(), headers, body.deepCopy());
+  }
+
+  private static String header(Request request, String name) {
+    String value = request.getHeaders().get(name);
+    return value == null ? "" : value;
+  }
+
+  private static Map<String, String> hostedEnvironment(HostedH2Server server) {
+    return Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + server.getAddress().getPort(),
+        "AGENTTY_INSECURE", "1");
+  }
+
+  private static HostedCapture normalizeHostedCapture(
+      HostedCapture capture, Path workspace, boolean nativeAgent) {
+    var headers = new java.util.TreeMap<>(capture.selectedHeaders());
+    if (nativeAgent) {
+      headers.computeIfPresent("user-agent", (ignored, value) -> value.replace("agentty", "ajent"));
+    }
+    JsonNode body = normalizeRequests(List.of(capture.body()), workspace, nativeAgent).getFirst();
+    return new HostedCapture(capture.path(), Map.copyOf(headers), body);
+  }
+
   private static HttpServer stalledProvider(
       AtomicReference<CancelGate> activeGate, List<JsonNode> requests) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -1229,6 +1444,13 @@ final class NativeAcpParityIT {
         "--sandbox", "off", "--provider", provider, "--model", model);
   }
 
+  private static List<String> commandWithKey(
+      Path executable, Path workspace, String provider) {
+    return List.of(executable.toString(), "acp", "--workspace", workspace.toString(),
+        "--sandbox", "off", "--provider", provider, "--model", "parity-model",
+        "--key", "sk-hosted-parity-test");
+  }
+
   private static List<String> javaCommand(Path jar, Path workspace) {
     return javaCommand(jar, workspace, "ollama");
   }
@@ -1242,6 +1464,12 @@ final class NativeAcpParityIT {
     return List.of(javaExecutable(), "-jar", jar.toString(), "acp", "--workspace",
         workspace.toString(), "--sandbox", "off", "--provider", provider, "--model",
         model);
+  }
+
+  private static List<String> javaCommandWithKey(Path jar, Path workspace, String provider) {
+    return List.of(javaExecutable(), "-jar", jar.toString(), "acp", "--workspace",
+        workspace.toString(), "--sandbox", "off", "--provider", provider, "--model",
+        "parity-model", "--key", "sk-hosted-parity-test");
   }
 
   private static String javaExecutable() {
@@ -1266,6 +1494,72 @@ final class NativeAcpParityIT {
   }
 
   private record Transcript(String sessionId, List<List<JsonNode>> exchanges) {}
+
+  private record HostedCapture(
+      String path, Map<String, String> selectedHeaders, JsonNode body) {
+    private HostedCapture {
+      selectedHeaders = Map.copyOf(selectedHeaders);
+      body = body.deepCopy();
+    }
+  }
+
+  @FunctionalInterface
+  private interface HostedHandler {
+    void handle(Request request, Response response, Callback callback) throws Exception;
+  }
+
+  private static final class HostedH2Server {
+    private final Server server = new Server();
+    private final ServerConnector connector;
+
+    private HostedH2Server(HostedHandler hostedHandler) throws Exception {
+      var tls = new SslContextFactory.Server();
+      KeyStore keys = tlsKeys();
+      String certificateAlias = keys.aliases().nextElement();
+      tls.setKeyStore(keys);
+      tls.setKeyStorePassword("changeit");
+      tls.setKeyManagerPassword("changeit");
+      tls.setCertAlias(certificateAlias);
+      tls.setSniRequired(false);
+      tls.setSNISelector((keyType, issuers, session, sniHost, certificates) -> certificateAlias);
+      var configuration = new HttpConfiguration();
+      configuration.setSendServerVersion(false);
+      configuration.setSendDateHeader(false);
+      var secureRequests = new SecureRequestCustomizer();
+      secureRequests.setSniHostCheck(false);
+      secureRequests.setSniRequired(false);
+      configuration.addCustomizer(secureRequests);
+      var h2 = new HTTP2ServerConnectionFactory(configuration);
+      var alpn = new ALPNServerConnectionFactory("h2");
+      var ssl = new SslConnectionFactory(tls, alpn.getProtocol());
+      ssl.setEnsureSecureRequestCustomizer(false);
+      connector = new ServerConnector(server, ssl, alpn, h2);
+      connector.setHost("127.0.0.1");
+      connector.setPort(0);
+      server.addConnector(connector);
+      server.setHandler(new Handler.Abstract() {
+        @Override public boolean handle(
+            Request request, Response response, Callback callback) throws Exception {
+          hostedHandler.handle(request, response, callback);
+          return true;
+        }
+      });
+    }
+
+    void start() throws Exception { server.start(); }
+
+    InetSocketAddress getAddress() {
+      return new InetSocketAddress(connector.getHost(), connector.getLocalPort());
+    }
+
+    void stop(int ignoredDelaySeconds) {
+      try {
+        server.stop();
+      } catch (Exception exception) {
+        throw new IllegalStateException("unable to stop HTTP/2 test server", exception);
+      }
+    }
+  }
 
   private record ConcurrentTranscript(
       String firstSession,
@@ -1303,6 +1597,12 @@ final class NativeAcpParityIT {
 
     static AgentProcess start(List<String> command, Path home, boolean javaProcess)
         throws Exception {
+      return start(command, home, javaProcess, Map.of());
+    }
+
+    static AgentProcess start(
+        List<String> command, Path home, boolean javaProcess, Map<String, String> environment)
+        throws Exception {
       Files.createDirectories(home);
       var effective = new ArrayList<>(command);
       if (javaProcess) effective.add(1, "-Duser.home=" + home);
@@ -1313,6 +1613,7 @@ final class NativeAcpParityIT {
       }
       builder.environment().putAll(Map.of(
           "HOME", home.toString(), "USERPROFILE", home.toString(), "APPDATA", home.toString()));
+      builder.environment().putAll(environment);
       return new AgentProcess(builder.start());
     }
 

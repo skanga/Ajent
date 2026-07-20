@@ -25,6 +25,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   virtual-thread effect execution.
 - Matched AgenTTY's Windows process CRLF behavior and terminal blank line in
   CLI usage output; added a pinned executable characterization profile.
+- Matched hosted OpenAI-compatible HTTP/2 routing, preset paths and headers,
+  versioned user agents, dial/SOCKS overrides, and exact TLS cancellation.
 
 ### Known limitations
 

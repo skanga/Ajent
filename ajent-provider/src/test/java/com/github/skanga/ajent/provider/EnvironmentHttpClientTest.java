@@ -14,17 +14,23 @@ import java.net.Proxy;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import org.junit.jupiter.api.Test;
@@ -94,6 +100,276 @@ final class EnvironmentHttpClientTest {
     } finally {
       api.stop(0);
       oauth.stop(0);
+    }
+  }
+
+  @Test void dialOverridesPreserveTheJdkHttp2PreferenceForHostedTls() {
+    var client = EnvironmentHttpClient.createProvider(Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:9443"));
+
+    assertThat(client.version()).isEqualTo(java.net.http.HttpClient.Version.HTTP_2);
+  }
+
+  @Test void routedClientPreservesAsyncRequestResponseAndLifecycleContracts() throws Exception {
+    var method = new AtomicReference<String>();
+    var requestBody = new AtomicReference<String>();
+    var requestHeader = new AtomicReference<String>();
+    HttpServer origin = HttpServer.create(
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    origin.createContext("/upload", exchange -> {
+      method.set(exchange.getRequestMethod());
+      requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+      requestHeader.set(exchange.getRequestHeaders().getFirst("X-Probe"));
+      byte[] body = "accepted".getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().set("X-Reply", "yes");
+      exchange.sendResponseHeaders(201, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    origin.start();
+    HttpClient client = EnvironmentHttpClient.createProvider(Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()));
+    try {
+      HttpResponse<String> response = client.sendAsync(HttpRequest.newBuilder(
+              URI.create("http://logical-provider.invalid/upload"))
+          .header("content-type", "text/plain").header("x-probe", "present")
+          .POST(HttpRequest.BodyPublishers.ofString("payload")).build(),
+          HttpResponse.BodyHandlers.ofString()).get(5, TimeUnit.SECONDS);
+
+      assertThat(method.get()).isEqualTo("POST");
+      assertThat(requestBody.get()).isEqualTo("payload");
+      assertThat(requestHeader.get()).isEqualTo("present");
+      assertThat(response.statusCode()).isEqualTo(201);
+      assertThat(response.body()).isEqualTo("accepted");
+      assertThat(response.headers().firstValue("x-reply")).contains("yes");
+      assertThat(response.request().method()).isEqualTo("POST");
+      assertThat(response.uri()).isEqualTo(URI.create("http://logical-provider.invalid/upload"));
+      assertThat(response.version()).isEqualTo(HttpClient.Version.HTTP_1_1);
+      assertThat(response.previousResponse()).isEmpty();
+      assertThat(response.sslSession()).isEmpty();
+      assertThat(client.cookieHandler()).isEmpty();
+      assertThat(client.authenticator()).isEmpty();
+      assertThat(client.connectTimeout()).isEmpty();
+      assertThat(client.executor()).isEmpty();
+      assertThat(client.followRedirects()).isEqualTo(HttpClient.Redirect.NEVER);
+      assertThat(client.proxy()).isPresent();
+      assertThat(client.sslContext()).isNotNull();
+      assertThat(client.sslParameters()).isNotNull();
+
+      var streamed = client.sendAsync(HttpRequest.newBuilder(
+              URI.create("http://logical-provider.invalid/upload")).build(),
+          HttpResponse.BodyHandlers.ofInputStream());
+      HttpResponse<java.io.InputStream> streamingResponse = streamed.get(5, TimeUnit.SECONDS);
+      assertThat(streamed.cancel(true)).isFalse();
+      streamingResponse.body().close();
+    } finally {
+      client.shutdown();
+      assertThat(client.awaitTermination(Duration.ofSeconds(2))).isTrue();
+      assertThat(client.isTerminated()).isTrue();
+      origin.stop(0);
+    }
+  }
+
+  @Test void routedClientCoversConfiguredRedirectTimeoutAndInsecureTls() throws Exception {
+    HttpClient configuration = HttpClient.newBuilder()
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .connectTimeout(Duration.ofSeconds(1)).build();
+    try (var client = new RoutedHttpClient(configuration,
+        new EnvironmentHttpClient.HostPort("127.0.0.1", 9443), null, null, true)) {
+      assertThat(client.followRedirects()).isEqualTo(HttpClient.Redirect.NORMAL);
+      assertThat(client.connectTimeout()).contains(Duration.ofSeconds(1));
+      client.shutdownNow();
+    }
+  }
+
+  @Test void routedProviderUsesSocksWithoutResolvingTheLogicalHostLocally() throws Exception {
+    HttpServer origin = HttpServer.create(
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    origin.createContext("/", exchange -> {
+      byte[] body = "routed-socks".getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(200, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    origin.start();
+    try (var socks = new FakeSocks(origin.getAddress().getPort());
+         var client = EnvironmentHttpClient.createProvider(Map.of(
+             "AGENTTY_SOCKS_PROXY", "127.0.0.1:" + socks.port()))) {
+      HttpResponse<String> response = client.send(HttpRequest.newBuilder(
+              URI.create("http://provider-through-socks.invalid/")).build(),
+          HttpResponse.BodyHandlers.ofString());
+
+      assertThat(response.body()).isEqualTo("routed-socks");
+      assertThat(socks.requestedHost().get(5, TimeUnit.SECONDS))
+          .isEqualTo("provider-through-socks.invalid");
+    } finally {
+      origin.stop(0);
+    }
+  }
+
+  @Test void routedClientPropagatesBodyPublisherAndHandlerFailures() throws Exception {
+    HttpServer origin = origin("unused", new CompletableFuture<>());
+    try (var client = EnvironmentHttpClient.createProvider(Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
+      HttpRequest.BodyPublisher brokenBody = new HttpRequest.BodyPublisher() {
+        @Override public long contentLength() { return -1; }
+        @Override public void subscribe(Flow.Subscriber<? super ByteBuffer> subscriber) {
+          subscriber.onSubscribe(new Flow.Subscription() {
+            @Override public void request(long count) {
+              subscriber.onError(new IOException("publisher failed"));
+            }
+            @Override public void cancel() { }
+          });
+        }
+      };
+      var brokenRequest = HttpRequest.newBuilder(URI.create("http://provider.invalid/"))
+          .POST(brokenBody).build();
+      assertThatThrownBy(() -> client.sendAsync(
+              brokenRequest, HttpResponse.BodyHandlers.discarding()).join())
+          .hasRootCauseInstanceOf(IOException.class)
+          .hasRootCauseMessage("publisher failed");
+
+      HttpRequest.BodyPublisher nonIoFailure = new HttpRequest.BodyPublisher() {
+        @Override public long contentLength() { return -1; }
+        @Override public void subscribe(Flow.Subscriber<? super ByteBuffer> subscriber) {
+          subscriber.onSubscribe(new Flow.Subscription() {
+            @Override public void request(long count) {
+              subscriber.onError(new IllegalStateException("non-io publisher failure"));
+            }
+            @Override public void cancel() { }
+          });
+        }
+      };
+      assertThatThrownBy(() -> client.sendAsync(HttpRequest.newBuilder(
+              URI.create("http://provider.invalid/")).POST(nonIoFailure).build(),
+          HttpResponse.BodyHandlers.discarding()).join())
+          .isInstanceOf(java.util.concurrent.CompletionException.class)
+          .hasCauseInstanceOf(IOException.class)
+          .hasRootCauseInstanceOf(IllegalStateException.class)
+          .hasRootCauseMessage("non-io publisher failure");
+
+      var get = HttpRequest.newBuilder(URI.create("http://provider.invalid/")).build();
+      assertThatThrownBy(() -> client.send(get, info -> {
+        throw new IllegalStateException("handler failed");
+      })).isInstanceOf(IllegalStateException.class).hasMessage("handler failed");
+
+      HttpResponse.BodyHandler<Void> nonPositiveDemand = info ->
+          new HttpResponse.BodySubscriber<>() {
+            private final CompletableFuture<Void> body = new CompletableFuture<>();
+            @Override public java.util.concurrent.CompletionStage<Void> getBody() { return body; }
+            @Override public void onSubscribe(Flow.Subscription subscription) {
+              subscription.request(0);
+            }
+            @Override public void onNext(List<ByteBuffer> item) { }
+            @Override public void onError(Throwable failure) { body.completeExceptionally(failure); }
+            @Override public void onComplete() { body.complete(null); }
+          };
+      assertThatThrownBy(() -> client.send(get, nonPositiveDemand))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("non-positive response demand");
+    } finally {
+      origin.stop(0);
+    }
+  }
+
+  @Test void routedClientHonorsFiniteResponseDemandAcrossChunks() throws Exception {
+    byte[] payload = new byte[40 * 1024];
+    Arrays.fill(payload, (byte) 'x');
+    HttpServer origin = HttpServer.create(
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    origin.createContext("/", exchange -> {
+      exchange.sendResponseHeaders(200, payload.length);
+      exchange.getResponseBody().write(payload);
+      exchange.close();
+    });
+    origin.start();
+    try (var client = EnvironmentHttpClient.createProvider(Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
+      HttpResponse<Integer> response = client.send(HttpRequest.newBuilder(
+              URI.create("http://provider.invalid/")).build(), info ->
+          new HttpResponse.BodySubscriber<>() {
+            private final CompletableFuture<Integer> body = new CompletableFuture<>();
+            private Flow.Subscription subscription;
+            private int bytes;
+            @Override public java.util.concurrent.CompletionStage<Integer> getBody() { return body; }
+            @Override public void onSubscribe(Flow.Subscription value) {
+              subscription = value;
+              subscription.request(1);
+            }
+            @Override public void onNext(List<ByteBuffer> items) {
+              items.forEach(item -> bytes += item.remaining());
+              subscription.request(1);
+            }
+            @Override public void onError(Throwable failure) { body.completeExceptionally(failure); }
+            @Override public void onComplete() { body.complete(bytes); }
+          });
+      assertThat(response.body()).isEqualTo(payload.length);
+    } finally {
+      origin.stop(0);
+    }
+  }
+
+  @Test void routedSynchronousSendPropagatesConnectionFailures() throws Exception {
+    int unusedPort;
+    try (var socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      unusedPort = socket.getLocalPort();
+    }
+    try (var client = EnvironmentHttpClient.createProvider(Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + unusedPort))) {
+      assertThatThrownBy(() -> client.send(HttpRequest.newBuilder(
+              URI.create("http://provider.invalid/")).build(),
+          HttpResponse.BodyHandlers.discarding())).isInstanceOf(IOException.class);
+    }
+  }
+
+  @Test void routedClientCancelsBeforeHeadersAndHonorsSubscriberCancellation() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    HttpServer origin = HttpServer.create(
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    origin.createContext("/stall", exchange -> {
+      entered.countDown();
+      try {
+        release.await(5, TimeUnit.SECONDS);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+      exchange.close();
+    });
+    origin.createContext("/cancel-body", exchange -> {
+      byte[] body = "ignored".getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(200, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    origin.start();
+    try (var client = EnvironmentHttpClient.createProvider(Map.of(
+        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
+      var pending = client.sendAsync(HttpRequest.newBuilder(
+              URI.create("http://provider.invalid/stall")).build(),
+          HttpResponse.BodyHandlers.ofString());
+      assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+      assertThat(pending.cancel(true)).isTrue();
+      assertThat(pending).isCancelled();
+      release.countDown();
+
+      HttpResponse<String> cancelledBody = client.send(HttpRequest.newBuilder(
+              URI.create("http://provider.invalid/cancel-body")).build(), info ->
+          new HttpResponse.BodySubscriber<>() {
+            private final CompletableFuture<String> body = new CompletableFuture<>();
+            @Override public java.util.concurrent.CompletionStage<String> getBody() { return body; }
+            @Override public void onSubscribe(Flow.Subscription subscription) {
+              subscription.cancel();
+              body.complete("cancelled");
+            }
+            @Override public void onNext(List<ByteBuffer> item) { }
+            @Override public void onError(Throwable failure) { body.completeExceptionally(failure); }
+            @Override public void onComplete() { }
+          });
+      assertThat(cancelledBody.body()).isEqualTo("cancelled");
+    } finally {
+      release.countDown();
+      origin.stop(0);
     }
   }
 

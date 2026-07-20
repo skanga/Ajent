@@ -43,7 +43,7 @@ public final class ProviderModelCatalog {
               OpenAiWire.endpointUri(endpoint, endpoint.modelsPath()))
           .timeout(Duration.ofSeconds(10))
           .header("accept", "application/json")
-          .header("user-agent", "ajent/0.1.0-SNAPSHOT")
+          .header("user-agent", "ajent/0.2.8")
           .GET();
       OpenAiWire.addAuthorization(builder, auth);
       JsonNode root = sendJson(builder.build(), MODELS_BODY_MAX);
@@ -141,7 +141,7 @@ public final class ProviderModelCatalog {
           .timeout(Duration.ofSeconds(5))
           .header("accept", "application/json")
           .header("content-type", "application/json")
-          .header("user-agent", "ajent/0.1.0-SNAPSHOT")
+          .header("user-agent", "ajent/0.2.8")
           .POST(HttpRequest.BodyPublishers.ofString(
               JSON.createObjectNode().put("model", model).toString(), StandardCharsets.UTF_8));
       OpenAiWire.addAuthorization(builder, auth);

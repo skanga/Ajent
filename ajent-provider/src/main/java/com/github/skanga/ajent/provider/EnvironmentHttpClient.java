@@ -18,6 +18,7 @@ import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -50,7 +51,18 @@ public final class EnvironmentHttpClient {
   }
 
   public static HttpClient createProvider(Map<String, String> environment) {
-    return builder(environment, Route.PROVIDER).build();
+    Objects.requireNonNull(environment, "environment");
+    HostPort socks = parseDialAddress(environment.get("AGENTTY_SOCKS_PROXY")).orElse(null);
+    HostPort api = parseDialAddress(environment.get("AGENTTY_API_HOST")).orElse(null);
+    if (socks == null && api == null) return builder(environment, Route.PROVIDER).build();
+    HostPort oauth = parseDialAddress(environment.get("AGENTTY_OAUTH_HOST")).orElse(null);
+    var directEnvironment = new HashMap<>(environment);
+    directEnvironment.remove("AGENTTY_SOCKS_PROXY");
+    directEnvironment.remove("AGENTTY_API_HOST");
+    directEnvironment.remove("AGENTTY_OAUTH_HOST");
+    HttpClient configuration = builder(directEnvironment, Route.PROVIDER).build();
+    return new RoutedHttpClient(configuration, api, oauth, socks,
+        "1".equals(environment.get("AGENTTY_INSECURE")));
   }
 
   public static HttpClient createOAuth(Map<String, String> environment) {
@@ -84,7 +96,7 @@ public final class EnvironmentHttpClient {
     var configuration = new BridgeConfig(socks, api, oauth, route);
     if (configuration.active()) {
       SocksBridge bridge = BRIDGES.computeIfAbsent(configuration, SocksBridge::open);
-      builder.proxy(ProxySelector.of(bridge.address())).version(HttpClient.Version.HTTP_1_1);
+      builder.proxy(ProxySelector.of(bridge.address()));
     }
     if (insecure) configureInsecureTls(builder);
     return builder;

@@ -28,7 +28,7 @@ public final class OpenAiWire {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final ObjectMapper TOOL_ARGUMENT_JSON = new ObjectMapper()
       .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
-  private static final String USER_AGENT = "ajent/0.1.0-SNAPSHOT";
+  private static final String USER_AGENT = "ajent/0.2.8";
 
   private OpenAiWire() {}
 

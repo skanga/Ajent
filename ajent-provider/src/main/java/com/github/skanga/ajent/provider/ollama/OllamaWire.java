@@ -133,7 +133,7 @@ public final class OllamaWire {
               OpenAiWire.endpointUri(request.endpoint(), "/api/chat"))
           .header("accept", "application/json")
           .header("content-type", "application/json")
-          .header("user-agent", "ajent/0.1.0-SNAPSHOT")
+          .header("user-agent", "ajent/0.2.8")
           .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
       OpenAiWire.addAuthorization(builder, request.auth());
       return builder.build();

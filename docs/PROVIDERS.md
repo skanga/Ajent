@@ -41,8 +41,12 @@ This covers the native 22-tool provider subset and recall-biased order,
 system/user messages, output controls, tool-call replay, canonical argument
 encoding, and usage/stop stream handling without sending traffic to an external
 provider.
-The same gate holds a local SSE body open, cancels the turn through ACP, and
-requires the native local-HTTP cancellation error and prompt metadata.
+The same gate holds local HTTP and hosted HTTP/2 SSE bodies open, cancels each
+turn through ACP, and requires the native cancellation error and prompt
+metadata. For OpenAI, Groq, OpenRouter, Together, and Cerebras it also preserves
+the logical Host and TLS SNI while safely dialing a loopback server, then
+compares the exact preset path, bearer/content headers, versioned user agent,
+request body, and streamed result.
 
 Concurrent Ajent sessions always receive the full immutable provider tool
 catalog; the pinned executable's cold-cache data race is documented in the
@@ -123,10 +127,13 @@ frame describes the same call.
 
 ## Cancellation and liveness
 
-JDK HTTP requests run asynchronously. Cancellation can close a request waiting
-for headers or a body read. A byte-idle watchdog closes stalled streams; the
-reducer separately watches semantic progress. Terminal events are emitted at
-most once even when cancellation, EOF, timeout, and parser failure race.
+HTTP requests run asynchronously. Ordinary routes remain on the JDK client;
+provider dial/SOCKS overrides use a narrowly scoped OkHttp HTTP/2 adapter because
+the JDK client downgrades HTTPS-over-CONNECT to HTTP/1.1. Cancellation aborts the
+underlying call while waiting for headers or a body read. A byte-idle watchdog
+closes stalled streams; the reducer separately watches semantic progress.
+Terminal events are emitted at most once even when cancellation, EOF, timeout,
+and parser failure race.
 
 ## Retry policy
 
@@ -145,10 +152,12 @@ capable model to a weaker one cannot send an invalid field.
 
 ## Endpoint and network overrides
 
-The environment-aware HTTP client applies proxy/air-gap and native dial/host
+The environment-aware HTTP clients apply proxy/air-gap and native dial/host
 overrides consistently to model listing, provider requests, OAuth, MCP HTTP,
-web tools, and optional Ollama RAG calls. A custom host is normalized before
-paths are appended. Debug logs redact secrets.
+web tools, and optional Ollama RAG calls. Hosted provider overrides retain
+HTTP/2 plus the logical URI, Host header, TLS SNI, and certificate-verification
+target while changing only the TCP destination. A custom host is normalized
+before paths are appended. Debug logs redact secrets.
 
 ## Adding a provider
 

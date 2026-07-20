@@ -35,7 +35,7 @@ class OpenAiRequestTest {
     assertThat(http.headers().firstValue("accept")).hasValue("application/json");
     assertThat(http.headers().firstValue("content-type")).hasValue("application/json");
     assertThat(http.headers().firstValue("authorization")).hasValue("Bearer sk-test");
-    assertThat(http.headers().firstValue("user-agent")).hasValue("ajent/0.1.0-SNAPSHOT");
+    assertThat(http.headers().firstValue("user-agent")).hasValue("ajent/0.2.8");
   }
 
   @Test
