@@ -162,10 +162,10 @@
         "com.github.skanga.ajent.parity.NativeTerminalParityIT",
         "com.github.skanga.ajent.terminal.JLineTerminalSessionTest",
         "translated terminal oracle suites enumerated in test-manifest.json",
-        "mvn -q verify -Pcharacterization: launches the pinned Windows executable under a real 80x24 pseudo-console and shaded Ajent through a deterministic 80x24 stream terminal in isolated fresh homes, decodes both ANSI streams through the same Unicode-width viewport emulator, compares stable startup rows 7-23 cell-for-cell, verifies nonblank wordmark regions, and delivers bounded Ctrl-C shutdown"
+        "mvn -q verify -Pcharacterization: launches the pinned Windows executable under a real 80x24 pseudo-console and shaded Ajent through a deterministic 80x24 stream terminal in isolated fresh homes, decodes both ANSI streams through the same Unicode-width viewport emulator, compares the tagline-anchored stable startup region cell-for-cell, scripts cursor editing, Shift+Enter multiline input, Unicode-width soft wrapping and Backspace, verifies nonblank wordmark regions, and delivers bounded Ctrl-C shutdown"
       ],
-      "coveredExecutableCases": ["real Windows pseudo-console startup", "deterministic Java stream-terminal startup", "80x24 geometry", "fresh isolated home and workspace", "Unicode-width ANSI viewport decoding", "stable startup rows 7-23 exact cell comparison", "visible welcome tagline", "configured local provider/model badge", "six-row bordered composer", "three-row provider/context status panel", "Ctrl-C shutdown"],
-      "remainingExecutableCases": ["time-dependent animated wordmark frame comparison", "composer input", "streamed provider turn", "tool cards and permissions", "pickers", "diff review", "thread switch", "resize", "append-only scrollback"]
+      "coveredExecutableCases": ["real Windows pseudo-console startup", "deterministic Java stream-terminal startup", "80x24 geometry", "fresh isolated home and workspace", "Unicode-width ANSI viewport decoding", "tagline-anchored stable startup region exact cell comparison", "visible welcome tagline", "configured local provider/model badge", "six-row bordered composer", "single-line cursor editing", "Shift+Enter multiline continuation rail and line-count caption", "wide-Unicode soft wrapping and Backspace", "three-row provider/context status panel", "Ctrl-C shutdown"],
+      "remainingExecutableCases": ["time-dependent animated wordmark frame comparison", "queued and attachment composer interactions", "streamed provider turn", "tool cards and permissions", "pickers", "diff review", "thread switch", "resize", "append-only scrollback"]
     }
   ]
 }

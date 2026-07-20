@@ -52,6 +52,20 @@ final class AppChromeTest {
     assertThat(composer.getLast().text()).startsWith("╰").endsWith("╯")
         .hasSize(78);
 
+    List<AppChrome.Row> multiline = AppChrome.composer(new AppChrome.Composer(
+        "first\nsecond", 12, Profile.WRITE, AppChrome.Phase.IDLE, 0, true, 78));
+    assertThat(multiline).hasSize(6);
+    assertThat(multiline.get(1).text()).startsWith("│ ❯ first");
+    assertThat(multiline.get(2).text()).startsWith("│ ┊ second█");
+    assertThat(multiline.getLast().text()).endsWith(" 2 lines ╯").hasSize(78);
+
+    String wrappingText = "0123456789".repeat(7) + "中é";
+    List<AppChrome.Row> wrapped = AppChrome.composer(new AppChrome.Composer(
+        wrappingText, wrappingText.length(), Profile.WRITE,
+        AppChrome.Phase.IDLE, 0, false, 78));
+    assertThat(wrapped).hasSize(7);
+    assertThat(wrapped.get(3).text()).isEqualTo("│" + " ".repeat(76) + "│");
+
     List<AppChrome.Row> status = AppChrome.statusPanel(new AppChrome.Status(
         "", "Ollama", AppChrome.Phase.IDLE, "", 0, 32_768, 0, "", 78));
     assertThat(status).hasSize(3);

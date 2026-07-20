@@ -24,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
 final class NativeTerminalParityIT {
   private static final int COLUMNS = 80;
   private static final int ROWS = 24;
+  private static final String TAGLINE = "a calm middleware between you and the model";
 
   @Test
   void bothExecutablesStartAndShutDownCleanlyUnderAn80By24Console(@TempDir Path root)
@@ -37,13 +38,12 @@ final class NativeTerminalParityIT {
     Path nativeLauncher = launcher(root.resolve("native-terminal.cmd"),
         List.of(nativeBinary.toString()));
     Capture nativeCapture = capture(List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
-        Files.createDirectories(root.resolve("native-workspace")),
-        nativeHome);
+        Files.createDirectories(root.resolve("native-workspace")), nativeHome, "", "");
     Capture javaCapture = capturePiped(List.of(javaExecutable(),
             "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
             "-Dajent.terminal.fixedSize=" + COLUMNS + "x" + ROWS,
             "-jar", ajentJar.toString()),
-        Files.createDirectories(root.resolve("java-workspace")), javaHome);
+        Files.createDirectories(root.resolve("java-workspace")), javaHome, "", "");
 
     int windowsControlC = 0xc000013a;
     assertThat(nativeCapture.exitCode()).as("native output:%n%s", nativeCapture.output())
@@ -66,18 +66,125 @@ final class NativeTerminalParityIT {
     }
 
     var nativeViewport = new AnsiViewport(COLUMNS, ROWS);
-    nativeViewport.feed(nativeCapture.output());
+    nativeViewport.feed(nativeCapture.frame());
     var javaViewport = new AnsiViewport(COLUMNS, ROWS);
-    javaViewport.feed(javaCapture.output());
-    assertThat(javaViewport.lines().subList(7, ROWS)).as(
+    javaViewport.feed(javaCapture.frame());
+    assertThat(stableRegion(javaViewport.lines())).as(
             "native viewport:%n%s%nJava viewport:%n%s",
             numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
-        .containsExactlyElementsOf(nativeViewport.lines().subList(7, ROWS));
-    assertThat(nativeViewport.lines().subList(0, 7)).anyMatch(line -> !line.isBlank());
-    assertThat(javaViewport.lines().subList(0, 7)).anyMatch(line -> !line.isBlank());
+        .containsExactlyElementsOf(stableRegion(nativeViewport.lines()));
+    assertThat(linesBeforeTagline(nativeViewport.lines())).anyMatch(line -> !line.isBlank());
+    assertThat(linesBeforeTagline(javaViewport.lines())).anyMatch(line -> !line.isBlank());
   }
 
-  private static Capture capture(List<String> executable, Path workspace, Path home)
+  @Test
+  void typedComposerEditingMatchesTheNativeViewport(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+    Path javaHome = Files.createDirectories(root.resolve("java-home"));
+    Path nativeLauncher = launcher(root.resolve("native-composer.cmd"),
+        List.of(nativeBinary.toString()));
+    String interaction = "hello world" + "\u001b[D".repeat(5) + "X";
+    String expected = "hello Xworld";
+
+    Capture nativeCapture = capture(List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+        Files.createDirectories(root.resolve("native-workspace")), nativeHome,
+        interaction, expected);
+    Capture javaCapture = capturePiped(List.of(javaExecutable(),
+            "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+            "-Dajent.terminal.fixedSize=" + COLUMNS + "x" + ROWS,
+            "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+        Files.createDirectories(root.resolve("java-workspace")), javaHome,
+        interaction, expected);
+
+    assertCleanExit(nativeCapture, "native");
+    assertCleanExit(javaCapture, "Java");
+    var nativeViewport = new AnsiViewport(COLUMNS, ROWS);
+    nativeViewport.feed(nativeCapture.frame());
+    var javaViewport = new AnsiViewport(COLUMNS, ROWS);
+    javaViewport.feed(javaCapture.frame());
+    assertThat(nativeViewport.lines()).anyMatch(
+        line -> withoutPaintedCursor(line).contains(expected));
+    assertThat(javaViewport.lines()).anyMatch(
+        line -> withoutPaintedCursor(line).contains(expected));
+    assertThat(stableRegion(javaViewport.lines())).as(
+            "native viewport:%n%s%nJava viewport:%n%s",
+            numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+        .containsExactlyElementsOf(stableRegion(nativeViewport.lines()));
+  }
+
+  @Test
+  void multilineComposerMatchesTheNativeViewport(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+    Path javaHome = Files.createDirectories(root.resolve("java-home"));
+    Path nativeLauncher = launcher(root.resolve("native-multiline.cmd"),
+        List.of(nativeBinary.toString()));
+    String interaction = "first\u001b[13;2usecond";
+
+    Capture nativeCapture = capture(List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+        Files.createDirectories(root.resolve("native-workspace")), nativeHome,
+        interaction, "second");
+    Capture javaCapture = capturePiped(List.of(javaExecutable(),
+            "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+            "-Dajent.terminal.fixedSize=" + COLUMNS + "x" + ROWS,
+            "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+        Files.createDirectories(root.resolve("java-workspace")), javaHome,
+        interaction, "second");
+
+    assertCleanExit(nativeCapture, "native");
+    assertCleanExit(javaCapture, "Java");
+    var nativeViewport = new AnsiViewport(COLUMNS, ROWS);
+    nativeViewport.feed(nativeCapture.frame());
+    var javaViewport = new AnsiViewport(COLUMNS, ROWS);
+    javaViewport.feed(javaCapture.frame());
+    assertThat(nativeViewport.lines()).anyMatch(line -> line.contains("┊ second"));
+    assertThat(javaViewport.lines()).anyMatch(line -> line.contains("┊ second"));
+    assertThat(stableRegion(javaViewport.lines())).as(
+            "native viewport:%n%s%nJava viewport:%n%s",
+            numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+        .containsExactlyElementsOf(stableRegion(nativeViewport.lines()));
+  }
+
+  @Test
+  void wideUnicodeSoftWrapAndBackspaceMatchTheNativeViewport(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+    Path javaHome = Files.createDirectories(root.resolve("java-home"));
+    Path nativeLauncher = launcher(root.resolve("native-unicode-wrap.cmd"),
+        List.of(nativeBinary.toString()));
+    String interaction = "0123456789".repeat(7) + "中界\u007fé";
+
+    Capture nativeCapture = capture(List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+        Files.createDirectories(root.resolve("native-workspace")), nativeHome,
+        interaction, "é");
+    Capture javaCapture = capturePiped(List.of(javaExecutable(),
+            "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+            "-Dajent.terminal.fixedSize=" + COLUMNS + "x" + ROWS,
+            "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+        Files.createDirectories(root.resolve("java-workspace")), javaHome,
+        interaction, "é");
+
+    assertCleanExit(nativeCapture, "native");
+    assertCleanExit(javaCapture, "Java");
+    var nativeViewport = new AnsiViewport(COLUMNS, ROWS);
+    nativeViewport.feed(nativeCapture.frame());
+    var javaViewport = new AnsiViewport(COLUMNS, ROWS);
+    javaViewport.feed(javaCapture.frame());
+    assertThat(nativeViewport.lines()).anyMatch(line -> line.contains("中"));
+    assertThat(javaViewport.lines()).anyMatch(line -> line.contains("中"));
+    assertThat(stableRegion(javaViewport.lines())).as(
+            "native viewport:%n%s%nJava viewport:%n%s",
+            numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+        .containsExactlyElementsOf(stableRegion(nativeViewport.lines()));
+  }
+
+  private static Capture capture(List<String> executable, Path workspace, Path home,
+                                 String interaction, String expected)
       throws Exception {
     var command = new ArrayList<>(executable);
     command.addAll(List.of("--provider", "ollama", "--model", "qwen2.5-coder:7b",
@@ -102,19 +209,26 @@ final class NativeTerminalParityIT {
     var error = new ByteArrayOutputStream();
     Thread reader = Thread.startVirtualThread(() -> {
       try {
-        process.getInputStream().transferTo(output);
+        drain(process.getInputStream(), output);
       } catch (java.io.IOException ignored) {
         // Closing the PTY during a normal shutdown may terminate the read first.
       }
     });
     Thread errorReader = Thread.startVirtualThread(() -> {
       try {
-        process.getErrorStream().transferTo(error);
+        drain(process.getErrorStream(), error);
       } catch (java.io.IOException ignored) {
         // Closing the PTY during a normal shutdown may terminate the read first.
       }
     });
     awaitWelcome(output, error, Duration.ofSeconds(8));
+    awaitStableChrome(output, error, Duration.ofSeconds(5));
+    if (!interaction.isEmpty() && process.isAlive()) {
+      process.getOutputStream().write(interaction.getBytes(StandardCharsets.UTF_8));
+      process.getOutputStream().flush();
+      awaitViewportText(output, error, expected, Duration.ofSeconds(5));
+    }
+    String frame = combined(output, error);
     if (process.isAlive()) {
       process.getOutputStream().write(3);
       process.getOutputStream().flush();
@@ -130,11 +244,11 @@ final class NativeTerminalParityIT {
     }
     reader.join(Duration.ofSeconds(3));
     errorReader.join(Duration.ofSeconds(3));
-    return new Capture(process.exitValue(), output.toString(StandardCharsets.UTF_8)
-        + error.toString(StandardCharsets.UTF_8));
+    return new Capture(process.exitValue(), combined(output, error), frame);
   }
 
-  private static Capture capturePiped(List<String> executable, Path workspace, Path home)
+  private static Capture capturePiped(List<String> executable, Path workspace, Path home,
+                                      String interaction, String expected)
       throws Exception {
     var command = new ArrayList<>(executable);
     command.addAll(List.of("--provider", "ollama", "--model", "qwen2.5-coder:7b",
@@ -152,10 +266,17 @@ final class NativeTerminalParityIT {
     Process process = builder.start();
     var output = new ByteArrayOutputStream();
     Thread reader = Thread.startVirtualThread(() -> {
-      try { process.getInputStream().transferTo(output); }
+      try { drain(process.getInputStream(), output); }
       catch (java.io.IOException ignored) { }
     });
     awaitWelcome(output, new ByteArrayOutputStream(), Duration.ofSeconds(8));
+    awaitStableChrome(output, new ByteArrayOutputStream(), Duration.ofSeconds(5));
+    if (!interaction.isEmpty() && process.isAlive()) {
+      process.getOutputStream().write(interaction.getBytes(StandardCharsets.UTF_8));
+      process.getOutputStream().flush();
+      awaitViewportText(output, new ByteArrayOutputStream(), expected, Duration.ofSeconds(5));
+    }
+    String frame = text(output);
     if (process.isAlive()) {
       // Use the enhanced-keyboard encoding requested by ENTER_INLINE. An external JLine
       // terminal can consume raw ETX as an input signal before it reaches Ajent's decoder.
@@ -167,7 +288,7 @@ final class NativeTerminalParityIT {
       process.waitFor(3, TimeUnit.SECONDS);
     }
     reader.join(Duration.ofSeconds(3));
-    return new Capture(process.exitValue(), output.toString(StandardCharsets.UTF_8));
+    return new Capture(process.exitValue(), text(output), frame);
   }
 
   private static void awaitWelcome(ByteArrayOutputStream output, ByteArrayOutputStream error,
@@ -175,14 +296,76 @@ final class NativeTerminalParityIT {
       throws InterruptedException {
     long deadline = System.nanoTime() + timeout.toNanos();
     while (System.nanoTime() < deadline) {
-      String captured = output.toString(StandardCharsets.UTF_8)
-          + error.toString(StandardCharsets.UTF_8);
-      if (captured.contains("a calm middleware between you and the model")) {
+      String captured = combined(output, error);
+      if (captured.contains(TAGLINE)) return;
+      Thread.sleep(20);
+    }
+  }
+
+  private static void awaitStableChrome(ByteArrayOutputStream output,
+                                        ByteArrayOutputStream error, Duration timeout)
+      throws InterruptedException {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    while (System.nanoTime() < deadline) {
+      var viewport = new AnsiViewport(COLUMNS, ROWS);
+      viewport.feed(combined(output, error));
+      List<String> lines = viewport.lines();
+      if (lines.stream().anyMatch(line -> line.contains(TAGLINE))
+          && lines.stream().anyMatch(line -> line.contains("type a message"))
+          && lines.stream().anyMatch(line -> line.contains("Ready"))) {
+        Thread.sleep(100);
+        return;
+      }
+      Thread.sleep(20);
+    }
+  }
+
+  private static void awaitViewportText(ByteArrayOutputStream output,
+                                        ByteArrayOutputStream error, String expected,
+                                        Duration timeout) throws InterruptedException {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    while (System.nanoTime() < deadline) {
+      var viewport = new AnsiViewport(COLUMNS, ROWS);
+      viewport.feed(combined(output, error));
+      if (viewport.lines().stream()
+          .map(NativeTerminalParityIT::withoutPaintedCursor)
+          .anyMatch(line -> line.contains(expected))) {
         Thread.sleep(150);
         return;
       }
       Thread.sleep(20);
     }
+  }
+
+  private static String combined(ByteArrayOutputStream output, ByteArrayOutputStream error) {
+    return text(output) + text(error);
+  }
+
+  private static String text(ByteArrayOutputStream output) {
+    synchronized (output) {
+      return output.toString(StandardCharsets.UTF_8);
+    }
+  }
+
+  private static void drain(java.io.InputStream input, ByteArrayOutputStream output)
+      throws java.io.IOException {
+    byte[] buffer = new byte[8192];
+    for (int read; (read = input.read(buffer)) >= 0;) {
+      synchronized (output) {
+        output.write(buffer, 0, read);
+      }
+    }
+  }
+
+  private static String withoutPaintedCursor(String value) {
+    return value.replace("█", "");
+  }
+
+  private static void assertCleanExit(Capture capture, String label) {
+    int windowsControlC = 0xc000013a;
+    assertThat(capture.exitCode()).as("%s output:%n%s", label, capture.output())
+        .isIn(0, 130, windowsControlC);
+    assertThat(capture.output()).doesNotContain("failed to initialize terminal");
   }
 
   private static Path repositoryRoot() {
@@ -222,11 +405,29 @@ final class NativeTerminalParityIT {
     return result.toString();
   }
 
+  private static List<String> stableRegion(List<String> lines) {
+    int start = taglineRow(lines);
+    int end = lines.size();
+    while (end > start && lines.get(end - 1).isBlank()) end--;
+    return lines.subList(start, end);
+  }
+
+  private static List<String> linesBeforeTagline(List<String> lines) {
+    return lines.subList(0, taglineRow(lines));
+  }
+
+  private static int taglineRow(List<String> lines) {
+    for (int index = 0; index < lines.size(); index++) {
+      if (lines.get(index).contains(TAGLINE)) return index;
+    }
+    throw new AssertionError("tagline missing from viewport:\n" + numbered(lines));
+  }
+
   private static String requiredProperty(String name) {
     String value = System.getProperty(name, "").strip();
     if (value.isEmpty()) throw new IllegalStateException("missing system property: " + name);
     return value;
   }
 
-  private record Capture(int exitCode, String output) {}
+  private record Capture(int exitCode, String output, String frame) {}
 }

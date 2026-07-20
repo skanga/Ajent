@@ -71,11 +71,15 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched AgenTTY's stable 80x24 startup viewport below the animated wordmark:
   welcome alignment and compact labels, the six-row Maya composer, attachment
   cursor projection, and the three-row provider/context status panel.
+- Matched executable composer editing for cursor insertion, Shift+Enter
+  continuation rows, multiline border captions, wide-Unicode soft wrapping,
+  Backspace, and Maya's pre-wrap two-logical-row height floor.
 
 ### Known limitations
 
 - Animated wordmark-frame and scripted live terminal differentials remain under
-  parity work; stable startup rows 7-23 now compare cell-for-cell.
+  parity work; the tagline-anchored stable startup and composer regions now
+  compare cell-for-cell.
 - OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's
   OpenAI-compatible transport uses Chat Completions and API keys.
 - The pinned AgenTTY 0.2.8 Windows binary has a positive `find_definition`

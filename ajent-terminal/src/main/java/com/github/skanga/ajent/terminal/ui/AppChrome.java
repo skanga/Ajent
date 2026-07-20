@@ -142,11 +142,11 @@ public final class AppChrome {
     rows.add(row("╭" + border + "╮", Tone.ACCENT));
 
     String placeholder = config.text().isEmpty() ? composerPlaceholder(config) : config.text();
-    String body = config.text().isEmpty()
-        ? "❯ █" + placeholder
-        : "❯ " + withCursor(config.text(), config.cursor());
-    List<String> bodyLines = wrapLines(body, Math.max(1, inside - 2));
-    int bodyRows = Math.max(2, bodyLines.size());
+    List<String> bodyLines = config.text().isEmpty()
+        ? List.of("❯ █" + placeholder)
+        : composerBodyLines(config.text(), config.cursor(), Math.max(1, inside - 2));
+    int logicalRows = config.text().isEmpty() ? 1 : config.text().split("\\n", -1).length;
+    int bodyRows = bodyLines.size() + Math.max(0, 2 - logicalRows);
     for (int index = 0; index < bodyRows; index++) {
       String value = index < bodyLines.size() ? bodyLines.get(index) : "";
       rows.add(row("│ " + fit(value, inside - 2) + " │", Tone.NORMAL));
@@ -159,7 +159,12 @@ public final class AppChrome {
     int fixed = 3 + columns(left) + columns(right) + 2;
     String hints = "   " + left + " ".repeat(Math.max(1, content - fixed)) + right + "  ";
     rows.add(row("│" + fit(hints, content) + "│", Tone.MUTED));
-    rows.add(row("╰" + border + "╯", Tone.ACCENT));
+    int lineCount = config.text().split("\\n", -1).length;
+    String caption = lineCount > 1 ? " " + lineCount + " lines " : "";
+    rows.add(row(caption.isEmpty()
+        ? "╰" + border + "╯"
+        : "╰" + "─".repeat(Math.max(0, inside - columns(caption))) + caption + "╯",
+        Tone.ACCENT));
     return List.copyOf(rows);
   }
 
@@ -274,28 +279,38 @@ public final class AppChrome {
     return text.substring(0, cursor) + "█" + text.substring(cursor);
   }
 
-  private static List<String> wrapLines(String value, int width) {
+  private static List<String> composerBodyLines(String text, int cursor, int width) {
     var rows = new ArrayList<String>();
-    for (String logical : value.split("\\n", -1)) {
-      String remaining = logical;
-      do {
-        if (columns(remaining) <= width) {
-          rows.add(remaining);
-          remaining = "";
-        } else {
-          int end = 0;
-          int used = 0;
-          while (end < remaining.length()) {
-            int codePoint = remaining.codePointAt(end);
-            int cellWidth = UnicodeWidth.of(codePoint);
-            if (used + cellWidth > width) break;
-            used += cellWidth;
-            end += Character.charCount(codePoint);
-          }
-          rows.add(remaining.substring(0, end));
-          remaining = remaining.substring(end);
-        }
-      } while (!remaining.isEmpty());
+    String[] logicalLines = withCursor(text, cursor).split("\\n", -1);
+    int contentWidth = Math.max(1, width - 2);
+    for (int logicalIndex = 0; logicalIndex < logicalLines.length; logicalIndex++) {
+      List<String> wrapped = wrapCellLine(logicalLines[logicalIndex], contentWidth);
+      for (int visualIndex = 0; visualIndex < wrapped.size(); visualIndex++) {
+        String prefix = visualIndex == 0
+            ? (logicalIndex == 0 ? "❯ " : "┊ ") : "  ";
+        rows.add(prefix + wrapped.get(visualIndex));
+      }
+    }
+    return List.copyOf(rows);
+  }
+
+  private static List<String> wrapCellLine(String value, int width) {
+    if (value.isEmpty()) return List.of("");
+    var rows = new ArrayList<String>();
+    String remaining = value;
+    while (!remaining.isEmpty()) {
+      int end = 0;
+      int used = 0;
+      while (end < remaining.length()) {
+        int codePoint = remaining.codePointAt(end);
+        int cellWidth = UnicodeWidth.of(codePoint);
+        if (used + cellWidth > width) break;
+        used += cellWidth;
+        end += Character.charCount(codePoint);
+      }
+      if (end == 0) end = Character.charCount(remaining.codePointAt(0));
+      rows.add(remaining.substring(0, end));
+      remaining = remaining.substring(end);
     }
     return List.copyOf(rows);
   }
