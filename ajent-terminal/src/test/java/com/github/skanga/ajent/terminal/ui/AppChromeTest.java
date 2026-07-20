@@ -173,6 +173,23 @@ final class AppChromeTest {
   }
 
   @Test
+  void rendersTheNativeSearchableModelPicker() {
+    List<AppChrome.Row> rows = AppChrome.modelPicker("", List.of(
+        new AppChrome.PickerRow("parity-model", "", true, true)), "", 78, 14);
+
+    assertThat(rows).hasSize(9).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(rows.getFirst().text()).contains(" Models ");
+    assertThat(rows.get(2).text()).contains("🔍 type to filter models…");
+    assertThat(rows.get(3).text()).contains("─".repeat(70));
+    assertThat(rows.get(4).text()).contains("▎ parity-model", "┃");
+    assertThat(rows.get(6).text())
+        .contains("↑↓ move   type filter   Enter select   F favorite   Esc close");
+    assertThat(AppChrome.modelPicker("opus", List.of(
+        new AppChrome.PickerRow("Opus", "◇ high", true, true)),
+        "←→ reasoning effort: high", 78, 14)).hasSize(10);
+  }
+
+  @Test
   void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
     AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);

@@ -145,7 +145,7 @@ initial and Down-navigated frames, closes it with Escape, and proves the complet
 76-column bordered bottom overlay. Registry blurbs, authentication/local notes,
 cursor and scrollbar rails, blank padding, legend, key hints, and the native
 short-terminal `rows - 8` viewport clamp are shared production behavior. The
-remaining picker backlog is limited to the model, thread, mention, symbol,
+remaining picker backlog is limited to the thread-switch, mention, symbol,
 code-block, and checkpoint surfaces.
 
 Ctrl+K now uses the same production picker chrome with the native search header,
@@ -155,8 +155,8 @@ viewport. The executable gate captures the open palette and compares a unique
 and predates the checked-in source's `Inspect tool outputs` palette entry;
 Ajent retains that source-correct fifteenth command, so only the common uniquely
 filtered view is asserted exactly. Command-palette rendering and filtering are
-complete; the remaining picker backlog is model, mention, symbol, code-block,
-and checkpoint surfaces.
+complete; the remaining picker backlog is mention, symbol, code-block, and
+checkpoint surfaces.
 
 Ctrl+J now opens the exact saved-thread picker in both executable clients. The
 characterization creates a real persisted turn in isolated homes and compares
@@ -166,6 +166,16 @@ cell-for-cell. The harness uses negotiated CSI-u Ctrl+J and Escape sequences,
 so the lifecycle is tested under the same enhanced keyboard mode as production.
 Thread selection/switching remains a separate terminal scenario; the picker
 surface itself is complete.
+
+Enhanced Ctrl+/ now opens the exact searchable model picker in both executable
+clients. The characterization serves a deterministic catalog and compares the
+title, search prompt and separator, active/selected rail, model row, blank
+padding, navigation legend, responsive viewport, and border cell-for-cell.
+Production rendering additionally pins pending-catalog, empty-catalog, empty
+filter, favorite, and reasoning-effort states. AgenTTY's Windows ConPTY capture
+substitutes U+FFFD for the source's two-cell search emoji while retaining its
+layout; the differential normalizes only that capture-layer glyph back to the
+source emoji. The model-picker surface and lifecycle are complete.
 
 `TurnChromeTest` and live `InteractiveCommandTest` coverage now pin the native
 turn shell independently of the broader renderer: `❯ You` and model-aware

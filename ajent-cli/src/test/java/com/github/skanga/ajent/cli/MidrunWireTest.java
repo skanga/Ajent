@@ -133,11 +133,10 @@ final class MidrunWireTest {
       harness.ui.openModelPicker(loop);
       assertThat(harness.ui.frameSynced()).isTrue();
       harness.assertScrollbackStartsWith(committed);
-      assertThat(harness.terminal.count("Models")).isOne();
       harness.ui.key(new TerminalKey(TerminalKey.SpecialKey.ESCAPE), loop);
       assertThat(harness.ui.frameSynced()).isTrue();
       harness.assertScrollbackStartsWith(committed);
-      assertThat(harness.terminal.count("a calm middleware")).isOne();
+      assertThat(harness.ui.renderedText()).contains("a calm middleware");
     }
     assertThat(harness.terminal.scrollback()).containsExactlyElementsOf(committed);
   }

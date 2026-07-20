@@ -276,6 +276,8 @@ final class NativeTerminalParityIT {
           "filtered command palette viewport");
       assertMatchingRegion(nativeCapture.threadFrame(), javaCapture.threadFrame(),
           "Threads", "thread picker viewport");
+      assertMatchingRegion(nativeCapture.modelFrame(), javaCapture.modelFrame(),
+          "Models", "model picker viewport");
     } finally {
       provider.stop(0);
     }
@@ -490,6 +492,14 @@ final class NativeTerminalParityIT {
     process.getOutputStream().write(closePicker);
     process.getOutputStream().flush();
     Thread.sleep(400);
+    process.getOutputStream().write("\u001b[47;5u".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Models", Duration.ofSeconds(5));
+    Thread.sleep(250);
+    String modelFrame = combined(output, error);
+    process.getOutputStream().write(closePicker);
+    process.getOutputStream().flush();
+    Thread.sleep(400);
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -509,7 +519,7 @@ final class NativeTerminalParityIT {
     if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
-        threadFrame);
+        threadFrame, modelFrame);
   }
 
   private static Map<String, String> terminalEnvironment(Path home) {
@@ -653,6 +663,15 @@ final class NativeTerminalParityIT {
 
   private static HttpServer permissionProvider(List<String> requests) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/models", exchange -> {
+      try (exchange) {
+        byte[] bytes = "{\"data\":[{\"id\":\"parity-model\"}]}"
+            .getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
     server.createContext("/v1/chat/completions", exchange -> {
       try (exchange) {
         String request = new String(exchange.getRequestBody().readAllBytes(),
@@ -779,6 +798,9 @@ final class NativeTerminalParityIT {
         normalized = normalized.replaceFirst(
             "\\d+(?:\\.\\d+)?(?:ms|s)\\s+(?=│$)", "#time ");
       }
+      // Windows ConPTY substitutes U+FFFD for AgenTTY's two-cell search emoji while
+      // retaining its two-column layout. Compare the intended source glyph and layout.
+      normalized = normalized.replace("� type to filter models…", "🔍 type to filter models…");
       return normalized;
     }).toList();
   }
@@ -800,5 +822,6 @@ final class NativeTerminalParityIT {
   private record StagedCapture(int exitCode, String output, String permissionFrame,
                                String finalFrame, String pickerFrame,
                                String movedPickerFrame, String commandFrame,
-                               String filteredCommandFrame, String threadFrame) {}
+                               String filteredCommandFrame, String threadFrame,
+                               String modelFrame) {}
 }

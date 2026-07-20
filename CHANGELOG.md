@@ -91,10 +91,13 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched the executable saved-thread picker cell-for-cell, including the
   active/current marker, local timestamp, position counter, navigation footer,
   responsive list viewport, and enhanced Ctrl+J/Escape lifecycle.
+- Matched the searchable model picker cell-for-cell, including catalog loading,
+  empty and filtered states, active/favorite markers, reasoning-effort tiers,
+  navigation hints, responsive viewport, and enhanced Ctrl+/ lifecycle.
 
 ### Known limitations
 
-- Animated wordmark-frame and model/mention/symbol/code/checkpoint picker,
+- Animated wordmark-frame and mention/symbol/code/checkpoint picker,
   review, resize, attachment, queue, and scrollback terminal
   differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live

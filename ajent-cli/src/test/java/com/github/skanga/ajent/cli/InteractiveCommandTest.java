@@ -228,7 +228,8 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(agent.provider).isEqualTo("ollama");
-    assertThat(terminal.bytes.toString()).contains("Providers").contains("provider: Ollama");
+    assertThat(terminal.bytes.toString()).contains("Providers");
+    assertThat(ui.renderedText()).contains("provider: Ollama");
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent); // closes model picker opened after switch
 
     ui.key(character('k', true), agent);
@@ -836,7 +837,7 @@ final class InteractiveCommandTest {
     ui.key(character('k', true), agent);
     for (int codePoint : "open model".codePoints().toArray()) ui.key(character(codePoint), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("loading");
+    assertThat(terminal.bytes.toString()).contains("Loading models…");
     agent.completeModels();
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
@@ -850,16 +851,17 @@ final class InteractiveCommandTest {
     agent.model = "claude-opus-4-7";
     agent.availableModels = List.of(
         new com.github.skanga.ajent.terminal.ui.ModelPicker.Model(
-            "claude-opus-4-7", "Claude Opus 4.7", false),
+            "claude-opus-4-7", "Claude Opus 4.7", true),
         new com.github.skanga.ajent.terminal.ui.ModelPicker.Model("gpt-5", "GPT 5", false));
 
     ui.key(character('k', true), agent);
     for (int codePoint : "open model".codePoints().toArray()) ui.key(character(codePoint), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("reasoning effort: off", "\u2190/\u2192 change");
+    assertThat(terminal.bytes.toString()).contains("←→ reasoning effort: off");
     ui.key(special(TerminalKey.SpecialKey.RIGHT), agent);
     assertThat(agent.effort).isEqualTo(com.github.skanga.ajent.domain.Effort.LOW);
-    assertThat(terminal.bytes.toString()).contains("\u25c7 low", "reasoning effort: low");
+    assertThat(terminal.bytes.toString()).contains("★  ◇ low");
+    assertThat(ui.renderedText()).contains("reasoning effort: low");
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
     assertThat(agent.effort).isEqualTo(com.github.skanga.ajent.domain.Effort.NONE);
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);

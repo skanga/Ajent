@@ -1494,9 +1494,6 @@ final class InteractiveCommand {
       modelsLoading = true;
       effort = loop.effort();
       modelId = loop.model();
-      if (models.isEmpty()) {
-        models = List.of(new ModelPicker.Model(loop.model(), loop.model(), false));
-      }
       modelPicker = ModelPicker.open(models, loop.model());
       loop.loadModels(loaded -> {
         synchronized (lock) {
@@ -2412,28 +2409,35 @@ final class InteractiveCommand {
           }
         }
         if (modelPicker instanceof PickerState.OpenAt open) {
-          var overlay = new ArrayList<StyledLine>();
-          overlay.add(new StyledLine("Models  " + open.query()
-              + (modelsLoading ? "  loading…" : ""), Style.ACCENT));
           List<Integer> visible = ModelPicker.filteredIndices(models, open.query());
-          for (int index = 0; index < visible.size(); index++) {
-            ModelPicker.Model model = models.get(visible.get(index));
-            String marker = index == open.index() ? "› " : "  ";
-            String favorite = model.favorite() ? "★ " : "  ";
-            boolean selected = index == open.index();
-            boolean supportsEffort = ModelCapabilities.fromId(model.id()).supportsEffort();
-            String trailing = selected && supportsEffort && effort != Effort.NONE
-                ? "  \u25c7 " + effort.label() : "";
-            overlay.add(new StyledLine(marker + favorite + model.displayName() + trailing,
-                index == open.index() ? Style.ACCENT : Style.NORMAL));
+          var pickerRows = new ArrayList<AppChrome.PickerRow>();
+          if (models.isEmpty()) {
+            pickerRows.add(new AppChrome.PickerRow(modelsLoading
+                ? "Loading models…"
+                : "No models available — check the provider/key, then Esc.", "", false, false));
+          } else if (visible.isEmpty()) {
+            pickerRows.add(new AppChrome.PickerRow("no models match", "", false, false));
+          } else {
+            for (int index = 0; index < visible.size(); index++) {
+              ModelPicker.Model model = models.get(visible.get(index));
+              boolean selected = index == open.index();
+              boolean supportsEffort = ModelCapabilities.fromId(model.id()).supportsEffort();
+              String trailing = model.favorite() ? "★" : "";
+              if (selected && supportsEffort && effort != Effort.NONE) {
+                if (!trailing.isEmpty()) trailing += "  ";
+                trailing += "◇ " + effort.label();
+              }
+              pickerRows.add(new AppChrome.PickerRow(model.displayName(), trailing, selected,
+                  model.id().equals(modelId)));
+            }
           }
           Optional<ModelPicker.Model> selected = ModelPicker.select(modelPicker, models).model();
-          if (selected.isPresent() && ModelCapabilities
-              .fromId(selected.orElseThrow().id()).supportsEffort()) {
-            overlay.add(new StyledLine("reasoning effort: " + effort.label()
-                + "  \u2190/\u2192 change", Style.MUTED));
-          }
-          if (!uiStatus.isBlank()) overlay.add(new StyledLine(uiStatus, Style.MUTED));
+          String effortHint = selected.filter(model -> ModelCapabilities
+                  .fromId(model.id()).supportsEffort())
+              .map(ignored -> "←→ reasoning effort: " + effort.label()).orElse("");
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.modelPicker(open.query(), pickerRows, effortHint,
+              Math.max(40, width - 2), Math.min(14, Math.max(4, terminalRows - 8))));
           lines = overlayBottom(lines, overlay);
         }
         if (providerPicker instanceof PickerState.OpenAt open) {
