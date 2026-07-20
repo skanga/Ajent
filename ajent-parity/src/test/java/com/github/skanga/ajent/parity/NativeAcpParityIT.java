@@ -72,6 +72,7 @@ final class NativeAcpParityIT {
       List<JsonNode> nativeRequests = List.copyOf(requests);
       requests.clear();
       assertThat(target.get()).as(nativeTranscript.toString()).hasContent("hello from acp\n");
+      assertThat(clientCallbackRequestCount(nativeTranscript)).isZero();
 
       Transcript javaTranscript;
       target.set(javaWorkspace.resolve("out.txt"));
@@ -81,6 +82,7 @@ final class NativeAcpParityIT {
       }
       List<JsonNode> javaRequests = List.copyOf(requests);
       assertThat(target.get()).as(javaTranscript.toString()).hasContent("hello from acp\n");
+      assertThat(clientCallbackRequestCount(javaTranscript)).isZero();
 
       Transcript normalizedNative = normalizePrompt(nativeTranscript, nativeWorkspace, true);
       Transcript normalizedJava = normalizePrompt(javaTranscript, javaWorkspace, false);
@@ -404,8 +406,7 @@ final class NativeAcpParityIT {
 
   private static Transcript exercisePrompt(
       AgentProcess agent, Path workspace, String permissionOption) throws Exception {
-    agent.call("initialize", JSON.readTree(
-        "{\"protocolVersion\":1,\"clientCapabilities\":{}}"));
+    agent.call("initialize", initializeWithClientCallbacks());
     List<JsonNode> created = agent.call("session/new", JSON.createObjectNode()
         .put("cwd", workspace.toString()).set("mcpServers", JSON.createArrayNode()));
     String sessionId = response(created).path("result").path("sessionId").textValue();
@@ -580,6 +581,24 @@ final class NativeAcpParityIT {
     return transcript.exchanges().stream().flatMap(List::stream)
         .filter(frame -> "session/request_permission".equals(frame.path("method").asText()))
         .count();
+  }
+
+  private static long clientCallbackRequestCount(Transcript transcript) {
+    return transcript.exchanges().stream().flatMap(List::stream)
+        .filter(frame -> isClientCallback(frame.path("method").asText()))
+        .count();
+  }
+
+  private static boolean isClientCallback(String method) {
+    return method.startsWith("fs/") || method.startsWith("terminal/");
+  }
+
+  private static ObjectNode initializeWithClientCallbacks() {
+    ObjectNode parameters = JSON.createObjectNode().put("protocolVersion", 1);
+    ObjectNode capabilities = parameters.putObject("clientCapabilities");
+    capabilities.putObject("fs").put("readTextFile", true).put("writeTextFile", true);
+    capabilities.put("terminal", true);
+    return parameters;
   }
 
   private record CancelGate(
@@ -986,6 +1005,10 @@ final class NativeAcpParityIT {
         if (line == null) throw new AssertionError("ACP process exited: " + stderr());
         JsonNode frame = JSON.readTree(line);
         frames.add(frame);
+        if (isClientCallback(frame.path("method").asText())) {
+          throw new AssertionError("ACP application emitted unsupported client callback: "
+              + frame);
+        }
         if (!permissionOption.isEmpty()
             && "session/request_permission".equals(frame.path("method").asText())) {
           ObjectNode response = JSON.createObjectNode().put("jsonrpc", "2.0");

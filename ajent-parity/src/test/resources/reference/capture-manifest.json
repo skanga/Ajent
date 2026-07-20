@@ -97,16 +97,16 @@
     },
     {
       "id": "acp",
-      "status": "partial-native-executable-green",
+      "status": "native-executable-green",
       "sources": ["agentty/include/agentty/acp/server.hpp", "agentty/src/acp/server.cpp", "agentty/tests/acp_integration_test.cpp", "agentty/scripts/acp_methods_test.py"],
       "cases": ["initialize", "authenticate", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel", "session/update", "session/request_permission", "errors", "concurrency"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeAcpParityIT",
-        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC exchange sequences for persisted API-key login/authenticate/logout plus the offline ACP lifecycle and loopback-provider allow-once/reject-once/allow-always/cancel/concurrent prompt/tool/permission/continuation turns against the pinned Windows executable"
+        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC exchange sequences for persisted API-key login/authenticate/logout plus the offline ACP lifecycle and loopback-provider allow-once/reject-once/allow-always/cancel/concurrent prompt/tool/permission/continuation turns, including advertised client fs/terminal capabilities with application-local tool execution, against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["initialize", "persisted API-key login", "authenticate missing methodId validation", "authenticate with installed credentials", "logout clears installed credentials", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel notification", "cancelled prompt stop and exact transport metadata", "two simultaneously in-flight sessions with exact isolated frames", "streamed text/tool/usage session/update", "session/request_permission allow-once", "session/request_permission reject-once", "session/request_permission allow-always", "allow-always session grant reuse", "rejected non-execution", "two sequential tool continuations", "tool-result continuation", "method-not-found error"],
+      "coveredExecutableCases": ["initialize", "advertised client fs/terminal capabilities are accepted and ignored", "filesystem and terminal tools remain application-local without client callbacks", "persisted API-key login", "authenticate missing methodId validation", "authenticate with installed credentials", "logout clears installed credentials", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel notification", "cancelled prompt stop and exact transport metadata", "two simultaneously in-flight sessions with exact isolated frames", "streamed text/tool/usage session/update", "session/request_permission allow-once", "session/request_permission reject-once", "session/request_permission allow-always", "allow-always session grant reuse", "rejected non-execution", "two sequential tool continuations", "tool-result continuation", "method-not-found error"],
       "deliberateExecutableDifferences": ["AgenTTY's unsynchronized cold ACP wire_tools_ cache can omit tools from one of two concurrent first requests; Ajent's immutable catalog supplies the exact full native catalog to both requests"],
-      "remainingExecutableCases": ["client filesystem and terminal callbacks"]
+      "remainingExecutableCases": []
     },
     {
       "id": "mcp-server-client",

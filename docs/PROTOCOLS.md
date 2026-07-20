@@ -27,6 +27,14 @@ prompt owns a session at a time.
 wire shape as AgenTTY, succeeds when startup resolved installed credentials,
 and returns `AuthRequired` after `logout` clears them.
 
+Clients may advertise `fs.readTextFile`, `fs.writeTextFile`, and `terminal` in
+their initialize capabilities. AgenTTY accepts but does not retain or invoke
+those capabilities: its built-in filesystem and terminal tools execute in the
+agent runtime, and its only outbound request is `session/request_permission`.
+Ajent intentionally matches that application behavior. The `fs/*` and
+`terminal/*` methods provided by the generic `acp-cpp` client library are not
+call sites in AgenTTY itself.
+
 Each session composes a real `AgentLoop` with selected provider, profile-derived
 tool catalog, persistence, checkpoints, skills/memory/RAG, MCP external tools,
 and permission bridge. Loading/resuming reconstructs from the durable thread;

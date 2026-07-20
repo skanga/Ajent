@@ -52,7 +52,9 @@ final class AcpJsonRpcServerTest {
         }, "0.2.8");
 
     JsonNode initialized = result(server, 1, "initialize", """
-        {"protocolVersion":1,"clientCapabilities":{}}
+        {"protocolVersion":1,"clientCapabilities":{
+          "fs":{"readTextFile":true,"writeTextFile":true},"terminal":true
+        }}
         """);
     assertThat(initialized.path("protocolVersion").intValue()).isEqualTo(1);
     assertThat(initialized.path("agentInfo").path("name").textValue()).isEqualTo("ajent");
