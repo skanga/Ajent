@@ -90,7 +90,56 @@ final class NativeAcpParityIT {
     }
   }
 
+  @Test
+  void rejectedPermissionAndContinuationMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-reject-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-reject-workspace"));
+    var target = new AtomicReference<Path>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedProvider(target, requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      target.set(nativeWorkspace.resolve("rejected.txt"));
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-reject-home"), false)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace, "reject_once");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+      assertThat(target.get()).doesNotExist();
+
+      target.set(javaWorkspace.resolve("rejected.txt"));
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-reject-home"), true)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace, "reject_once");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+      assertThat(target.get()).doesNotExist();
+
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
   private static Transcript exercisePrompt(AgentProcess agent, Path workspace) throws Exception {
+    return exercisePrompt(agent, workspace, "allow_once");
+  }
+
+  private static Transcript exercisePrompt(
+      AgentProcess agent, Path workspace, String permissionOption) throws Exception {
     agent.call("initialize", JSON.readTree(
         "{\"protocolVersion\":1,\"clientCapabilities\":{}}"));
     List<JsonNode> created = agent.call("session/new", JSON.createObjectNode()
@@ -100,7 +149,8 @@ final class NativeAcpParityIT {
     var prompt = JSON.createArrayNode();
     prompt.addObject().put("type", "text").put("text", "please write the file");
     params.set("prompt", prompt);
-    return new Transcript(sessionId, List.of(agent.callWithPermission("session/prompt", params)));
+    return new Transcript(sessionId, List.of(
+        agent.callWithPermission("session/prompt", params, permissionOption)));
   }
 
   private static HttpServer scriptedProvider(
@@ -415,14 +465,15 @@ final class NativeAcpParityIT {
     }
 
     List<JsonNode> call(String method, JsonNode params) throws Exception {
-      return call(method, params, false);
+      return call(method, params, "");
     }
 
-    List<JsonNode> callWithPermission(String method, JsonNode params) throws Exception {
-      return call(method, params, true);
+    List<JsonNode> callWithPermission(String method, JsonNode params, String optionId)
+        throws Exception {
+      return call(method, params, optionId);
     }
 
-    private List<JsonNode> call(String method, JsonNode params, boolean answerPermission)
+    private List<JsonNode> call(String method, JsonNode params, String permissionOption)
         throws Exception {
       int id = ++nextId;
       ObjectNode request = JSON.createObjectNode().put("jsonrpc", "2.0").put("id", id)
@@ -438,12 +489,12 @@ final class NativeAcpParityIT {
         if (line == null) throw new AssertionError("ACP process exited: " + stderr());
         JsonNode frame = JSON.readTree(line);
         frames.add(frame);
-        if (answerPermission
+        if (!permissionOption.isEmpty()
             && "session/request_permission".equals(frame.path("method").asText())) {
           ObjectNode response = JSON.createObjectNode().put("jsonrpc", "2.0");
           response.set("id", frame.path("id"));
           response.putObject("result").putObject("outcome")
-              .put("outcome", "selected").put("optionId", "allow_once");
+              .put("outcome", "selected").put("optionId", permissionOption);
           stdin.write(JSON.writeValueAsString(response));
           stdin.newLine();
           stdin.flush();
