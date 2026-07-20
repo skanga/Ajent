@@ -192,6 +192,53 @@ final class NativeAcpParityIT {
   }
 
   @Test
+  void fragmentedMultiToolBatchMatchesPinnedExecutable(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-fragment-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-fragment-workspace"));
+    var target = new AtomicReference<Path>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedFragmentedMultiToolProvider(target, requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      Path nativeTarget = nativeWorkspace.resolve("fragmented.txt");
+      target.set(nativeTarget);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-fragment-home"), false)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace, "allow_always");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+      assertThat(nativeTarget).hasContent("second fragment\n");
+
+      Path javaTarget = javaWorkspace.resolve("fragmented.txt");
+      target.set(javaTarget);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-fragment-home"), true)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace, "allow_always");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+      assertThat(javaTarget).hasContent("second fragment\n");
+
+      assertThat(nativeRequests).hasSize(2);
+      assertThat(javaRequests).hasSize(2);
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void cancellationOfStalledProviderTurnMatchesPinnedExecutable(@TempDir Path root)
       throws Exception {
     Path repository = repositoryRoot();
@@ -501,6 +548,59 @@ final class NativeAcpParityIT {
       }
     });
     return server;
+  }
+
+  private static HttpServer scriptedFragmentedMultiToolProvider(
+      AtomicReference<Path> target, List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        JsonNode request = JSON.readTree(exchange.getRequestBody());
+        requests.add(request.deepCopy());
+        int toolResults = 0;
+        for (JsonNode message : request.path("messages")) {
+          if ("tool".equals(message.path("role").asText())) toolResults++;
+        }
+        String body;
+        if (toolResults >= 2) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":\"Both fragments done.\"}}]}\n\n"
+              + "data: {\"usage\":{\"prompt_tokens\":1450,\"completion_tokens\":12},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else {
+          String first = JSON.writeValueAsString(JSON.createObjectNode()
+              .put("path", target.get().toString()).put("content", "first fragment\n"));
+          String second = JSON.writeValueAsString(JSON.createObjectNode()
+              .put("path", target.get().toString()).put("content", "second fragment\n"));
+          int firstCut = first.length() / 2;
+          int secondCut = second.length() / 2;
+          body = toolCallDelta(0, "tc_fragment_0", "write", first.substring(0, firstCut))
+              + toolCallDelta(0, "", "", first.substring(firstCut))
+              + toolCallDelta(1, "tc_fragment_1", "write", second.substring(0, secondCut))
+              + toolCallDelta(1, "", "", second.substring(secondCut))
+              + "data: {\"usage\":{\"prompt_tokens\":1350,\"completion_tokens\":60},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static String toolCallDelta(
+      int index, String id, String name, String arguments) throws IOException {
+    ObjectNode frame = JSON.createObjectNode();
+    ObjectNode call = frame.putArray("choices").addObject().putObject("delta")
+        .putArray("tool_calls").addObject().put("index", index);
+    if (!id.isEmpty()) call.put("id", id).put("type", "function");
+    ObjectNode function = call.putObject("function");
+    if (!name.isEmpty()) function.put("name", name);
+    function.put("arguments", arguments);
+    return "data: " + JSON.writeValueAsString(frame) + "\n\n";
   }
 
   private static HttpServer stalledProvider(

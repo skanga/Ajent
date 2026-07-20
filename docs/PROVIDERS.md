@@ -27,7 +27,9 @@ tool calls, and `/v1/models` where supported.
 
 The executable characterization gate drives AgenTTY and Ajent through the same
 loopback OpenAI-compatible turns and compares their complete request sequences,
-including accepted, rejected, and two sequential tool-result continuations.
+including accepted, rejected, and two sequential tool-result continuations. It
+also splits each of two calls across multiple SSE frames, executes the
+same-path batch in order, and compares the canonical two-result continuation.
 This covers the native 22-tool provider subset and recall-biased order,
 system/user messages, output controls, tool-call replay, canonical argument
 encoding, and usage/stop stream handling without sending traffic to an external
