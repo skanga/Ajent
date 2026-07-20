@@ -35,6 +35,10 @@ provider.
 The same gate holds a local SSE body open, cancels the turn through ACP, and
 requires the native local-HTTP cancellation error and prompt metadata.
 
+Concurrent Ajent sessions always receive the full immutable provider tool
+catalog; the pinned executable's cold-cache data race is documented in the
+[parity ledger](PARITY.md#deliberate-differences).
+
 Ajent does not currently implement `/v1/responses`. That is an optional future
 extension, not part of the pinned AgenTTY behavior.
 

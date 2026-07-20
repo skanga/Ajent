@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpServer;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
@@ -18,6 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -242,6 +244,57 @@ final class NativeAcpParityIT {
     }
   }
 
+  @Test
+  void concurrentPromptsInSeparateSessionsMatchPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-concurrent-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-concurrent-workspace"));
+    var activeBarrier = new AtomicReference<ConcurrentBarrier>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    var providerExecutor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+    HttpServer provider = concurrentProvider(activeBarrier, requests, providerExecutor);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      ConcurrentBarrier nativeBarrier = new ConcurrentBarrier();
+      activeBarrier.set(nativeBarrier);
+      ConcurrentTranscript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-concurrent-home"), false)) {
+        nativeTranscript = exerciseConcurrentPrompts(agent, nativeWorkspace, nativeBarrier);
+      }
+      assertThat(nativeBarrier.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+
+      ConcurrentBarrier javaBarrier = new ConcurrentBarrier();
+      activeBarrier.set(javaBarrier);
+      ConcurrentTranscript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-concurrent-home"), true)) {
+        javaTranscript = exerciseConcurrentPrompts(agent, javaWorkspace, javaBarrier);
+      }
+      assertThat(javaBarrier.finished().await(5, TimeUnit.SECONDS)).isTrue();
+      List<JsonNode> javaRequests = List.copyOf(requests);
+
+      assertThat(nativeRequests).hasSize(2);
+      assertThat(javaRequests).hasSize(2);
+      assertThat(normalizeConcurrent(nativeTranscript, nativeWorkspace, true))
+          .isEqualTo(normalizeConcurrent(javaTranscript, javaWorkspace, false));
+      assertConcurrentRequestsMatchExceptNativeColdCatalogRace(
+          sortedNormalizedRequests(nativeRequests, nativeWorkspace, true),
+          sortedNormalizedRequests(javaRequests, javaWorkspace, false));
+    } finally {
+      ConcurrentBarrier barrier = activeBarrier.get();
+      if (barrier != null) barrier.release().countDown();
+      provider.stop(0);
+      providerExecutor.close();
+    }
+  }
+
   private static Transcript exercisePrompt(AgentProcess agent, Path workspace) throws Exception {
     return exercisePrompt(agent, workspace, "allow_once");
   }
@@ -261,6 +314,35 @@ final class NativeAcpParityIT {
     assertThat(gate.started().await(5, TimeUnit.SECONDS)).isTrue();
     agent.sendNotification("session/cancel", session(sessionId));
     return new Transcript(sessionId, List.of(agent.readUntilResponse(promptId, "")));
+  }
+
+  private static ConcurrentTranscript exerciseConcurrentPrompts(
+      AgentProcess agent, Path workspace, ConcurrentBarrier barrier) throws Exception {
+    agent.call("initialize", JSON.readTree(
+        "{\"protocolVersion\":1,\"clientCapabilities\":{}}"));
+    List<JsonNode> firstCreated = agent.call("session/new", JSON.createObjectNode()
+        .put("cwd", workspace.toString()).set("mcpServers", JSON.createArrayNode()));
+    List<JsonNode> secondCreated = agent.call("session/new", JSON.createObjectNode()
+        .put("cwd", workspace.toString()).set("mcpServers", JSON.createArrayNode()));
+    String firstSession = response(firstCreated).at("/result/sessionId").textValue();
+    String secondSession = response(secondCreated).at("/result/sessionId").textValue();
+    int firstPrompt = agent.sendRequest("session/prompt",
+        prompt(firstSession, "first concurrent prompt"));
+    int secondPrompt = agent.sendRequest("session/prompt",
+        prompt(secondSession, "second concurrent prompt"));
+    assertThat(barrier.started().await(5, TimeUnit.SECONDS)).isTrue();
+    barrier.release().countDown();
+    List<JsonNode> frames = agent.readUntilResponses(Set.of(firstPrompt, secondPrompt));
+    return new ConcurrentTranscript(
+        firstSession, firstPrompt, secondSession, secondPrompt, frames);
+  }
+
+  private static ObjectNode prompt(String sessionId, String text) {
+    ObjectNode params = session(sessionId);
+    var prompt = JSON.createArrayNode();
+    prompt.addObject().put("type", "text").put("text", text);
+    params.set("prompt", prompt);
+    return params;
   }
 
   private static Transcript exercisePrompt(
@@ -389,6 +471,54 @@ final class NativeAcpParityIT {
     return server;
   }
 
+  private static HttpServer concurrentProvider(
+      AtomicReference<ConcurrentBarrier> activeBarrier,
+      List<JsonNode> requests,
+      java.util.concurrent.Executor executor) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.setExecutor(executor);
+    server.createContext("/v1/chat/completions", exchange -> {
+      ConcurrentBarrier barrier = activeBarrier.get();
+      try (exchange) {
+        JsonNode request = JSON.readTree(exchange.getRequestBody());
+        requests.add(request.deepCopy());
+        String user = latestUserText(request);
+        barrier.started().countDown();
+        try {
+          if (!barrier.release().await(5, TimeUnit.SECONDS)) {
+            throw new IOException("concurrent provider release timed out");
+          }
+        } catch (InterruptedException interrupted) {
+          java.lang.Thread.currentThread().interrupt();
+          throw new IOException("concurrent provider interrupted", interrupted);
+        }
+        String reply = user.contains("first") ? "first reply" : "second reply";
+        String body = "data: {\"choices\":[{\"delta\":{\"content\":\"" + reply
+            + "\"}}]}\n\n"
+            + "data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":2},"
+            + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+            + "data: [DONE]\n\n";
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      } finally {
+        barrier.finished().countDown();
+      }
+    });
+    return server;
+  }
+
+  private static String latestUserText(JsonNode request) {
+    String result = "";
+    for (JsonNode message : request.path("messages")) {
+      if ("user".equals(message.path("role").asText())) {
+        result = message.path("content").asText();
+      }
+    }
+    return result;
+  }
+
   private static long permissionRequestCount(Transcript transcript) {
     return transcript.exchanges().stream().flatMap(List::stream)
         .filter(frame -> "session/request_permission".equals(frame.path("method").asText()))
@@ -402,6 +532,17 @@ final class NativeAcpParityIT {
     private CancelGate() {
       this(new java.util.concurrent.CountDownLatch(1),
           new java.util.concurrent.CountDownLatch(1), new AtomicBoolean());
+    }
+  }
+
+  private record ConcurrentBarrier(
+      java.util.concurrent.CountDownLatch started,
+      java.util.concurrent.CountDownLatch release,
+      java.util.concurrent.CountDownLatch finished) {
+    private ConcurrentBarrier() {
+      this(new java.util.concurrent.CountDownLatch(2),
+          new java.util.concurrent.CountDownLatch(1),
+          new java.util.concurrent.CountDownLatch(2));
     }
   }
 
@@ -472,6 +613,65 @@ final class NativeAcpParityIT {
         .map(request -> replaceText(request, workspaceText, "<WORKSPACE>"))
         .map(request -> replaceText(request, jsonEncodedWorkspace, "<WORKSPACE>"))
         .toList();
+  }
+
+  private static List<JsonNode> sortedNormalizedRequests(
+      List<JsonNode> requests, Path workspace, boolean nativeProgram) {
+    return normalizeRequests(requests, workspace, nativeProgram).stream()
+        .sorted(java.util.Comparator.comparing(NativeAcpParityIT::latestUserText)
+            .thenComparing(JsonNode::toString))
+        .toList();
+  }
+
+  private static Map<String, List<JsonNode>> normalizeConcurrent(
+      ConcurrentTranscript transcript, Path workspace, boolean nativeProgram) {
+    var first = new ArrayList<JsonNode>();
+    var second = new ArrayList<JsonNode>();
+    for (JsonNode frame : transcript.frames()) {
+      String sessionId;
+      List<JsonNode> target;
+      if (frame.has("id") && frame.path("id").asInt(-1) == transcript.firstPrompt()) {
+        sessionId = transcript.firstSession();
+        target = first;
+      } else if (frame.has("id")
+          && frame.path("id").asInt(-1) == transcript.secondPrompt()) {
+        sessionId = transcript.secondSession();
+        target = second;
+      } else if (transcript.firstSession().equals(frame.at("/params/sessionId").asText())) {
+        sessionId = transcript.firstSession();
+        target = first;
+      } else if (transcript.secondSession().equals(frame.at("/params/sessionId").asText())) {
+        sessionId = transcript.secondSession();
+        target = second;
+      } else {
+        throw new AssertionError("unowned concurrent ACP frame: " + frame);
+      }
+      target.add(normalizePromptFrame(
+          normalize(frame, sessionId, nativeProgram), workspace));
+    }
+    return Map.of("first", List.copyOf(first), "second", List.copyOf(second));
+  }
+
+  private static void assertConcurrentRequestsMatchExceptNativeColdCatalogRace(
+      List<JsonNode> nativeRequests, List<JsonNode> javaRequests) {
+    assertThat(nativeRequests).hasSameSizeAs(javaRequests);
+    List<JsonNode> nativeWithTools = nativeRequests.stream().filter(request -> request.has("tools"))
+        .toList();
+    List<JsonNode> nativeWithoutTools = nativeRequests.stream()
+        .filter(request -> !request.has("tools")).toList();
+    assertThat(nativeWithTools).as("native initialized wire catalog").singleElement();
+    assertThat(nativeWithoutTools).as("native cold-cache race").singleElement();
+    JsonNode nativeCatalog = nativeWithTools.getFirst().path("tools");
+    assertThat(javaRequests).allSatisfy(request ->
+        assertThat(request.path("tools")).isEqualTo(nativeCatalog));
+
+    var repairedNative = new ArrayList<JsonNode>();
+    for (JsonNode request : nativeRequests) {
+      ObjectNode repaired = request.deepCopy();
+      if (!repaired.has("tools")) repaired.set("tools", nativeCatalog.deepCopy());
+      repairedNative.add(repaired);
+    }
+    assertThat(firstJsonListDifference(repairedNative, javaRequests)).isEmpty();
   }
 
   private static String firstJsonListDifference(
@@ -637,6 +837,17 @@ final class NativeAcpParityIT {
 
   private record Transcript(String sessionId, List<List<JsonNode>> exchanges) {}
 
+  private record ConcurrentTranscript(
+      String firstSession,
+      int firstPrompt,
+      String secondSession,
+      int secondPrompt,
+      List<JsonNode> frames) {
+    private ConcurrentTranscript {
+      frames = List.copyOf(frames);
+    }
+  }
+
   private static final class AgentProcess implements AutoCloseable {
     private final Process process;
     private final BufferedReader stdout;
@@ -728,6 +939,21 @@ final class NativeAcpParityIT {
         }
         if (frame.path("id").asInt(-1) == id) return List.copyOf(frames);
       }
+    }
+
+    List<JsonNode> readUntilResponses(Set<Integer> responseIds) throws Exception {
+      var pending = new java.util.HashSet<>(responseIds);
+      var frames = new ArrayList<JsonNode>();
+      while (!pending.isEmpty()) {
+        String line = stdout.readLine();
+        if (line == null) throw new AssertionError("ACP process exited: " + stderr());
+        JsonNode frame = JSON.readTree(line);
+        frames.add(frame);
+        if (frame.has("id") && frame.path("id").canConvertToInt()) {
+          pending.remove(frame.path("id").intValue());
+        }
+      }
+      return List.copyOf(frames);
     }
 
     @Override public void close() throws Exception {

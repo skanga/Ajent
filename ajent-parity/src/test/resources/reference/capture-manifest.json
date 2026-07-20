@@ -68,7 +68,7 @@
         "com.github.skanga.ajent.parity.NativeAcpParityIT",
         "mvn -q verify -Pcharacterization: exact semantic comparison of complete OpenAI-compatible request sequences and their streamed tool continuations against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["raw host:port", "initial request body", "provider-facing 22-tool subset and recall-bias order", "streamed text/tool/usage", "accepted and rejected tool-result continuation request bodies", "two sequential tool continuations", "stalled local HTTP stream cancellation and exact error", "stop reason"],
+      "coveredExecutableCases": ["raw host:port", "initial request body", "provider-facing 22-tool subset and recall-bias order", "streamed text/tool/usage", "accepted and rejected tool-result continuation request bodies", "two sequential tool continuations", "two concurrent session request bodies", "stalled local HTTP stream cancellation and exact error", "stop reason"],
       "remainingExecutableCases": ["hosted preset endpoints and headers", "fragmented multi-tool calls", "weak-model salvage", "HTTP errors and retries", "hosted TLS cancellation"]
     },
     {
@@ -102,10 +102,11 @@
       "cases": ["initialize", "authenticate", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel", "session/update", "session/request_permission", "errors", "concurrency"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeAcpParityIT",
-        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC exchange sequences for the offline ACP lifecycle and loopback-provider allow-once/reject-once/allow-always/cancel prompt/tool/permission/continuation turns against the pinned Windows executable"
+        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC exchange sequences for the offline ACP lifecycle and loopback-provider allow-once/reject-once/allow-always/cancel/concurrent prompt/tool/permission/continuation turns against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["initialize", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel notification", "cancelled prompt stop and exact transport metadata", "streamed text/tool/usage session/update", "session/request_permission allow-once", "session/request_permission reject-once", "session/request_permission allow-always", "allow-always session grant reuse", "rejected non-execution", "two sequential tool continuations", "tool-result continuation", "method-not-found error"],
-      "remainingExecutableCases": ["authenticate with installed credentials", "concurrent prompts", "client filesystem and terminal callbacks"]
+      "coveredExecutableCases": ["initialize", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel notification", "cancelled prompt stop and exact transport metadata", "two simultaneously in-flight sessions with exact isolated frames", "streamed text/tool/usage session/update", "session/request_permission allow-once", "session/request_permission reject-once", "session/request_permission allow-always", "allow-always session grant reuse", "rejected non-execution", "two sequential tool continuations", "tool-result continuation", "method-not-found error"],
+      "deliberateExecutableDifferences": ["AgenTTY's unsynchronized cold ACP wire_tools_ cache can omit tools from one of two concurrent first requests; Ajent's immutable catalog supplies the exact full native catalog to both requests"],
+      "remainingExecutableCases": ["authenticate with installed credentials", "client filesystem and terminal callbacks"]
     },
     {
       "id": "mcp-server-client",
