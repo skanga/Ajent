@@ -49,6 +49,7 @@ final class McpStdioTransportTest {
       }
     });
     assertThat(slowSent.await(5, TimeUnit.SECONDS)).isTrue();
+    assertThat(outbound.getFirst().path("params").isObject()).isTrue();
     JsonNode fast = transport.request("fast", JSON.createObjectNode(), Duration.ofSeconds(5));
     assertThat(fast.path("value").textValue()).isEqualTo("fast-result");
     assertThat(slow.get(5, TimeUnit.SECONDS).path("value").textValue())
@@ -71,7 +72,7 @@ final class McpStdioTransportTest {
     assertThat(transport.alive()).isFalse();
   }
 
-  @Test void mapsRpcErrorsTimeoutCancellationMalformedFramesAndRemoteClose() throws Exception {
+  @Test void mapsRpcErrorsNativeStyleTimeoutMalformedFramesAndRemoteClose() throws Exception {
     var transportRef = new AtomicReference<McpStdioTransport>();
     var outbound = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
     var transport = new McpStdioTransport(line -> {
@@ -96,11 +97,9 @@ final class McpStdioTransportTest {
         });
     assertThatThrownBy(() -> transport.request(
         "hang", JSON.createObjectNode(), Duration.ofMillis(25)))
-        .isInstanceOf(McpTransportException.class).hasMessageContaining("timed out");
-    assertThat(outbound).anySatisfy(frame -> {
-      assertThat(frame.path("method").asText()).isEqualTo("notifications/cancelled");
-      assertThat(frame.path("params").path("reason").asText()).contains("timed out");
-    });
+        .isInstanceOf(McpTransportException.class).hasMessage("request timed out");
+    assertThat(outbound).noneSatisfy(frame ->
+        assertThat(frame.path("method").asText()).isEqualTo("notifications/cancelled"));
     transport.acceptLine("not-json");
     transport.acceptLine("[]");
     transport.remoteClosed();

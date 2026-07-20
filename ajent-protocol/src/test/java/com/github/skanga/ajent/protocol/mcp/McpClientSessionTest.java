@@ -57,10 +57,26 @@ final class McpClientSessionTest {
     assertThat(transport.closed).isTrue();
   }
 
+  @Test void progressNotificationCannotBlockTheResponseReaderDuringAnActiveCall() {
+    var transport = new FakeTransport();
+    transport.progressBeforeCallResult = true;
+    try (var session = new McpClientSession("demo", transport, Duration.ofSeconds(2), "test")) {
+      session.connect();
+
+      McpClientSession.CallResult called = session.call(
+          "first", JSON.createObjectNode().put("value", 7));
+
+      assertThat(called.text()).isEqualTo("seven\n[image]\n");
+      assertThat(transport.progressDelivered).isTrue();
+    }
+  }
+
   private static final class FakeTransport implements McpClientSession.Transport {
     private final List<String> methods = new ArrayList<>();
     private BiConsumer<String, JsonNode> notifications = (method, params) -> {};
     private boolean toolsChanged;
+    private boolean progressBeforeCallResult;
+    private boolean progressDelivered;
     private boolean closed;
 
     @Override public JsonNode request(String method, ObjectNode parameters, Duration timeout) {
@@ -84,11 +100,7 @@ final class McpClientSessionTest {
             {"prompts":[{"name":"greet","description":"Greeting",
               "arguments":[{"name":"name","required":true}]}]}
             """);
-        case "tools/call" -> json("""
-            {"content":[{"type":"text","text":"seven"},{"type":"image",
-              "mimeType":"image/png","data":"abcdefgh"}],
-             "structuredContent":{"value":7}}
-            """);
+        case "tools/call" -> callResult();
         case "resources/read" -> json("""
             {"contents":[{"uri":"mem://note","text":"body"},
               {"uri":"mem://note","blob":"abcdefgh","mimeType":"image/png"}]}
@@ -99,6 +111,29 @@ final class McpClientSessionTest {
             """);
         default -> throw new AssertionError(method);
       };
+    }
+
+    private JsonNode callResult() {
+      if (progressBeforeCallResult) {
+        java.lang.Thread notification = java.lang.Thread.ofVirtual().start(() -> {
+          emit("notifications/progress");
+          progressDelivered = true;
+        });
+        try {
+          notification.join(Duration.ofMillis(250));
+        } catch (InterruptedException exception) {
+          java.lang.Thread.currentThread().interrupt();
+          throw new AssertionError(exception);
+        }
+        if (notification.isAlive()) {
+          throw new AssertionError("progress notification blocked the response reader");
+        }
+      }
+      return json("""
+          {"content":[{"type":"text","text":"seven"},{"type":"image",
+            "mimeType":"image/png","data":"abcdefgh"}],
+           "structuredContent":{"value":7}}
+          """);
     }
 
     private JsonNode tools(ObjectNode parameters) {

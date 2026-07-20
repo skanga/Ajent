@@ -152,19 +152,34 @@ public final class McpClientSession implements AutoCloseable {
     return output.toString();
   }
 
-  private synchronized void notification(String method, JsonNode ignored) {
+  private void notification(String method, JsonNode ignored) {
+    if (!isListChanged(method)) return;
+    synchronized (this) {
+      refreshFromNotification(method);
+    }
+  }
+
+  private void refreshFromNotification(String method) {
     try {
       switch (method) {
         case "notifications/tools/list_changed" -> refreshTools();
         case "notifications/resources/list_changed" -> refreshResources();
         case "notifications/prompts/list_changed" -> refreshPrompts();
-        default -> { return; }
+        default -> throw new IllegalArgumentException("not a list-changed notification: " + method);
       }
       generation.incrementAndGet();
       listChanged.run();
     } catch (RuntimeException ignoredFailure) {
       // Keep the previous known-good snapshot.
     }
+  }
+
+  private static boolean isListChanged(String method) {
+    return switch (method) {
+      case "notifications/tools/list_changed", "notifications/resources/list_changed",
+           "notifications/prompts/list_changed" -> true;
+      default -> false;
+    };
   }
 
   private void refreshTools() {

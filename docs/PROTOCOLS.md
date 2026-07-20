@@ -71,17 +71,31 @@ Ajent loads MCP configuration through `McpConfigLoader` and supports:
 
 - stdio child-process transports;
 - Streamable HTTP transports;
-- session initialization and tool discovery;
+- session initialization and paginated tool, resource, resource-template, and
+  prompt discovery;
+- text, structured, image, and audio tool results, resource reads, prompt
+  rendering, progress notifications, and list-change refresh;
 - pooled connections and bounded calls;
 - conversion to Ajent external tool specifications/runtime.
 
 Stdio transport owns process lifecycle and protocol-clean streams. HTTP
 transport uses the shared environment-aware JDK client. Sessions validate
 JSON-RPC ids/results/errors and close outstanding calls on transport failure.
+Streamable HTTP retains the negotiated session id and protocol version on
+subsequent POSTs and accepts both JSON and event-stream response envelopes.
+Request timeouts fail locally without inventing a downstream cancellation
+notification, matching AgenTTY.
 
 External tool schemas and annotations are retained, then Ajent applies its own
 effect/permission/output safety boundary. Configuration/server failure is
 reported without disabling the native catalog.
+
+The pinned AgenTTY executable currently sends a list refresh when a downstream
+`notifications/tools/list_changed` arrives during an active call, but its
+response reader then times out that call. Ajent preserves this observable
+behavior pending an upstream semantic change. External MCP catalog order is
+protocol-unordered; Ajent deliberately keeps deterministic local-first order
+instead of reproducing AgenTTY's hash-table interleaving.
 
 ## Standalone MCP server
 

@@ -77,19 +77,17 @@ public final class McpStdioTransport implements McpClientSession.Transport {
     pending.put(id, result);
     ObjectNode request = JSON.createObjectNode();
     request.put("jsonrpc", "2.0"); request.put("id", id); request.put("method", method);
-    if (!parameters.isEmpty()) request.set("params", parameters);
+    request.set("params", parameters);
     try {
       send(request);
       return result.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
     } catch (TimeoutException exception) {
       pending.remove(id);
-      cancel(id, "MCP request timed out after " + timeout.toMillis() + " ms");
       throw new McpTransportException(TRANSPORT_ERROR,
-          "MCP request timed out after " + timeout.toMillis() + " ms", exception);
+          "request timed out", exception);
     } catch (InterruptedException exception) {
       pending.remove(id);
       java.lang.Thread.currentThread().interrupt();
-      cancel(id, "MCP request interrupted");
       throw new McpTransportException(TRANSPORT_ERROR, "MCP request interrupted", exception);
     } catch (ExecutionException exception) {
       Throwable cause = exception.getCause();
@@ -106,7 +104,7 @@ public final class McpStdioTransport implements McpClientSession.Transport {
     requireOpen();
     ObjectNode notification = JSON.createObjectNode();
     notification.put("jsonrpc", "2.0"); notification.put("method", method);
-    if (!parameters.isEmpty()) notification.set("params", parameters);
+    notification.set("params", parameters);
     send(notification);
   }
 
@@ -154,13 +152,6 @@ public final class McpStdioTransport implements McpClientSession.Transport {
     error.put("code", -32601);
     error.put("message", "Method not found: " + frame.path("method").asText());
     send(response);
-  }
-
-  private void cancel(long id, String reason) {
-    if (!alive()) return;
-    ObjectNode parameters = JSON.createObjectNode();
-    parameters.put("requestId", id); parameters.put("reason", reason);
-    notify("notifications/cancelled", parameters);
   }
 
   private void send(JsonNode frame) {

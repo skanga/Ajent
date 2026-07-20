@@ -18,6 +18,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   ledger, and subsystem documentation.
 - Reproducible ZIP and TAR.GZ distributions, a CycloneDX 1.6 SBOM, SHA-256
   checksums, and tag-validated GitHub Release automation.
+- Native-executable MCP client characterization for configured stdio and
+  Streamable HTTP servers, including rich tool results, resources, prompts,
+  progress, list refresh, timeouts, sessions, headers, and JSON/SSE envelopes.
 
 ### Changed
 
@@ -27,6 +30,10 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   CLI usage output; added a pinned executable characterization profile.
 - Matched hosted OpenAI-compatible HTTP/2 routing, preset paths and headers,
   versioned user agents, dial/SOCKS overrides, and exact TLS cancellation.
+- Matched AgenTTY's MCP empty-parameter envelopes, protocol-version headers,
+  timeout wording, structured JSON formatting, and absence of unsolicited
+  cancellation notifications; progress delivery no longer blocks response
+  processing.
 
 ### Known limitations
 

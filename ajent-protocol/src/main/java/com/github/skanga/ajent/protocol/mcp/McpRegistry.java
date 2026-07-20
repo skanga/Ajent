@@ -1,8 +1,12 @@
 package com.github.skanga.ajent.protocol.mcp;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.util.DefaultIndenter;
+import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
+import com.fasterxml.jackson.core.util.Separators;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.tools.policy.Effect;
@@ -23,6 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Live fan-in and Ajent tool projection for connected MCP sessions. */
 public final class McpRegistry implements AutoCloseable {
   private static final ObjectMapper JSON = new ObjectMapper();
+  private static final ObjectWriter NATIVE_PRETTY = nativePrettyWriter();
   private static final EffectSet READ_EFFECTS = EffectSet.of(Effect.READ_FS, Effect.NET);
   private static final EffectSet FULL_EFFECTS = EffectSet.of(
       Effect.EXEC, Effect.WRITE_FS, Effect.NET, Effect.READ_FS);
@@ -88,7 +93,7 @@ public final class McpRegistry implements AutoCloseable {
       String rendered = render(called);
       return success(rendered.isEmpty() ? "(no output)" : rendered);
     } catch (RuntimeException exception) {
-      return failure("MCP call failed: " + message(exception));
+      return failure("mcp call failed: " + message(exception));
     }
   }
 
@@ -179,18 +184,27 @@ public final class McpRegistry implements AutoCloseable {
     properties.putObject("list").put("type", "boolean").put("description",
         "List all available resources instead of reading.");
     return new ProjectedTool(new ToolSpecification(READ_RESOURCE,
-        "[MCP] Read the contents of an MCP resource by URI. Call with no args to list.",
+        "[MCP] Read the contents of an MCP resource by URI. Resources are "
+            + "server-provided documents/data (files, DB rows, API docs). Call with "
+            + "no args (or {\"list\":true}) to LIST every available resource and its "
+            + "URI; call with {\"uri\":\"...\"} to read one. Read-only.",
         schema, false), READ_EFFECTS);
   }
 
   private ProjectedTool promptTool() {
     ObjectNode schema = JSON.createObjectNode(); schema.put("type", "object");
     ObjectNode properties = schema.putObject("properties");
-    properties.putObject("name").put("type", "string");
-    properties.putObject("arguments").put("type", "object");
-    properties.putObject("list").put("type", "boolean");
+    properties.putObject("name").put("type", "string").put("description",
+        "Prompt name to render. Omit to list all prompts.");
+    properties.putObject("arguments").put("type", "object").put("description",
+        "name→value map for the prompt's template arguments.");
+    properties.putObject("list").put("type", "boolean").put("description",
+        "List all available prompts instead of rendering.");
     return new ProjectedTool(new ToolSpecification(GET_PROMPT,
-        "[MCP] Render an MCP prompt template. Call with no args to list.", schema, false),
+        "[MCP] Render an MCP prompt template provided by a server. Call with no "
+            + "args (or {\"list\":true}) to LIST every prompt, its name, and its "
+            + "arguments; call with {\"name\":\"...\",\"arguments\":{...}} to render "
+            + "one into ready-to-use messages. Read-only.", schema, false),
         READ_EFFECTS);
   }
 
@@ -275,13 +289,23 @@ public final class McpRegistry implements AutoCloseable {
     if (!structured.isNull() && !(structured.isObject() && structured.isEmpty())) {
       if (!output.isEmpty() && output.charAt(output.length() - 1) != '\n') output.append('\n');
       try {
-        output.append("```json\n").append(JSON.writerWithDefaultPrettyPrinter()
+        output.append("```json\n").append(NATIVE_PRETTY
             .writeValueAsString(structured)).append("\n```\n");
       } catch (JsonProcessingException exception) {
         output.append("```json\n").append(structured).append("\n```\n");
       }
     }
     return output.toString();
+  }
+
+  private static ObjectWriter nativePrettyWriter() {
+    Separators separators = Separators.createDefaultInstance()
+        .withObjectFieldValueSpacing(Separators.Spacing.AFTER);
+    var printer = new DefaultPrettyPrinter(separators);
+    var indenter = new DefaultIndenter("  ", "\n");
+    printer.indentObjectsWith(indenter);
+    printer.indentArraysWith(indenter);
+    return JSON.writer(printer);
   }
 
   private static ToolResult success(String text) {

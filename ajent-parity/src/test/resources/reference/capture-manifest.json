@@ -115,10 +115,11 @@
       "cases": ["initialize", "capabilities", "tools/list", "tools/call", "resources", "prompts", "list_changed", "progress", "shutdown", "malformed request", "errors", "cancel", "stdio", "streamable HTTP"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeMcpParityIT",
-        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC comparison of initialize, ping, the ordered 22-tool standalone catalog, a real write, and method-not-found against the pinned Windows executable"
+        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC comparison of standalone initialize/ping/catalog/write/errors/shutdown plus configured downstream stdio and Streamable HTTP initialization, discovery, tool/resource/prompt calls, rich/error results, progress, list-change refresh, timeout behavior, HTTP session/protocol/custom headers, and JSON/SSE response handling against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["initialize", "capabilities", "ping", "notifications/initialized", "tools/list full descriptions/schemas/annotations/order", "tools/call write result and structured change", "method-not-found", "stdio EOF shutdown"],
-      "remainingExecutableCases": ["other tools/call families", "resources", "prompts", "list_changed", "progress", "cancel", "configured downstream MCP servers", "streamable HTTP client"]
+      "coveredExecutableCases": ["initialize", "capabilities", "ping", "notifications/initialized", "tools/list full descriptions/schemas/annotations/order", "tools/call write result and structured change", "configured stdio downstream server", "configured Streamable HTTP downstream server", "tools/call text, structured, image, audio, and error results", "resources/list", "resources/templates/list", "resources/read", "prompts/list", "prompts/get", "notifications/progress during an active call", "notifications/tools/list_changed refresh during an active call", "request timeout without outgoing notifications/cancelled", "HTTP JSON and SSE responses", "HTTP MCP-Session-Id replay", "HTTP MCP-Protocol-Version and custom headers", "method-not-found", "stdio EOF shutdown"],
+      "deliberateExecutableDifferences": ["AgenTTY rehashes configured external tools into an unstable interleaved catalog order; Ajent retains deterministic local-first order while the differential compares the protocol-defined unordered tool set", "AgenTTY races the Streamable HTTP notifications/initialized POST with the first tools/list POST; Ajent sends deterministic initialization order while the differential canonicalizes only those two startup records"],
+      "remainingExecutableCases": ["other tools/call families", "cancel"]
     },
     {
       "id": "terminal",

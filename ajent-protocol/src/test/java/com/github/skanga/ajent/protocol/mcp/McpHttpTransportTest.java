@@ -30,7 +30,8 @@ final class McpHttpTransportTest {
           exchange.getRequestHeaders().getFirst("Mcp-Session-Id"),
           exchange.getRequestHeaders().getFirst("MCP-Protocol-Version"),
           exchange.getRequestHeaders().getFirst("Authorization"),
-          exchange.getRequestHeaders().getFirst("Accept")));
+          exchange.getRequestHeaders().getFirst("Accept"),
+          exchange.getRequestHeaders().getFirst("User-Agent")));
       String method = request.path("method").asText();
       if ("initialize".equals(method)) {
         respond(exchange, 200, "application/json", "test-session", response(request,
@@ -64,13 +65,15 @@ final class McpHttpTransportTest {
 
     assertThat(requests).hasSize(3);
     assertThat(requests.getFirst().session()).isNull();
-    assertThat(requests.getFirst().version()).isNull();
-    assertThat(requests.subList(1, 3)).allSatisfy(request -> {
-      assertThat(request.session()).isEqualTo("test-session");
+    assertThat(requests).allSatisfy(request -> {
       assertThat(request.version()).isEqualTo("2025-11-25");
       assertThat(request.authorization()).isEqualTo("Bearer secret");
       assertThat(request.accept()).contains("application/json", "text/event-stream");
+      assertThat(request.userAgent()).isNullOrEmpty();
+      assertThat(request.body().path("params").isObject()).isTrue();
     });
+    assertThat(requests.subList(1, 3)).allSatisfy(request ->
+        assertThat(request.session()).isEqualTo("test-session"));
   }
 
   @Test void portsTheLiveHttpCapabilityBridgeEndToEnd() throws Exception {
@@ -309,7 +312,7 @@ final class McpHttpTransportTest {
   }
 
   private record CapturedRequest(JsonNode body, String session, String version,
-                                 String authorization, String accept) {}
+                                 String authorization, String accept, String userAgent) {}
   @FunctionalInterface private interface Handler { void handle(HttpExchange exchange) throws IOException; }
   private record TestServer(HttpServer server) implements AutoCloseable {
     @Override public void close() { server.stop(0); }

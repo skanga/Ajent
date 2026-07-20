@@ -56,7 +56,7 @@ final class McpRegistryTest {
       assertThat(result).isInstanceOf(ToolResult.Success.class);
       String text = ((ToolResult.Success) result).output().text();
       assertThat(text).contains("alpha:hi", "[image image/png, ~4B base64]",
-          "```json", "\"answer\" : 42");
+          "```json\n{\n  \"answer\": 42\n}\n```\n");
       assertThat(registry.execute("ping", JSON.createObjectNode()))
           .isInstanceOf(ToolResult.Failure.class);
       assertThat(registry.execute("missing", JSON.createObjectNode()))
@@ -72,7 +72,7 @@ final class McpRegistryTest {
       assertThat(registry.execute("throw", JSON.createObjectNode()))
           .isInstanceOf(ToolResult.Failure.class)
           .satisfies(failure -> assertThat(((ToolResult.Failure) failure).error().detail())
-              .contains("MCP call failed", "transport exploded"));
+              .isEqualTo("mcp call failed: transport exploded"));
     }
     assertThat(alpha.closed).isTrue();
     assertThat(beta.closed).isTrue();
@@ -117,6 +117,28 @@ final class McpRegistryTest {
       registry.add("beta", connected("beta", beta));
       assertThat(registry.tools()).extracting(tool -> tool.specification().name())
           .contains("mcp_read_resource", "mcp_get_prompt");
+      var resourceTool = registry.tools().stream()
+          .map(McpRegistry.ProjectedTool::specification)
+          .filter(tool -> tool.name().equals("mcp_read_resource")).findFirst().orElseThrow();
+      assertThat(resourceTool.description()).isEqualTo(
+          "[MCP] Read the contents of an MCP resource by URI. Resources are "
+              + "server-provided documents/data (files, DB rows, API docs). Call with "
+              + "no args (or {\"list\":true}) to LIST every available resource and its "
+              + "URI; call with {\"uri\":\"...\"} to read one. Read-only.");
+      assertThat(resourceTool.inputSchema().path("properties").path("uri")
+          .path("description").asText()).isEqualTo(
+              "Resource URI to read. Omit to list all resources.");
+      var promptTool = registry.tools().stream()
+          .map(McpRegistry.ProjectedTool::specification)
+          .filter(tool -> tool.name().equals("mcp_get_prompt")).findFirst().orElseThrow();
+      assertThat(promptTool.description()).isEqualTo(
+          "[MCP] Render an MCP prompt template provided by a server. Call with no "
+              + "args (or {\"list\":true}) to LIST every prompt, its name, and its "
+              + "arguments; call with {\"name\":\"...\",\"arguments\":{...}} to render "
+              + "one into ready-to-use messages. Read-only.");
+      assertThat(promptTool.inputSchema().path("properties").path("arguments")
+          .path("description").asText()).isEqualTo(
+              "name→value map for the prompt's template arguments.");
       assertThat(registry.resources()).singleElement().satisfies(resource -> {
         assertThat(resource.uri()).isEqualTo("mem://note");
         assertThat(resource.server()).isEqualTo("mcp:alpha");

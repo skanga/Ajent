@@ -44,7 +44,8 @@ public final class McpHttpTransport implements McpClientSession.Transport {
   private final AtomicLong ids = new AtomicLong();
   private final AtomicBoolean open = new AtomicBoolean(true);
   private final AtomicReference<String> sessionId = new AtomicReference<>("");
-  private final AtomicReference<String> protocolVersion = new AtomicReference<>("");
+  private final AtomicReference<String> protocolVersion =
+      new AtomicReference<>(PROTOCOL_VERSION);
   private final Set<CompletableFuture<?>> inflight = ConcurrentHashMap.newKeySet();
   private volatile BiConsumer<String, JsonNode> notifications = (method, parameters) -> {};
 
@@ -76,7 +77,7 @@ public final class McpHttpTransport implements McpClientSession.Transport {
     long id = ids.incrementAndGet();
     ObjectNode frame = JSON.createObjectNode();
     frame.put("jsonrpc", "2.0"); frame.put("id", id); frame.put("method", method);
-    if (!parameters.isEmpty()) frame.set("params", parameters);
+    frame.set("params", parameters);
     List<JsonNode> frames = post(frame, timeout);
     JsonNode response = frames.stream()
         .filter(candidate -> candidate.path("id").canConvertToLong()
@@ -92,7 +93,6 @@ public final class McpHttpTransport implements McpClientSession.Transport {
     if (!response.has("result")) {
       throw new McpTransportException(-32600, "MCP response has neither result nor error");
     }
-    if ("initialize".equals(method)) protocolVersion.set(PROTOCOL_VERSION);
     return response.path("result");
   }
 
@@ -100,7 +100,7 @@ public final class McpHttpTransport implements McpClientSession.Transport {
     requireOpen();
     ObjectNode frame = JSON.createObjectNode();
     frame.put("jsonrpc", "2.0"); frame.put("method", method);
-    if (!parameters.isEmpty()) frame.set("params", parameters);
+    frame.set("params", parameters);
     routeOtherFrames(post(frame, Duration.ofSeconds(60)), null);
   }
 
@@ -113,6 +113,7 @@ public final class McpHttpTransport implements McpClientSession.Transport {
         .timeout(timeout)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream")
+        .header("User-Agent", "")
         .POST(HttpRequest.BodyPublishers.ofString(encode(frame), StandardCharsets.UTF_8));
     String session = sessionId.get();
     if (!session.isEmpty()) request.header("Mcp-Session-Id", session);
