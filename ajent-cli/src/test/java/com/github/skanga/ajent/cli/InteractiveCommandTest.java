@@ -1062,7 +1062,7 @@ final class InteractiveCommandTest {
         "Run Code Block", "1  echo one", "python · 1 line");
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains(
+    assertThat(ui.renderedText()).contains(
         "isn't runnable here — press e to edit or y to copy");
     ui.key(character('y'), agent);
     assertThat(terminal.bytes.toString()).contains("cHJpbnQoMik=");

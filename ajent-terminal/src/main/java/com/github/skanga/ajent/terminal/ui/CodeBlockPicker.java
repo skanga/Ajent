@@ -143,8 +143,11 @@ public final class CodeBlockPicker {
       return new Open(open.blocks(), index);
     }
     if (state instanceof Result result) {
+      int rows = result.output().isEmpty() ? 1
+          : 1 + (int) result.output().chars().filter(value -> value == '\n').count();
+      int maximum = Math.max(0, rows - 14);
       return new Result(result.command(), result.output(), result.exitCode(), result.timedOut(),
-          Math.max(0, result.scroll() + delta));
+          Math.max(0, Math.min(maximum, result.scroll() + delta)));
     }
     return state;
   }

@@ -261,7 +261,7 @@ final class NativeTerminalParityIT {
 
       assertCleanExit(nativeCapture.exitCode(), nativeCapture.output(), "native");
       assertCleanExit(javaCapture.exitCode(), javaCapture.output(), "Java");
-      assertThat(requests).hasSize(4);
+      assertThat(requests).hasSize(6);
 
       assertMatchingRegion(nativeCapture.permissionFrame(), javaCapture.permissionFrame(),
           "E X E C U T E 1", "permission viewport");
@@ -284,6 +284,10 @@ final class NativeTerminalParityIT {
           "Mention File", "mention picker viewport");
       assertMatchingRegion(nativeCapture.symbolFrame(), javaCapture.symbolFrame(),
           "Symbol", "symbol picker viewport");
+      assertMatchingRegion(nativeCapture.codeBlockFrame(), javaCapture.codeBlockFrame(),
+          "Run Code Block", "code-block picker viewport");
+      assertMatchingRegion(nativeCapture.codeResultFrame(), javaCapture.codeResultFrame(),
+          "Run Result", "code-block result viewport");
     } finally {
       provider.stop(0);
     }
@@ -527,6 +531,22 @@ final class NativeTerminalParityIT {
     process.getOutputStream().write(closePicker);
     process.getOutputStream().flush();
     Thread.sleep(400);
+    process.getOutputStream().write("show code\r".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "code-parity", Duration.ofSeconds(8));
+    process.getOutputStream().write("\u001b[103;5u".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Run Code Block", Duration.ofSeconds(5));
+    Thread.sleep(250);
+    String codeBlockFrame = combined(output, error);
+    process.getOutputStream().write('1');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Run Result", Duration.ofSeconds(12));
+    Thread.sleep(250);
+    String codeResultFrame = combined(output, error);
+    process.getOutputStream().write(closePicker);
+    process.getOutputStream().flush();
+    Thread.sleep(400);
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -546,7 +566,7 @@ final class NativeTerminalParityIT {
     if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
-        threadFrame, modelFrame, mentionFrame, symbolFrame);
+        threadFrame, modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame);
   }
 
   private static void seedPickerWorkspace(Path workspace) throws java.io.IOException {
@@ -710,7 +730,12 @@ final class NativeTerminalParityIT {
             StandardCharsets.UTF_8);
         requests.add(request);
         String body;
-        if (request.contains("\"role\":\"tool\"")) {
+        if (request.contains("show code")) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":"
+              + "\"```powershell\\n[Console]::Write('code-parity')\\n```\"}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else if (request.contains("\"role\":\"tool\"")) {
           body = "data: {\"choices\":[{\"delta\":{\"content\":"
               + "\"permission parity complete\"}}]}\n\n"
               + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
@@ -830,6 +855,10 @@ final class NativeTerminalParityIT {
         normalized = normalized.replaceFirst(
             "\\d+(?:\\.\\d+)?(?:ms|s)\\s+(?=│$)", "#time ");
       }
+      if (line.contains("●") || line.contains("○")) {
+        normalized = normalized.replaceFirst(
+            "\\b[A-Z][a-z]{2} \\d{1,2} \\d{2}:\\d{2}\\b", "Mon # ##:##");
+      }
       // Windows ConPTY substitutes U+FFFD for AgenTTY's two-cell search emoji while
       // retaining its two-column layout. Compare the intended source glyph and layout.
       normalized = normalized.replace("� type to filter models…", "🔍 type to filter models…");
@@ -855,5 +884,6 @@ final class NativeTerminalParityIT {
                                String finalFrame, String pickerFrame,
                                String movedPickerFrame, String commandFrame,
                                String filteredCommandFrame, String threadFrame,
-                               String modelFrame, String mentionFrame, String symbolFrame) {}
+                               String modelFrame, String mentionFrame, String symbolFrame,
+                               String codeBlockFrame, String codeResultFrame) {}
 }

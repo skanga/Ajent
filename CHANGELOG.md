@@ -97,10 +97,13 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched the mention-file and symbol pickers cell-for-cell, including typed
   filtering, filename/symbol loci, parent-directory columns, selected rails,
   empty/no-match states, and long-list position footers.
+- Matched the executable Ctrl+G code-block picker and post-run result view
+  cell-for-cell, including numbered language/line metadata, real PowerShell
+  execution, exit/line/byte status, output scrollbar gutter, and decision hints.
 
 ### Known limitations
 
-- Animated wordmark-frame and code/checkpoint picker,
+- Animated wordmark-frame and checkpoint picker,
   review, resize, attachment, queue, and scrollback terminal
   differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live

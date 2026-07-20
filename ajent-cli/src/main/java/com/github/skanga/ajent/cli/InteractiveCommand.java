@@ -2490,39 +2490,41 @@ final class InteractiveCommand {
           lines.add(new StyledLine("Esc close", Style.MUTED));
         }
         if (codeBlocks instanceof CodeBlockPicker.Open open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Run Code Block", Style.ACCENT));
+          var pickerRows = new ArrayList<AppChrome.PickerRow>();
           for (int index = 0; index < open.blocks().size(); index++) {
             CodeBlockPicker.Block block = open.blocks().get(index);
             String language = block.language().isEmpty() ? "sh" : block.language();
-            lines.add(new StyledLine((index == open.index() ? "› " : "  ")
-                + (index + 1) + "  " + block.preview() + "  " + language + " · "
-                + block.lineCount() + (block.lineCount() == 1 ? " line" : " lines"),
-                index == open.index() ? Style.ACCENT : Style.NORMAL));
+            pickerRows.add(new AppChrome.PickerRow((index + 1) + "  " + block.preview(),
+                language + " · " + block.lineCount()
+                    + (block.lineCount() == 1 ? " line" : " lines"),
+                index == open.index(), false));
           }
-          lines.add(new StyledLine(
-              "↑↓ move  Enter/1-9 run  e edit  y copy  Esc close", Style.MUTED));
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.codeBlockPicker(pickerRows,
+              Math.max(60, width - 2), Math.min(14, Math.max(4, terminalRows - 8))));
+          lines = overlayBottom(lines, overlay);
         }
         if (codeBlocks instanceof CodeBlockPicker.Result result) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Run Result", result.exitCode() == 0 && !result.timedOut()
-              ? Style.ACCENT : Style.DANGER));
+          boolean success = result.exitCode() == 0 && !result.timedOut();
           String command = result.command().lines().findFirst().orElse("");
           if (result.command().contains("\n")) command += " …";
-          lines.add(new StyledLine("$ " + command, Style.NORMAL));
           int outputLines = result.output().isEmpty() ? 0
               : 1 + (int) result.output().chars().filter(value -> value == '\n').count();
-          lines.add(new StyledLine((result.timedOut() ? "timed out" : "exit " + result.exitCode())
-              + " · " + outputLines + " lines · " + result.output().getBytes(
-                  java.nio.charset.StandardCharsets.UTF_8).length + " B", Style.MUTED));
-          List<String> output = result.output().lines().toList();
-          if (output.isEmpty()) lines.add(new StyledLine("  (no output captured)", Style.MUTED));
-          else for (String line : output.stream().skip(result.scroll()).limit(14).toList()) {
-            wrap(lines, "  " + line, width, Style.MUTED);
-          }
-          lines.add(new StyledLine("a attach to composer  y copy  Esc discard", Style.MUTED));
+          int bytes = result.output().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+          String outputSize = bytes >= 1024 ? (bytes / 1024) + " KB" : bytes + " B";
+          String status = (result.timedOut() ? "timed out" : "exit " + result.exitCode())
+              + " · " + outputLines + " lines · " + outputSize;
+          List<String> output = result.output().isEmpty()
+              ? List.of("(no output captured)")
+              : java.util.Arrays.asList(result.output().split("\\n", -1));
+          int viewportRows = Math.min(14, Math.max(4, terminalRows - 8));
+          int start = Math.min(result.scroll(), Math.max(0, output.size() - viewportRows));
+          List<String> visible = output.subList(start,
+              Math.min(output.size(), start + viewportRows));
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.codeBlockResult(command, status, visible, success,
+              Math.max(60, width - 2), viewportRows));
+          lines = overlayBottom(lines, overlay);
         }
         if (checkpoints instanceof CheckpointPicker.Open open) {
           lines = new ArrayList<>(lines);

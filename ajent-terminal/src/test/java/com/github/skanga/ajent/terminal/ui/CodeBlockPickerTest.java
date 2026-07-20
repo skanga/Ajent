@@ -68,8 +68,13 @@ final class CodeBlockPickerTest {
     assertThat(CodeBlockPicker.move(state, -20)).isEqualTo(new CodeBlockPicker.Open(blocks, 0));
     assertThat(CodeBlockPicker.open(List.of())).isEqualTo(new CodeBlockPicker.Closed());
     var result = new CodeBlockPicker.Result("cmd", "out", 0, false);
-    assertThat(CodeBlockPicker.move(result, 10))
-        .isEqualTo(new CodeBlockPicker.Result("cmd", "out", 0, false, 10));
+    assertThat(CodeBlockPicker.move(result, 10)).isEqualTo(result);
+    var longResult = new CodeBlockPicker.Result("cmd",
+        java.util.stream.IntStream.range(0, 20).mapToObj(String::valueOf)
+            .collect(java.util.stream.Collectors.joining("\n")), 0, false);
+    assertThat(CodeBlockPicker.move(longResult, 20))
+        .isEqualTo(new CodeBlockPicker.Result(longResult.command(), longResult.output(),
+            0, false, 6));
     assertThat(CodeBlockPicker.move(result, -1)).isEqualTo(result);
     assertThat(CodeBlockPicker.close(state)).isEqualTo(new CodeBlockPicker.Closed());
     assertThat(blocks.get(1).preview()).isEqualTo("two");

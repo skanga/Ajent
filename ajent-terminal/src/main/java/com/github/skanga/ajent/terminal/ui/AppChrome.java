@@ -378,6 +378,45 @@ public final class AppChrome {
         symbolRows, position, width, viewportRows, 60);
   }
 
+  /** Maya's Ctrl+G fenced-code picker. */
+  public static List<Row> codeBlockPicker(
+      List<PickerRow> blockRows, int width, int viewportRows) {
+    List<PickerRow> values = List.copyOf(Objects.requireNonNull(blockRows, "blockRows"));
+    if (width < 60) throw new IllegalArgumentException("code picker width must be at least 60");
+    if (viewportRows < 1) throw new IllegalArgumentException("picker viewport must be positive");
+    var rows = pickerStart(" Run Code Block ", width);
+    appendPickerRows(rows, values, width, viewportRows);
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBody(
+        "↑↓ move   Enter/1-9 run   e edit   y copy   Esc close", width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBottom(width));
+    return List.copyOf(rows);
+  }
+
+  /** Maya's post-execution result card. */
+  public static List<Row> codeBlockResult(String command, String status,
+      List<String> outputRows, boolean success, int width, int viewportRows) {
+    Objects.requireNonNull(command, "command");
+    Objects.requireNonNull(status, "status");
+    List<String> output = List.copyOf(Objects.requireNonNull(outputRows, "outputRows"));
+    if (width < 60) throw new IllegalArgumentException("result width must be at least 60");
+    if (viewportRows < 1) throw new IllegalArgumentException("picker viewport must be positive");
+    var rows = pickerStart(" Run Result ", width);
+    rows.add(pickerBody("$ " + command, width, success ? Tone.SUCCESS : Tone.DANGER));
+    rows.add(pickerBody("  " + status, width, success ? Tone.MUTED : Tone.DANGER));
+    rows.add(pickerBody("─".repeat(width - 8), width, Tone.MUTED));
+    for (String line : output.stream().limit(viewportRows).toList()) {
+      rows.add(pickerScrollBody("  " + line, width,
+          success ? Tone.MUTED : Tone.DANGER));
+    }
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBody("a attach to composer   y copy   Esc discard", width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBottom(width));
+    return List.copyOf(rows);
+  }
+
   public static List<Row> changes(List<Change> changes, int width) {
     List<Change> values = List.copyOf(Objects.requireNonNull(changes, "changes"));
     if (values.isEmpty()) return List.of();
@@ -425,6 +464,10 @@ public final class AppChrome {
     return row("  │  " + fit(content, width - 8) + "  │", tone);
   }
 
+  private static Row pickerScrollBody(String content, int width, Tone tone) {
+    return row("  │  " + fit(content, width - 9) + "┃  │", tone);
+  }
+
   private static List<Row> searchablePicker(String title, String prefix, String placeholder,
       String query, List<PickerRow> pickerRows, String position, int width, int viewportRows,
       int minimumWidth) {
@@ -459,6 +502,35 @@ public final class AppChrome {
     rows.add(pickerBody("", width, Tone.NORMAL));
     rows.add(row("  ╰" + "─".repeat(panelWidth - 2) + "╯", Tone.ACCENT));
     return List.copyOf(rows);
+  }
+
+  private static ArrayList<Row> pickerStart(String title, int width) {
+    int panelWidth = width - 2;
+    int rules = panelWidth - columns(title) - 2;
+    int leftRule = rules / 2;
+    var rows = new ArrayList<Row>();
+    rows.add(row("  ╭" + "─".repeat(leftRule) + title
+        + "─".repeat(rules - leftRule) + "╮", Tone.ACCENT));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    return rows;
+  }
+
+  private static void appendPickerRows(
+      List<Row> output, List<PickerRow> values, int width, int viewportRows) {
+    int visibleRows = Math.min(values.size(), viewportRows);
+    int selected = 0;
+    for (int index = 0; index < values.size(); index++) {
+      if (values.get(index).selected()) selected = index;
+    }
+    int start = Math.max(0, Math.min(selected - visibleRows + 1, values.size() - visibleRows));
+    for (PickerRow value : values.subList(start, start + visibleRows)) {
+      output.add(pickerBody(pickerDataRow(value, width - 9) + "┃", width,
+          value.selected() ? Tone.ACCENT : Tone.NORMAL));
+    }
+  }
+
+  private static Row pickerBottom(int width) {
+    return row("  ╰" + "─".repeat(width - 4) + "╯", Tone.ACCENT);
   }
 
   private static String pickerDataRow(PickerRow row, int width) {

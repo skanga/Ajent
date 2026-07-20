@@ -136,7 +136,7 @@ native argument description, running and completed action timeline, completed
 output/footer, assistant continuation seam, phase elapsed slot, and measured
 idle breadcrumb/context degradation cell-for-cell at 80x24. Only spinner phase
 and subprocess wall-clock cells are normalized. Tool-card and permission flow is
-therefore executable-proven; queued/attachment composer behavior, pickers, diff
+therefore executable-proven; queued/attachment composer behavior, remaining pickers, diff
 review, thread switching, resize, and append-only scrollback remain in the
 terminal differential backlog.
 
@@ -145,8 +145,7 @@ initial and Down-navigated frames, closes it with Escape, and proves the complet
 76-column bordered bottom overlay. Registry blurbs, authentication/local notes,
 cursor and scrollbar rails, blank padding, legend, key hints, and the native
 short-terminal `rows - 8` viewport clamp are shared production behavior. The
-remaining picker backlog is limited to the thread-switch, code-block, and
-checkpoint surfaces.
+remaining picker backlog is limited to the thread-switch and checkpoint surfaces.
 
 Ctrl+K now uses the same production picker chrome with the native search header,
 separator, protected descriptions, cursor/scroll rail, clipping, and responsive
@@ -155,7 +154,7 @@ viewport. The executable gate captures the open palette and compares a unique
 and predates the checked-in source's `Inspect tool outputs` palette entry;
 Ajent retains that source-correct fifteenth command, so only the common uniquely
 filtered view is asserted exactly. Command-palette rendering and filtering are
-complete; the remaining picker backlog is code-block and checkpoint surfaces.
+complete; the remaining picker backlog is the checkpoint surface.
 
 Ctrl+J now opens the exact saved-thread picker in both executable clients. The
 characterization creates a real persisted turn in isolated homes and compares
@@ -183,6 +182,15 @@ symbol name/file/line loci cell-for-cell. Source-derived tests additionally pin
 workspace-empty, no-symbol, no-match, parent-directory, clamped selection, and
 the native over-14-item position footer. Mention-file and symbol picker chrome,
 modal ownership, filtering, and attachment selection are complete.
+
+Enhanced Ctrl+G now opens the exact fenced-code picker in both executable
+clients, after a deterministic provider reply supplies a runnable PowerShell
+block. The characterization compares the numbered preview, language and line
+metadata, selected rail, navigation/action hints, padding, and border; it then
+executes selection `1` in both clients and compares the complete Run Result
+card, including command, exit/line/UTF-8-byte status, output, Maya heavy-thumb
+scrollbar gutter, attach/copy/discard hints, and border. Code-block picker and
+run-result rendering are executable-proven.
 
 `TurnChromeTest` and live `InteractiveCommandTest` coverage now pin the native
 turn shell independently of the broader renderer: `❯ You` and model-aware

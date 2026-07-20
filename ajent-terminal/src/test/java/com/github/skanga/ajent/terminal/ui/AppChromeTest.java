@@ -208,6 +208,27 @@ final class AppChromeTest {
   }
 
   @Test
+  void rendersNativeCodeBlockPickerAndRunResult() {
+    List<AppChrome.Row> picker = AppChrome.codeBlockPicker(List.of(
+        new AppChrome.PickerRow("1  echo parity", "powershell · 1 line", true, false)),
+        78, 14);
+    assertThat(picker).hasSize(7).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(picker.getFirst().text()).contains(" Run Code Block ");
+    assertThat(picker.get(2).text()).contains("▎ 1  echo parity", "powershell · 1 line", "┃");
+    assertThat(picker.get(4).text())
+        .contains("↑↓ move", "Enter/1-9 run", "e edit", "y copy", "Esc close");
+
+    List<AppChrome.Row> result = AppChrome.codeBlockResult("echo parity",
+        "exit 0 · 1 lines · 7 B", List.of("parity"), true, 78, 14);
+    assertThat(result).hasSize(10).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(result.getFirst().text()).contains(" Run Result ");
+    assertThat(result.get(2).text()).contains("$ echo parity");
+    assertThat(result.get(3).text()).contains("exit 0 · 1 lines · 7 B");
+    assertThat(result.get(5).text()).contains("parity").endsWith("┃  │");
+    assertThat(result.get(7).text()).contains("a attach to composer", "y copy", "Esc discard");
+  }
+
+  @Test
   void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
     AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);
