@@ -25,7 +25,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -33,11 +32,6 @@ import java.util.Objects;
 final class McpServeCommand {
   private static final int USAGE_ERROR = 2;
   private static final int SOFTWARE_ERROR = 70;
-  private static final List<String> NATIVE_STANDALONE_ORDER = List.of(
-      "todo", "read", "list_dir", "edit", "grep", "write", "bash", "glob",
-      "web_fetch", "remember", "web_search", "find_definition", "diagnostics",
-      "git_status", "git_diff", "git_log", "git_commit", "task", "forget",
-      "wipe_memory", "skill", "search_docs");
   private final Path currentDirectory;
   private final Path home;
   private final Map<String, String> environment;
@@ -115,12 +109,8 @@ final class McpServeCommand {
           provider, model, auth, settings.effort(), tools.systemPrompt(), 0, environment,
           tools::additionalTools);
       subagents.install(() -> providerConfiguration);
-      Map<String, com.github.skanga.ajent.provider.ToolSpecification> nativeTools =
-          NativeToolWireCatalog.all().stream().collect(java.util.stream.Collectors.toMap(
-              com.github.skanga.ajent.provider.ToolSpecification::name,
-              java.util.function.Function.identity()));
       var published = java.util.stream.Stream.concat(
-          NATIVE_STANDALONE_ORDER.stream().map(nativeTools::get).map(specification ->
+          NativeToolWireCatalog.standaloneMcp().stream().map(specification ->
               new McpJsonRpcServer.PublishedTool(specification,
                   NativeToolWireCatalog.wireEffects(specification.name()))),
           tools.additionalTools().stream().map(specification ->

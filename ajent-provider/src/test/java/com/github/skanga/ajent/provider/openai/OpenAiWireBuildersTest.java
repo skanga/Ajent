@@ -16,6 +16,7 @@ import com.github.skanga.ajent.domain.ToolUse;
 import com.github.skanga.ajent.provider.ToolSpecification;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -69,6 +70,27 @@ class OpenAiWireBuildersTest {
     assertThat(messages.at("/1/role").textValue()).isEqualTo("tool");
     assertThat(messages.at("/1/tool_call_id").textValue()).isEqualTo("call_abc");
     assertThat(messages.at("/1/content").textValue()).isEqualTo("file contents here");
+  }
+
+  @Test
+  void canonicalizesToolArgumentObjectKeysLikeNativeNlohmannJson() {
+    var nested = new LinkedHashMap<String, Object>();
+    nested.put("z", 2);
+    nested.put("a", 1);
+    var arguments = new LinkedHashMap<String, Object>();
+    arguments.put("path", "foo.txt");
+    arguments.put("nested", nested);
+    arguments.put("content", "hello");
+    var call = new ToolUse(
+        new ToolCallId("call_sorted"), new ToolName("write"), arguments,
+        new ToolStatus.Done("ok"));
+
+    var messages = OpenAiWire.buildMessages(thread(
+        new Message(Role.ASSISTANT, "", List.of(), List.of(call))));
+
+    assertThat(messages.at("/0/tool_calls/0/function/arguments").textValue())
+        .isEqualTo("{\"content\":\"hello\",\"nested\":{\"a\":1,\"z\":2},"
+            + "\"path\":\"foo.txt\"}");
   }
 
   @Test

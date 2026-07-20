@@ -15,6 +15,16 @@ class NativeToolWireCatalogTest {
       "todo", "web_fetch", "web_search", "find_definition", "diagnostics",
       "git_status", "git_diff", "git_log", "git_commit", "remember", "forget",
       "wipe_memory", "task", "skill", "search_docs");
+  private static final List<String> STANDALONE_MCP_ORDER = List.of(
+      "todo", "read", "list_dir", "edit", "grep", "write", "bash", "glob",
+      "web_fetch", "remember", "web_search", "find_definition", "diagnostics",
+      "git_status", "git_diff", "git_log", "git_commit", "task", "forget",
+      "wipe_memory", "skill", "search_docs");
+  private static final List<String> PROVIDER_FACING_ORDER = List.of(
+      "read", "edit", "write", "bash", "grep", "glob", "list_dir", "todo",
+      "web_fetch", "web_search", "find_definition", "diagnostics", "git_status",
+      "git_diff", "git_log", "git_commit", "remember", "forget", "wipe_memory",
+      "task", "skill", "search_docs");
 
   @Test
   void publishesEveryPinnedAgenTTYToolInRecallBiasOrder() {
@@ -23,6 +33,24 @@ class NativeToolWireCatalogTest {
         .containsExactlyElementsOf(PINNED_ORDER);
     assertThat(NativeToolWireCatalog.all()).allSatisfy(specification ->
         assertThat(ToolCatalog.byName(specification.name())).isPresent());
+  }
+
+  @Test
+  void publishesTheExactStandaloneMcpRegistrySubsetAndOrder() {
+    assertThat(NativeToolWireCatalog.standaloneMcp())
+        .extracting(ToolSpecification::name)
+        .containsExactlyElementsOf(STANDALONE_MCP_ORDER)
+        .doesNotContain("repo_map");
+    assertThat(NativeToolWireCatalog.standaloneMcp()).isUnmodifiable();
+  }
+
+  @Test
+  void publishesTheExactProviderFacingRegistrySubsetAndRecallBiasOrder() {
+    assertThat(NativeToolWireCatalog.providerFacing())
+        .extracting(ToolSpecification::name)
+        .containsExactlyElementsOf(PROVIDER_FACING_ORDER)
+        .doesNotContain("repo_map");
+    assertThat(NativeToolWireCatalog.providerFacing()).isUnmodifiable();
   }
 
   @Test

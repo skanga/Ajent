@@ -818,7 +818,7 @@ final class AcpJsonRpcServerTest {
         """).getLast();
     assertThat(embedded.path("result").path("stopReason").textValue()).isEqualTo("end_turn");
     assertThat(captured.get()).isEqualTo(
-        "inspect\n[Resource: guide (file:///guide.md)]\ncontext\n");
+        "inspect\n[resource: guide (file:///guide.md)]\ncontext\n");
     List<String> notification = server.handleLineAsync("""
         {"jsonrpc":"2.0","method":"session/prompt","params":{
           "sessionId":"blocks","prompt":[{"type":"text","text":"notify"}]}}

@@ -198,6 +198,10 @@ final class NativeMcpParityIT {
       var effective = new ArrayList<>(command);
       if (javaProcess) effective.add(1, "-Duser.home=" + home);
       var builder = new ProcessBuilder(effective).redirectErrorStream(false);
+      int workspaceOption = effective.indexOf("--workspace");
+      if (workspaceOption >= 0) {
+        builder.directory(Path.of(effective.get(workspaceOption + 1)).toFile());
+      }
       builder.environment().putAll(Map.of(
           "HOME", home.toString(), "USERPROFILE", home.toString(), "APPDATA", home.toString()));
       return new McpProcess(builder.start());

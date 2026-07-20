@@ -157,7 +157,7 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
                                                  ToolPort boundTools,
                                                  CancellationSignal parentCancellation,
                                                  Consumer<String> progress) {
-    List<ToolSpecification> selectedTools = NativeToolWireCatalog.all().stream()
+    List<ToolSpecification> selectedTools = NativeToolWireCatalog.providerFacing().stream()
         .filter(tool -> allowed(type, tool.name())).toList();
     String systemPrompt = systemPrompt(selected, type);
     var turns = new AtomicInteger();

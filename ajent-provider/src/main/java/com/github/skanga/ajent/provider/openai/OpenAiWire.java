@@ -2,6 +2,7 @@ package com.github.skanga.ajent.provider.openai;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.skanga.ajent.domain.Message;
@@ -25,6 +26,8 @@ import java.util.Locale;
 
 public final class OpenAiWire {
   private static final ObjectMapper JSON = new ObjectMapper();
+  private static final ObjectMapper TOOL_ARGUMENT_JSON = new ObjectMapper()
+      .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
   private static final String USER_AGENT = "ajent/0.1.0-SNAPSHOT";
 
   private OpenAiWire() {}
@@ -213,7 +216,7 @@ public final class OpenAiWire {
         ObjectNode function = call.putObject("function");
         function.put("name", tool.name().value());
         try {
-          function.put("arguments", JSON.writeValueAsString(tool.arguments()));
+          function.put("arguments", TOOL_ARGUMENT_JSON.writeValueAsString(tool.arguments()));
         } catch (JsonProcessingException exception) {
           throw new IllegalStateException("Unable to serialize OpenAI tool arguments", exception);
         }

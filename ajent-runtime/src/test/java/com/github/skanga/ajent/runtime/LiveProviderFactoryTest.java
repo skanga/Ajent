@@ -36,7 +36,7 @@ class LiveProviderFactoryTest {
       assertThat(value.value().effort()).isEqualTo("high");
       assertThat(value.value().systemPrompt()).startsWith("You are ajent");
       assertThat(value.value().tools()).extracting(tool -> tool.name())
-          .hasSize(24).endsWith("remote_lookup");
+          .hasSize(23).doesNotContain("repo_map").endsWith("remote_lookup");
       assertThat(value.value().auth()).isEqualTo(new ProviderAuth.Bearer("oauth"));
     });
   }
@@ -50,13 +50,13 @@ class LiveProviderFactoryTest {
         components.systemPrompt(), 200_000, Map.of(), current::get);
 
     assertThat(((HttpProviderPort.Request.Anthropic)
-        LiveProviderFactory.request(configuration, List.of())).value().tools()).hasSize(23);
+        LiveProviderFactory.request(configuration, List.of())).value().tools()).hasSize(22);
     current.set(List.of(new ToolSpecification("late_tool", "added after startup",
         com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
             .put("type", "object"), false)));
     assertThat(((HttpProviderPort.Request.Anthropic)
         LiveProviderFactory.request(configuration, List.of())).value().tools())
-        .extracting(ToolSpecification::name).hasSize(24).endsWith("late_tool");
+        .extracting(ToolSpecification::name).hasSize(23).endsWith("late_tool");
   }
 
   @Test
@@ -74,7 +74,8 @@ class LiveProviderFactoryTest {
         .isInstanceOfSatisfying(HttpProviderPort.Request.OpenAi.class, value -> {
           assertThat(value.value().endpoint().host()).isEqualTo("api.groq.com");
           assertThat(value.value().jsonProtocol()).isFalse();
-          assertThat(value.value().tools()).hasSize(23);
+          assertThat(value.value().tools()).extracting(tool -> tool.name())
+              .hasSize(22).doesNotContain("repo_map");
           assertThat(value.value().systemPrompt())
               .contains("The full conversation so far is provided in the messages.")
               .doesNotContain("When a task DOES need an action");
@@ -86,7 +87,7 @@ class LiveProviderFactoryTest {
           assertThat(value.value().contextWindow()).isEqualTo(32_768);
           assertThat(value.value().tools()).extracting(tool -> tool.name())
               .doesNotContain("skill", "remember", "forget", "wipe_memory")
-              .hasSize(19);
+              .hasSize(18);
           assertThat(value.value().systemPrompt())
               .contains("When a task DOES need an action")
               .doesNotContain("The full conversation so far is provided in the messages.");

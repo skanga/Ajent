@@ -55,7 +55,8 @@ final class NativeAcpParityIT {
     Path nativeWorkspace = Files.createDirectories(root.resolve("native-workspace"));
     Path javaWorkspace = Files.createDirectories(root.resolve("java-workspace"));
     var target = new AtomicReference<Path>();
-    HttpServer provider = scriptedProvider(target);
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedProvider(target, requests);
     provider.start();
     String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
     try {
@@ -65,6 +66,8 @@ final class NativeAcpParityIT {
           root.resolve("native-prompt-home"), false)) {
         nativeTranscript = exercisePrompt(agent, nativeWorkspace);
       }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
       assertThat(target.get()).as(nativeTranscript.toString()).hasContent("hello from acp\n");
 
       Transcript javaTranscript;
@@ -73,11 +76,15 @@ final class NativeAcpParityIT {
           root.resolve("java-prompt-home"), true)) {
         javaTranscript = exercisePrompt(agent, javaWorkspace);
       }
+      List<JsonNode> javaRequests = List.copyOf(requests);
       assertThat(target.get()).as(javaTranscript.toString()).hasContent("hello from acp\n");
 
       Transcript normalizedNative = normalizePrompt(nativeTranscript, nativeWorkspace, true);
       Transcript normalizedJava = normalizePrompt(javaTranscript, javaWorkspace, false);
       assertThat(firstDifference(normalizedNative, normalizedJava)).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
     } finally {
       provider.stop(0);
     }
@@ -96,11 +103,13 @@ final class NativeAcpParityIT {
     return new Transcript(sessionId, List.of(agent.callWithPermission("session/prompt", params)));
   }
 
-  private static HttpServer scriptedProvider(AtomicReference<Path> target) throws Exception {
+  private static HttpServer scriptedProvider(
+      AtomicReference<Path> target, List<JsonNode> requests) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/v1/chat/completions", exchange -> {
       try (exchange) {
         JsonNode request = JSON.readTree(exchange.getRequestBody());
+        requests.add(request.deepCopy());
         boolean continuation = false;
         for (JsonNode message : request.path("messages")) {
           if ("tool".equals(message.path("role").asText())) continuation = true;
@@ -185,6 +194,36 @@ final class NativeAcpParityIT {
             .map(frame -> normalizePromptFrame(frame, workspace)).toList())
         .toList();
     return new Transcript(normalized.sessionId(), exchanges);
+  }
+
+  private static List<JsonNode> normalizeRequests(
+      List<JsonNode> requests, Path workspace, boolean nativeProgram) {
+    String workspaceText = workspace.toString();
+    String jsonEncodedWorkspace;
+    try {
+      String quoted = JSON.writeValueAsString(workspaceText);
+      jsonEncodedWorkspace = quoted.substring(1, quoted.length() - 1);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+      throw new AssertionError("cannot JSON-encode workspace path", impossible);
+    }
+    return requests.stream()
+        .map(request -> normalize(request, "__NO_SESSION__", nativeProgram))
+        .map(request -> replaceText(request, workspaceText, "<WORKSPACE>"))
+        .map(request -> replaceText(request, jsonEncodedWorkspace, "<WORKSPACE>"))
+        .toList();
+  }
+
+  private static String firstJsonListDifference(
+      List<JsonNode> actual, List<JsonNode> expected) {
+    if (actual.size() != expected.size()) {
+      return "provider request count: expected " + expected.size() + " but was " + actual.size();
+    }
+    for (int index = 0; index < actual.size(); index++) {
+      String difference = jsonDifference(
+          actual.get(index), expected.get(index), "providerRequest[" + index + "]");
+      if (!difference.isEmpty()) return difference;
+    }
+    return "";
   }
 
   private static String firstDifference(Transcript actual, Transcript expected) {
@@ -366,6 +405,10 @@ final class NativeAcpParityIT {
       var effective = new ArrayList<>(command);
       if (javaProcess) effective.add(1, "-Duser.home=" + home);
       var builder = new ProcessBuilder(effective).redirectErrorStream(false);
+      int workspaceOption = effective.indexOf("--workspace");
+      if (workspaceOption >= 0) {
+        builder.directory(Path.of(effective.get(workspaceOption + 1)).toFile());
+      }
       builder.environment().putAll(Map.of(
           "HOME", home.toString(), "USERPROFILE", home.toString(), "APPDATA", home.toString()));
       return new AgentProcess(builder.start());

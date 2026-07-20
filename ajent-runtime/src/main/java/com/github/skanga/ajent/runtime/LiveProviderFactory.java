@@ -120,8 +120,8 @@ public final class LiveProviderFactory {
       String model, List<ToolSpecification> additionalTools) {
     var tools = new java.util.ArrayList<ToolSpecification>();
     var nativeTools = !ModelCapabilities.isWeakModel(model)
-        ? NativeToolWireCatalog.all()
-        : NativeToolWireCatalog.all().stream().filter(tool -> switch (tool.name()) {
+        ? NativeToolWireCatalog.providerFacing()
+        : NativeToolWireCatalog.providerFacing().stream().filter(tool -> switch (tool.name()) {
       case "skill", "remember", "forget", "wipe_memory" -> false;
       default -> true;
     }).toList();

@@ -76,7 +76,8 @@ final class ProviderBackedSubagentRunnerTest {
     });
     assertThat(models).containsExactly("model-a", "model-a");
     assertThat(prompt.get()).contains("Your role: EXPLORER", "You are READ-ONLY");
-    assertThat(toolNames.get()).contains("read", "grep", "repo_map")
+    assertThat(toolNames.get()).contains("read", "grep")
+        .doesNotContain("repo_map")
         .doesNotContain("task", "write", "bash", "web_fetch", "web_search");
     assertThat(activity).anyMatch(line -> line.contains("⚙ read  README.md"))
         .anyMatch(line -> line.contains("✓ read  README.md"))

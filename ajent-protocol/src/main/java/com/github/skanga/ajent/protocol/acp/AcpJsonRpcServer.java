@@ -491,11 +491,12 @@ public final class AcpJsonRpcServer {
         if (!block.path("text").isTextual()) {
           throw new RpcFailure(INVALID_PARAMS, "text prompt block requires text");
         }
-        text.append(block.path("text").textValue());
+        text.append(block.path("text").textValue()).append('\n');
       } else if ("resource_link".equals(type)) {
         String name = block.path("name").asText();
         String uri = block.path("uri").asText();
-        text.append("\n[Resource: ").append(name).append(" (").append(uri).append(")]\n");
+        text.append("[resource: ").append(name.isEmpty() ? uri : name)
+            .append(" (").append(uri).append(")]\n");
       } else if ("resource".equals(type)
           && block.path("resource").path("text").isTextual()) {
         text.append(block.path("resource").path("text").textValue()).append('\n');
