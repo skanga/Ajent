@@ -155,8 +155,17 @@ viewport. The executable gate captures the open palette and compares a unique
 and predates the checked-in source's `Inspect tool outputs` palette entry;
 Ajent retains that source-correct fifteenth command, so only the common uniquely
 filtered view is asserted exactly. Command-palette rendering and filtering are
-complete; the remaining picker backlog is model, thread, mention, symbol,
-code-block, and checkpoint surfaces.
+complete; the remaining picker backlog is model, mention, symbol, code-block,
+and checkpoint surfaces.
+
+Ctrl+J now opens the exact saved-thread picker in both executable clients. The
+characterization creates a real persisted turn in isolated homes and compares
+the active/current marker, title, local `MMM dd HH:mm` timestamp, scrollbar
+rail, position counter, navigation hints, blank padding, and border
+cell-for-cell. The harness uses negotiated CSI-u Ctrl+J and Escape sequences,
+so the lifecycle is tested under the same enhanced keyboard mode as production.
+Thread selection/switching remains a separate terminal scenario; the picker
+surface itself is complete.
 
 `TurnChromeTest` and live `InteractiveCommandTest` coverage now pin the native
 turn shell independently of the broader renderer: `❯ You` and model-aware

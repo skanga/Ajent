@@ -88,10 +88,13 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched the source-correct searchable command palette chrome and filtering,
   with an executable exact differential for a uniquely filtered command and an
   explicit record of the pinned binary's missing tool-output command entry.
+- Matched the executable saved-thread picker cell-for-cell, including the
+  active/current marker, local timestamp, position counter, navigation footer,
+  responsive list viewport, and enhanced Ctrl+J/Escape lifecycle.
 
 ### Known limitations
 
-- Animated wordmark-frame and model/thread/mention/symbol/code/checkpoint picker,
+- Animated wordmark-frame and model/mention/symbol/code/checkpoint picker,
   review, resize, attachment, queue, and scrollback terminal
   differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live

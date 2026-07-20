@@ -2444,27 +2444,29 @@ final class InteractiveCommand {
           lines = overlayBottom(lines, overlay);
         }
         if (threadPicker instanceof PickerState.OpenAt open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Threads", Style.ACCENT));
+          var pickerRows = new ArrayList<AppChrome.PickerRow>();
           if (threadRows.isEmpty()) {
-            lines.add(new StyledLine(threadsLoading
-                ? "  Loading conversations…" : "  No threads yet.", Style.MUTED));
+            pickerRows.add(new AppChrome.PickerRow(threadsLoading
+                ? "Loading conversations…" : "No threads yet.", "", false, false));
           } else {
             ThreadId current = state.thread().id();
             for (int index = 0; index < threadRows.size(); index++) {
               ThreadPicker.Entry entry = threadRows.get(index);
-              String selected = index == open.index() ? "› " : "  ";
-              String active = entry.id().equals(current) ? "● " : "  ";
-              lines.add(new StyledLine(selected + active + entry.displayTitle()
-                  + "  " + entry.updatedAt(), index == open.index() || entry.id().equals(current)
-                      ? Style.ACCENT : Style.MUTED));
+              boolean active = entry.id().equals(current);
+              String timestamp = java.time.format.DateTimeFormatter.ofPattern(
+                      "MMM dd HH:mm", java.util.Locale.ENGLISH)
+                  .withZone(ZoneId.systemDefault()).format(entry.updatedAt());
+              pickerRows.add(new AppChrome.PickerRow(
+                  (active ? "● " : "  ") + entry.displayTitle(), timestamp,
+                  index == open.index(), active));
             }
-            lines.add(new StyledLine("  " + (open.index() + 1) + "/" + threadRows.size(),
-                Style.MUTED));
           }
-          lines.add(new StyledLine(
-              "↑↓ move  PgUp/PgDn page  Enter open  N new  Esc close", Style.MUTED));
+          String position = threadRows.isEmpty() ? "0/0"
+              : (open.index() + 1) + "/" + threadRows.size();
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.threadPicker(pickerRows, position,
+              Math.max(50, width - 2), Math.min(14, Math.max(4, terminalRows - 8))));
+          lines = overlayBottom(lines, overlay);
         }
         if (plan instanceof PickerState.OpenModal) {
           lines = new ArrayList<>(lines);
