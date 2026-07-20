@@ -227,7 +227,8 @@ final class NativeMcpParityIT {
     JsonNode changed = process.call("tools/call", toolCall("remote_change", "unused", true));
     assertThat(changed.toString()).containsIgnoringCase("timed out").contains("isError");
     exchanges.add(changed);
-    JsonNode timeout = process.call("tools/call", toolCall("remote_slow", "unused", true));
+    JsonNode timeout = process.callThenCancel(
+        "tools/call", toolCall("remote_slow", "unused", true));
     assertThat(timeout.toString()).containsIgnoringCase("timed out").contains("isError");
     exchanges.add(timeout);
     return new Transcript(List.copyOf(exchanges));
@@ -759,13 +760,38 @@ final class NativeMcpParityIT {
       return response;
     }
 
+    JsonNode callThenCancel(String method, JsonNode params) throws Exception {
+      int id = ++nextId;
+      ObjectNode request = JSON.createObjectNode().put("jsonrpc", "2.0").put("id", id)
+          .put("method", method);
+      request.set("params", params);
+      write(request);
+      java.lang.Thread cancellation = java.lang.Thread.ofVirtual().start(() -> {
+        try {
+          java.lang.Thread.sleep(Duration.ofMillis(25));
+          ObjectNode cancellationParams = JSON.createObjectNode().put("requestId", id)
+              .put("reason", "parity cancellation");
+          notify("notifications/cancelled", cancellationParams);
+        } catch (Exception failure) {
+          throw new AssertionError(failure);
+        }
+      });
+      String line = stdout.readLine();
+      cancellation.join(Duration.ofSeconds(2));
+      assertThat(cancellation.isAlive()).isFalse();
+      if (line == null) throw new AssertionError("MCP process exited: " + stderr());
+      JsonNode response = JSON.readTree(line);
+      assertThat(response.path("id").asInt(-1)).as(response.toString()).isEqualTo(id);
+      return response;
+    }
+
     void notify(String method, JsonNode params) throws Exception {
       ObjectNode request = JSON.createObjectNode().put("jsonrpc", "2.0").put("method", method);
       request.set("params", params);
       write(request);
     }
 
-    private void write(JsonNode frame) throws Exception {
+    private synchronized void write(JsonNode frame) throws Exception {
       stdin.write(JSON.writeValueAsString(frame));
       stdin.newLine();
       stdin.flush();

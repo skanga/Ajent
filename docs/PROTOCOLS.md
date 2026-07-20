@@ -97,6 +97,13 @@ behavior pending an upstream semantic change. External MCP catalog order is
 protocol-unordered; Ajent deliberately keeps deterministic local-first order
 instead of reproducing AgenTTY's hash-table interleaving.
 
+Explicit `notifications/cancelled` sent to the standalone server during a
+blocking tool call are likewise queued behind that call in both programs. The
+notification is accepted silently once the call returns, but it is not
+forwarded to the downstream server and does not replace the configured request
+timeout. This is executable-pinned compatibility, not cooperative MCP tool
+cancellation.
+
 ## Standalone MCP server
 
 Run:

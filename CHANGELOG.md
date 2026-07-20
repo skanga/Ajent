@@ -34,6 +34,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   timeout wording, structured JSON formatting, and absence of unsolicited
   cancellation notifications; progress delivery no longer blocks response
   processing.
+- Pinned AgenTTY's explicit MCP cancellation limitation: a cancellation
+  notification queued during a synchronous configured tool call neither
+  preempts the call nor propagates downstream, and the normal timeout wins.
 
 ### Known limitations
 
