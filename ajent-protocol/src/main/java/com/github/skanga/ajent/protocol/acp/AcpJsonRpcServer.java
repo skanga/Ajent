@@ -326,7 +326,7 @@ public final class AcpJsonRpcServer {
   private JsonNode dispatch(String method, JsonNode parameters, List<ObjectNode> frames) {
     return switch (method) {
       case "initialize" -> initialize(parameters);
-      case "authenticate" -> authenticate();
+      case "authenticate" -> authenticate(parameters);
       case "logout" -> logout();
       case "session/new" -> newSession(parameters);
       case "session/load" -> loadSession(parameters, frames);
@@ -367,7 +367,8 @@ public final class AcpJsonRpcServer {
     return result;
   }
 
-  private JsonNode authenticate() {
+  private JsonNode authenticate(JsonNode parameters) {
+    requiredText(parameters, "methodId");
     if (!authenticated.getAsBoolean()) {
       throw new RpcFailure(AUTH_REQUIRED,
           "ajent has no credentials — run `ajent login` first");

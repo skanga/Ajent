@@ -295,6 +295,33 @@ final class NativeAcpParityIT {
     }
   }
 
+  @Test
+  void persistedCredentialAuthenticationLifecycleMatchesPinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path workspace = Files.createDirectories(root.resolve("authenticated-workspace"));
+    Path nativeHome = root.resolve("native-auth-home");
+    Path javaHome = root.resolve("java-auth-home");
+    installApiKey(List.of(nativeBinary.toString(), "login"), nativeHome, false);
+    installApiKey(List.of(javaExecutable(), "-jar", ajentJar.toString(), "login"),
+        javaHome, true);
+
+    Transcript nativeTranscript;
+    try (var agent = AgentProcess.start(command(nativeBinary, workspace, "anthropic"),
+        nativeHome, false)) {
+      nativeTranscript = exerciseAuthentication(agent);
+    }
+    Transcript javaTranscript;
+    try (var agent = AgentProcess.start(javaCommand(ajentJar, workspace, "anthropic"),
+        javaHome, true)) {
+      javaTranscript = exerciseAuthentication(agent);
+    }
+
+    assertThat(normalize(nativeTranscript, true)).isEqualTo(normalize(javaTranscript, false));
+  }
+
   private static Transcript exercisePrompt(AgentProcess agent, Path workspace) throws Exception {
     return exercisePrompt(agent, workspace, "allow_once");
   }
@@ -335,6 +362,36 @@ final class NativeAcpParityIT {
     List<JsonNode> frames = agent.readUntilResponses(Set.of(firstPrompt, secondPrompt));
     return new ConcurrentTranscript(
         firstSession, firstPrompt, secondSession, secondPrompt, frames);
+  }
+
+  private static Transcript exerciseAuthentication(AgentProcess agent) throws Exception {
+    var exchanges = new ArrayList<List<JsonNode>>();
+    exchanges.add(agent.call("initialize", JSON.readTree(
+        "{\"protocolVersion\":1,\"clientCapabilities\":{}}")));
+    exchanges.add(agent.call("authenticate", JSON.createObjectNode()));
+    exchanges.add(agent.call("authenticate", JSON.readTree("{\"methodId\":\"agent\"}")));
+    exchanges.add(agent.call("logout", JSON.createObjectNode()));
+    exchanges.add(agent.call("authenticate", JSON.readTree("{\"methodId\":\"agent\"}")));
+    return new Transcript("__NO_SESSION__", List.copyOf(exchanges));
+  }
+
+  private static void installApiKey(
+      List<String> command, Path home, boolean javaProcess) throws Exception {
+    Files.createDirectories(home);
+    var effective = new ArrayList<>(command);
+    if (javaProcess) effective.add(1, "-Duser.home=" + home);
+    var builder = new ProcessBuilder(effective).redirectErrorStream(false);
+    builder.environment().putAll(Map.of(
+        "HOME", home.toString(), "USERPROFILE", home.toString(), "APPDATA", home.toString()));
+    Process process = builder.start();
+    try (var input = process.getOutputStream()) {
+      input.write("2\nsk-ant-parity-test\n".getBytes(StandardCharsets.UTF_8));
+    }
+    assertThat(process.waitFor(10, TimeUnit.SECONDS)).isTrue();
+    String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertThat(process.exitValue()).as(stderr).isZero();
+    assertThat(stdout + stderr).doesNotContain("sk-ant-parity-test");
   }
 
   private static ObjectNode prompt(String sessionId, String text) {
@@ -812,11 +869,14 @@ final class NativeAcpParityIT {
   }
 
   private static List<String> javaCommand(Path jar, Path workspace, String provider) {
-    String executable = Path.of(System.getProperty("java.home"), "bin",
-        System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
-    return List.of(executable, "-jar", jar.toString(), "acp", "--workspace",
+    return List.of(javaExecutable(), "-jar", jar.toString(), "acp", "--workspace",
         workspace.toString(), "--sandbox", "off", "--provider", provider, "--model",
         "qwen3:14b");
+  }
+
+  private static String javaExecutable() {
+    return Path.of(System.getProperty("java.home"), "bin",
+        System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
   }
 
   private static String requiredProperty(String name) {

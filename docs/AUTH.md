@@ -127,6 +127,11 @@ distinguish environment, saved API key, valid OAuth, expiring OAuth, expired
 OAuth, and absent credentials. `logout` removes the saved credential
 idempotently; it cannot remove an environment variable from the parent shell.
 
+The ACP server resolves credentials at startup. Its `authenticate` request
+requires the ACP v1 `methodId` string and confirms that credentials are
+installed; `logout` clears both the live server credential and its saved file,
+so a later `authenticate` request returns `AuthRequired`.
+
 The interactive command palette also exposes login and provider switching.
 Provider-key input is owned by the login modal, is not echoed, and is cleared
 on close or thread-wide UI reset.

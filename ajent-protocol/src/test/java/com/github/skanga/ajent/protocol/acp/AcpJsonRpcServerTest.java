@@ -120,15 +120,20 @@ final class AcpJsonRpcServerTest {
         "{\"sessionId\":\"session-1\"}")).isEmpty();
     assertThat(result(server, 12, "session/list", "{}").path("sessions")).isEmpty();
 
-    assertThat(result(server, 13, "authenticate", "{\"methodId\":\"agent\"}")).isEmpty();
-    assertThat(result(server, 14, "logout", "{}")).isEmpty();
+    JsonNode missingMethod = call(server, 13, "authenticate", "{}")
+        .getLast().path("error");
+    assertThat(missingMethod.path("code").intValue()).isEqualTo(-32602);
+    assertThat(missingMethod.path("message").textValue())
+        .isEqualTo("missing required field: methodId");
+    assertThat(result(server, 14, "authenticate", "{\"methodId\":\"agent\"}")).isEmpty();
+    assertThat(result(server, 15, "logout", "{}")).isEmpty();
     assertThat(logoutCalls).hasValue(1);
-    JsonNode authError = call(server, 15, "authenticate", "{\"methodId\":\"agent\"}")
+    JsonNode authError = call(server, 16, "authenticate", "{\"methodId\":\"agent\"}")
         .getLast().path("error");
     assertThat(authError.path("code").intValue()).isEqualTo(-32000);
     assertThat(authError.path("message").textValue()).contains("ajent login");
 
-    JsonNode unknown = call(server, 16, "does/not/exist", "{}").getLast().path("error");
+    JsonNode unknown = call(server, 17, "does/not/exist", "{}").getLast().path("error");
     assertThat(unknown.path("code").intValue()).isEqualTo(-32601);
   }
 

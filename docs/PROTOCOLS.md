@@ -23,6 +23,10 @@ new/list/load/resume/close/delete, mode updates, model configuration, prompts,
 cancellation, and durable thread replay. Sessions are isolated and one active
 prompt owns a session at a time.
 
+`authenticate` requires the ACP v1 string `methodId`. It validates the same
+wire shape as AgenTTY, succeeds when startup resolved installed credentials,
+and returns `AuthRequired` after `logout` clears them.
+
 Each session composes a real `AgentLoop` with selected provider, profile-derived
 tool catalog, persistence, checkpoints, skills/memory/RAG, MCP external tools,
 and permission bridge. Loading/resuming reconstructs from the durable thread;
