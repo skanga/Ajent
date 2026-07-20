@@ -2435,16 +2435,11 @@ final class InteractiveCommand {
           lines = overlayBottom(lines, overlay);
         }
         if (providerPicker instanceof PickerState.OpenAt open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Providers", Style.ACCENT));
-          List<ProviderPicker.Provider> providers = providerRows;
-          for (int index = 0; index <= providers.size(); index++) {
-            String label = index == providers.size()
-                ? "Custom host…" : providers.get(index).label();
-            lines.add(new StyledLine((index == open.index() ? "› " : "  ") + label,
-                index == open.index() ? Style.ACCENT : Style.NORMAL));
-          }
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.providerPicker(
+              providerPickerRows(open, providerId), Math.max(52, width - 2),
+              Math.min(14, Math.max(4, terminalRows - 8))));
+          lines = overlayBottom(lines, overlay);
         }
         if (threadPicker instanceof PickerState.OpenAt open) {
           lines = new ArrayList<>(lines);
@@ -3112,6 +3107,33 @@ final class InteractiveCommand {
     private static String providerLabel(String providerId) {
       return ProviderRegistry.presetFor(providerId).map(ProviderRegistry.Preset::label)
           .orElseGet(() -> providerId.isBlank() ? "OpenAI" : providerId);
+    }
+
+    private static List<AppChrome.PickerRow> providerPickerRows(
+        PickerState.OpenAt open, String activeProvider) {
+      var rows = new ArrayList<AppChrome.PickerRow>();
+      List<ProviderRegistry.Preset> presets = ProviderRegistry.presets();
+      for (int index = 0; index < presets.size(); index++) {
+        ProviderRegistry.Preset preset = presets.get(index);
+        String note;
+        if (preset.local() || preset.authStyle() == ProviderRegistry.AuthStyle.NONE) {
+          note = "● local";
+        } else if (preset.kind() == ProviderRegistry.Kind.ANTHROPIC) {
+          note = "✓ login";
+        } else {
+          String configured = preset.authEnvironment().stream()
+              .filter(name -> !System.getenv().getOrDefault(name, "").isBlank())
+              .findFirst().orElse("");
+          note = configured.isEmpty() ? "⚠ " + preset.authEnvironment().getFirst()
+              : "✓ " + configured;
+        }
+        rows.add(new AppChrome.PickerRow(preset.label() + "  " + preset.description(), note,
+            index == open.index(), preset.id().equals(activeProvider)));
+      }
+      rows.add(new AppChrome.PickerRow(
+          "Custom host…  any OpenAI-compatible server (host:port)", "✎ edit",
+          open.index() == presets.size(), false));
+      return List.copyOf(rows);
     }
 
     private static boolean hasCompactionBoundary(AgentState state, int messageIndex,

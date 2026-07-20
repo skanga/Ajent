@@ -265,6 +265,10 @@ final class NativeTerminalParityIT {
           "E X E C U T E 1", "permission viewport");
       assertMatchingRegion(nativeCapture.finalFrame(), javaCapture.finalFrame(),
           "Bash  echo terminal parity", "completed tool viewport");
+      assertMatchingRegion(nativeCapture.pickerFrame(), javaCapture.pickerFrame(),
+          "Providers", "provider picker viewport");
+      assertMatchingRegion(nativeCapture.movedPickerFrame(), javaCapture.movedPickerFrame(),
+          "Providers", "navigated provider picker viewport");
     } finally {
       provider.stop(0);
     }
@@ -445,6 +449,21 @@ final class NativeTerminalParityIT {
     process.getOutputStream().flush();
     awaitViewportText(output, error, "permission parity complete", Duration.ofSeconds(8));
     String finalFrame = combined(output, error);
+    process.getOutputStream().write(16); // Ctrl+P
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Providers", Duration.ofSeconds(5));
+    Thread.sleep(150);
+    String pickerFrame = combined(output, error);
+    process.getOutputStream().write("\u001b[B".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    Thread.sleep(150);
+    String movedPickerFrame = combined(output, error);
+    byte[] closePicker = enhancedControlC
+        ? "\u001b[27u".getBytes(StandardCharsets.US_ASCII)
+        : new byte[] {27};
+    process.getOutputStream().write(closePicker);
+    process.getOutputStream().flush();
+    Thread.sleep(400);
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -463,7 +482,7 @@ final class NativeTerminalParityIT {
     reader.join(Duration.ofSeconds(3));
     if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
-        finalFrame);
+        finalFrame, pickerFrame, movedPickerFrame);
   }
 
   private static Map<String, String> terminalEnvironment(Path home) {
@@ -740,5 +759,6 @@ final class NativeTerminalParityIT {
 
   private record Capture(int exitCode, String output, String frame) {}
   private record StagedCapture(int exitCode, String output, String permissionFrame,
-                               String finalFrame) {}
+                               String finalFrame, String pickerFrame,
+                               String movedPickerFrame) {}
 }

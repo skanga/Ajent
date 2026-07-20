@@ -140,6 +140,14 @@ therefore executable-proven; queued/attachment composer behavior, pickers, diff
 review, thread switching, resize, and append-only scrollback remain in the
 terminal differential backlog.
 
+The same executable run now opens the provider picker with Ctrl+P, captures the
+initial and Down-navigated frames, closes it with Escape, and proves the complete
+76-column bordered bottom overlay. Registry blurbs, authentication/local notes,
+cursor and scrollbar rails, blank padding, legend, key hints, and the native
+short-terminal `rows - 8` viewport clamp are shared production behavior. The
+remaining picker backlog is limited to the model, thread, command, mention,
+symbol, code-block, and checkpoint surfaces.
+
 `TurnChromeTest` and live `InteractiveCommandTest` coverage now pin the native
 turn shell independently of the broader renderer: `❯ You` and model-aware
 `✦` identity, native per-speaker rail colors, muted metadata, local time,

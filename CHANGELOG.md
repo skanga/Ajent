@@ -82,11 +82,15 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   including the six-row permission card, native argument descriptions, running
   and completed Bash action timelines, phase elapsed slot, assistant
   continuation seam, completed output, and measured idle-status degradation.
+- Matched the executable provider picker cell-for-cell, including its bordered
+  bottom overlay, registry descriptions, protected authentication/local notes,
+  footer legend and hints, cursor navigation, and short-terminal height clamp.
 
 ### Known limitations
 
-- Animated wordmark-frame and richer picker, review, thread, resize, attachment,
-  queue, and scrollback terminal differentials remain under parity work;
+- Animated wordmark-frame and model/thread/command/mention/symbol/code/checkpoint
+  picker, review, resize, attachment, queue, and scrollback terminal
+  differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live
   permissioned Bash-tool turn now compare cell-for-cell.
 - OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's

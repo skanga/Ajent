@@ -119,6 +119,28 @@ final class AppChromeTest {
   }
 
   @Test
+  void rendersTheNativeProviderPickerChromeAndProtectedTrailingColumn() {
+    List<AppChrome.PickerRow> providers = List.of(
+        new AppChrome.PickerRow("Anthropic  Claude — OAuth (Pro/Max) or API key",
+            "✓ login", true, false),
+        new AppChrome.PickerRow("OpenAI  GPT — api.openai.com",
+            "⚠ OPENAI_API_KEY", false, false),
+        new AppChrome.PickerRow("Custom host…  any OpenAI-compatible server (host:port)",
+            "✎ edit", false, false));
+
+    List<AppChrome.Row> rows = AppChrome.providerPicker(providers, 78);
+
+    assertThat(rows).hasSize(10).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(rows.getFirst().text())
+        .isEqualTo("  ╭" + "─".repeat(31) + " Providers " + "─".repeat(32) + "╮");
+    assertThat(rows.get(2).text()).contains("▎ Anthropic", "✓ login", "┃  │");
+    assertThat(rows.get(3).text()).contains("OpenAI", "⚠ OPENAI_API_KEY", "┃  │");
+    assertThat(rows.get(6).text()).contains("✓ ready  ⚠ set the named key first");
+    assertThat(rows.get(7).text()).contains("↑↓ move   Enter switch   Esc close");
+    assertThat(rows.getLast().text()).isEqualTo("  ╰" + "─".repeat(74) + "╯");
+  }
+
+  @Test
   void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
     AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);

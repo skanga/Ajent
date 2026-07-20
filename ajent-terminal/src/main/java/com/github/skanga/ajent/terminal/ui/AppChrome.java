@@ -72,6 +72,13 @@ public final class AppChrome {
     }
   }
 
+  public record PickerRow(String leading, String trailing, boolean selected, boolean active) {
+    public PickerRow {
+      leading = Objects.requireNonNull(leading, "leading");
+      trailing = Objects.requireNonNull(trailing, "trailing");
+    }
+  }
+
   public record Change(String path, boolean created, int added, int removed) {
     public Change {
       path = Objects.requireNonNull(path, "path");
@@ -216,6 +223,42 @@ public final class AppChrome {
         row("╰" + "─".repeat(config.width() - 2) + "╯", Tone.WARNING));
   }
 
+  /** Maya's bottom-inset provider picker, including its list and footer padding. */
+  public static List<Row> providerPicker(List<PickerRow> pickerRows, int width) {
+    return providerPicker(pickerRows, width, pickerRows.size());
+  }
+
+  public static List<Row> providerPicker(
+      List<PickerRow> pickerRows, int width, int viewportRows) {
+    List<PickerRow> values = List.copyOf(Objects.requireNonNull(pickerRows, "pickerRows"));
+    if (width < 52) throw new IllegalArgumentException("provider picker width must be at least 52");
+    if (viewportRows < 1) throw new IllegalArgumentException("picker viewport must be positive");
+    int panelWidth = width - 2;
+    String title = " Providers ";
+    int rules = panelWidth - columns(title) - 2;
+    int leftRule = rules / 2;
+    var rows = new ArrayList<Row>();
+    rows.add(row("  ╭" + "─".repeat(leftRule) + title
+        + "─".repeat(rules - leftRule) + "╮", Tone.ACCENT));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    int visibleRows = Math.min(values.size(), viewportRows);
+    int selected = 0;
+    for (int index = 0; index < values.size(); index++) {
+      if (values.get(index).selected()) selected = index;
+    }
+    int start = Math.max(0, Math.min(selected - visibleRows + 1, values.size() - visibleRows));
+    for (PickerRow value : values.subList(start, start + visibleRows)) {
+      rows.add(pickerBody(pickerDataRow(value, width - 9) + "┃", width,
+          value.selected() ? Tone.ACCENT : Tone.NORMAL));
+    }
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBody("✓ ready  ⚠ set the named key first", width, Tone.MUTED));
+    rows.add(pickerBody("↑↓ move   Enter switch   Esc close", width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(row("  ╰" + "─".repeat(panelWidth - 2) + "╯", Tone.ACCENT));
+    return List.copyOf(rows);
+  }
+
   public static List<Row> changes(List<Change> changes, int width) {
     List<Change> values = List.copyOf(Objects.requireNonNull(changes, "changes"));
     if (values.isEmpty()) return List.of();
@@ -257,6 +300,20 @@ public final class AppChrome {
 
   private static Row permissionBody(String content, int width) {
     return row("│ " + fit(content, width - 4) + " │", Tone.NORMAL);
+  }
+
+  private static Row pickerBody(String content, int width, Tone tone) {
+    return row("  │  " + fit(content, width - 8) + "  │", tone);
+  }
+
+  private static String pickerDataRow(PickerRow row, int width) {
+    String edge = row.selected() || row.active() ? "▎" : " ";
+    int availableLeading = Math.max(1,
+        width - columns(edge) - 1 - columns(row.trailing()) - 2);
+    String leading = truncate(row.leading(), availableLeading);
+    int spaces = Math.max(1, width - columns(edge) - 1 - columns(leading)
+        - columns(row.trailing()) - 1);
+    return fit(edge + " " + leading + " ".repeat(spaces) + row.trailing() + " ", width);
   }
 
   private static String phase(Status config) {
