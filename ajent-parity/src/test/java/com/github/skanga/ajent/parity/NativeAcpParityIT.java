@@ -134,6 +134,58 @@ final class NativeAcpParityIT {
     }
   }
 
+  @Test
+  void allowAlwaysPersistsAcrossTwoToolsLikePinnedExecutable(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-always-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-always-workspace"));
+    var targets = new AtomicReference<List<Path>>();
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<JsonNode>();
+    HttpServer provider = scriptedTwoWriteProvider(targets, requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      List<Path> nativeTargets = List.of(
+          nativeWorkspace.resolve("first.txt"), nativeWorkspace.resolve("second.txt"));
+      targets.set(nativeTargets);
+      Transcript nativeTranscript;
+      try (var agent = AgentProcess.start(command(nativeBinary, nativeWorkspace, endpoint),
+          root.resolve("native-always-home"), false)) {
+        nativeTranscript = exercisePrompt(agent, nativeWorkspace, "allow_always");
+      }
+      List<JsonNode> nativeRequests = List.copyOf(requests);
+      requests.clear();
+      assertThat(nativeTargets.get(0)).hasContent("first\n");
+      assertThat(nativeTargets.get(1)).hasContent("second\n");
+      assertThat(permissionRequestCount(nativeTranscript)).isOne();
+
+      List<Path> javaTargets = List.of(
+          javaWorkspace.resolve("first.txt"), javaWorkspace.resolve("second.txt"));
+      targets.set(javaTargets);
+      Transcript javaTranscript;
+      try (var agent = AgentProcess.start(javaCommand(ajentJar, javaWorkspace, endpoint),
+          root.resolve("java-always-home"), true)) {
+        javaTranscript = exercisePrompt(agent, javaWorkspace, "allow_always");
+      }
+      List<JsonNode> javaRequests = List.copyOf(requests);
+      assertThat(javaTargets.get(0)).hasContent("first\n");
+      assertThat(javaTargets.get(1)).hasContent("second\n");
+      assertThat(permissionRequestCount(javaTranscript)).isOne();
+
+      assertThat(firstDifference(
+          normalizePrompt(nativeTranscript, nativeWorkspace, true),
+          normalizePrompt(javaTranscript, javaWorkspace, false))).isEmpty();
+      assertThat(firstJsonListDifference(
+          normalizeRequests(nativeRequests, nativeWorkspace, true),
+          normalizeRequests(javaRequests, javaWorkspace, false))).isEmpty();
+    } finally {
+      provider.stop(0);
+    }
+  }
+
   private static Transcript exercisePrompt(AgentProcess agent, Path workspace) throws Exception {
     return exercisePrompt(agent, workspace, "allow_once");
   }
@@ -192,6 +244,56 @@ final class NativeAcpParityIT {
       }
     });
     return server;
+  }
+
+  private static HttpServer scriptedTwoWriteProvider(
+      AtomicReference<List<Path>> targets, List<JsonNode> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        JsonNode request = JSON.readTree(exchange.getRequestBody());
+        requests.add(request.deepCopy());
+        int toolResults = 0;
+        for (JsonNode message : request.path("messages")) {
+          if ("tool".equals(message.path("role").asText())) toolResults++;
+        }
+        String body;
+        if (toolResults >= 2) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":\"Both done.\"}}]}\n\n"
+              + "data: {\"usage\":{\"prompt_tokens\":1400,\"completion_tokens\":10},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else {
+          int index = toolResults;
+          String content = index == 0 ? "first\n" : "second\n";
+          String arguments = JSON.writeValueAsString(JSON.createObjectNode()
+              .put("path", targets.get().get(index).toString()).put("content", content));
+          ObjectNode frame = JSON.createObjectNode();
+          ObjectNode choice = frame.putArray("choices").addObject();
+          ObjectNode delta = choice.putObject("delta");
+          delta.put("content", "Writing file " + (index + 1) + ". ");
+          ObjectNode call = delta.putArray("tool_calls").addObject();
+          call.put("index", 0).put("id", "tc_write_" + index).put("type", "function");
+          call.putObject("function").put("name", "write").put("arguments", arguments);
+          body = "data: " + JSON.writeValueAsString(frame) + "\n\n"
+              + "data: {\"usage\":{\"prompt_tokens\":" + (1200 + index * 100)
+              + ",\"completion_tokens\":40},"
+              + "\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
+  private static long permissionRequestCount(Transcript transcript) {
+    return transcript.exchanges().stream().flatMap(List::stream)
+        .filter(frame -> "session/request_permission".equals(frame.path("method").asText()))
+        .count();
   }
 
   private static Transcript exercise(AgentProcess agent, Path workspace) throws Exception {

@@ -66,9 +66,9 @@
       "cases": ["openai", "groq", "openrouter", "together", "cerebras", "raw host:port", "request body", "fragmented tool calls", "tool-result continuation", "weak-model salvage"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeAcpParityIT",
-        "mvn -q verify -Pcharacterization: exact semantic comparison of both OpenAI-compatible request bodies and their streamed tool continuation against the pinned Windows executable"
+        "mvn -q verify -Pcharacterization: exact semantic comparison of complete OpenAI-compatible request sequences and their streamed tool continuations against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["raw host:port", "initial request body", "provider-facing 22-tool subset and recall-bias order", "streamed text/tool/usage", "tool-result continuation request body", "stop reason"],
+      "coveredExecutableCases": ["raw host:port", "initial request body", "provider-facing 22-tool subset and recall-bias order", "streamed text/tool/usage", "accepted and rejected tool-result continuation request bodies", "two sequential tool continuations", "stop reason"],
       "remainingExecutableCases": ["hosted preset endpoints and headers", "fragmented multi-tool calls", "weak-model salvage", "HTTP errors and retries", "cancellation"]
     },
     {
@@ -102,10 +102,10 @@
       "cases": ["initialize", "authenticate", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "session/cancel", "session/update", "session/request_permission", "errors", "concurrency"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeAcpParityIT",
-        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC exchange sequences for the offline ACP lifecycle and loopback-provider allow-once/reject-once prompt/tool/permission/continuation turns against the pinned Windows executable"
+        "mvn -q verify -Pcharacterization: exact semantic JSON-RPC exchange sequences for the offline ACP lifecycle and loopback-provider allow-once/reject-once/allow-always prompt/tool/permission/continuation turns against the pinned Windows executable"
       ],
-      "coveredExecutableCases": ["initialize", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "streamed text/tool/usage session/update", "session/request_permission allow-once", "session/request_permission reject-once", "rejected non-execution", "tool-result continuation", "method-not-found error"],
-      "remainingExecutableCases": ["authenticate with installed credentials", "session/cancel", "permission allow-always", "concurrent prompts", "client filesystem and terminal callbacks"]
+      "coveredExecutableCases": ["initialize", "logout", "session/new", "session/load", "session/resume", "session/list", "session/close", "session/delete", "session/set_mode", "session/set_config_option", "session/prompt", "streamed text/tool/usage session/update", "session/request_permission allow-once", "session/request_permission reject-once", "session/request_permission allow-always", "allow-always session grant reuse", "rejected non-execution", "two sequential tool continuations", "tool-result continuation", "method-not-found error"],
+      "remainingExecutableCases": ["authenticate with installed credentials", "session/cancel", "concurrent prompts", "client filesystem and terminal callbacks"]
     },
     {
       "id": "mcp-server-client",

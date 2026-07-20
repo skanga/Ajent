@@ -26,10 +26,11 @@ custom host. They use `/v1/chat/completions`, incremental SSE, OpenAI-style
 tool calls, and `/v1/models` where supported.
 
 The executable characterization gate drives AgenTTY and Ajent through the same
-loopback OpenAI-compatible turn and compares both complete request bodies: the
-initial prompt/tool request and the tool-result continuation. This covers the
-native 22-tool provider subset and recall-biased order, system/user messages,
-output controls, tool-call replay, canonical argument encoding, and usage/stop
+loopback OpenAI-compatible turns and compares their complete request sequences,
+including accepted, rejected, and two sequential tool-result continuations.
+This covers the native 22-tool provider subset and recall-biased order,
+system/user messages, output controls, tool-call replay, canonical argument
+encoding, and usage/stop
 stream handling without sending traffic to an external provider.
 
 Ajent does not currently implement `/v1/responses`. That is an optional future
