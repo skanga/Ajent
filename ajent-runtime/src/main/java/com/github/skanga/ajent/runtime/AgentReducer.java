@@ -2,8 +2,10 @@ package com.github.skanga.ajent.runtime;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.skanga.ajent.core.persistence.ThreadStore;
 import com.github.skanga.ajent.domain.ActiveTurn;
 import com.github.skanga.ajent.domain.Attachment;
+import com.github.skanga.ajent.domain.AttachmentText;
 import com.github.skanga.ajent.domain.CancellationSignal;
 import com.github.skanga.ajent.domain.CompactionRecord;
 import com.github.skanga.ajent.domain.CheckpointId;
@@ -253,7 +255,14 @@ public final class AgentReducer {
     messages.add(message(Role.USER, submit.text(), submit.images(), submit.attachments(), List.of(),
         now, checkpoint));
     messages.add(message(Role.ASSISTANT, "", List.of(), List.of(), now));
-    var thread = withMessages(state.thread(), messages, now);
+    var current = state.thread();
+    if (current.title().isEmpty()) {
+      current = new com.github.skanga.ajent.domain.Thread(current.id(),
+          ThreadStore.deriveTitleFromFirstMessage(AttachmentText.display(
+              submit.text(), submit.attachments())), current.messages(), current.createdAt(),
+          current.updatedAt(), current.compactions());
+    }
+    var thread = withMessages(current, messages, now);
     var cancellation = new CancellationSignal();
     SessionPhase phase = SessionPhase.start(new SessionPhase.Idle(),
         ActiveTurn.start(cancellation, context.nanoClock().getAsLong()));

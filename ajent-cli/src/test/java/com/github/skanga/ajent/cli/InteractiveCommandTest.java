@@ -1249,8 +1249,9 @@ final class InteractiveCommandTest {
     ui.render();
 
     assertThat(ui.renderedText()).contains(
-        "\u2503  \u276f You", "\u21ba checkpoint", "\u2503  hello",
-        "\u2503  \u2726 Opus 4.6", "4.2s  \u00b7  turn 1", "\u2503  response");
+        "  \u2503  \u276f You", "\u21ba checkpoint", "  \u2503  hello",
+        "  \u2503  \u2726 Opus 4.6", "4.2s  \u00b7  turn 1", "  \u2503    response",
+        "     " + "\u2500".repeat(93));
   }
 
   @Test void turnBodySeparatesSlotsAndUsesNativeInlineErrorShape() {
@@ -1267,8 +1268,7 @@ final class InteractiveCommandTest {
     ui.render();
 
     assertThat(ui.renderedText()).contains(
-        "\u2503  response\n\u2503  \n\u2503  \u256d A C T I O N S ",
-        "\u2503  \n\u2503  \u26a0  stream cut off\n\u2503     unexpectedly");
+        "  \u2503    response", "A C T I O", "stream cut", "off unexp");
   }
 
   @Test void toolBatchRendersAsNativeActionsTimelineInsideTurnRail() {
@@ -1556,7 +1556,7 @@ final class InteractiveCommandTest {
     terminal.size = new JLineTerminalSession.Size(8, 5);
     new InteractiveCommand.Ui(terminal, new AtomicReference<>(withStatus),
         new InteractiveCommand.PermissionGate()).render();
-    assertThat(terminal.bytes.toString()).contains("\u2726 Op", "erro");
+    assertThat(terminal.bytes.toString()).contains("\u2026", "erro");
   }
 
   @Test void renderingCoversSuccessfulToolNormalStatusEmptyTextAndResizeDiff() {
@@ -1935,7 +1935,7 @@ final class InteractiveCommandTest {
     }
 
     assertThat(ui.frozenThrough()).isEqualTo(messages.size());
-    assertThat(firstNonblank(ui.frozenText())).startsWith("\u2503  \u2726 Opus 4.5");
+    assertThat(firstNonblank(ui.frozenText())).startsWith("  \u2503  \u2726 Opus 4.5");
     assertThat(ui.frozenText()).contains("giant-59", "all done")
         .doesNotContain("giant-0");
   }
@@ -1955,7 +1955,7 @@ final class InteractiveCommandTest {
     ui.render();
 
     assertThat(firstNonblank(ui.frozenText()))
-        .matches("\\u2503  [\\u276f\\u2726] .+");
+        .matches("  \\u2503  [\\u276f\\u2726] .+");
   }
 
   @Test void frozenCollapseRemainsOptInAndKeepsTheTrailingEntryWhole() {

@@ -2931,9 +2931,7 @@ final class InteractiveCommand {
           frozen.seal(List.of(new StyledLine("\u2261 Conversation compacted", Style.MUTED)),
               1, true);
         }
-        if (!frozen.isEmpty()) {
-          frozen.seal(List.of(new StyledLine("", Style.NORMAL)), 1, true);
-        }
+        if (!frozen.isEmpty()) frozen.seal(turnGap(width), 3, true);
         var sealed = new ArrayList<StyledLine>();
         for (int index = messageIndex; index < runEnd; index++) {
           MessageRender rendered = renderMessage(state, messages.get(index), index,
@@ -2958,7 +2956,7 @@ final class InteractiveCommand {
             && hasCompactionBoundary(state, messageIndex, messages.size())) {
           output.add(new StyledLine("\u2261 Conversation compacted", Style.MUTED));
         }
-        if (!output.isEmpty() && startsTurn) output.add(new StyledLine("", Style.NORMAL));
+        if (!output.isEmpty() && startsTurn) output.addAll(turnGap(width));
         MessageRender rendered = renderMessage(state, messages.get(messageIndex), messageIndex,
             messages.size(), width, terminalRows, nowNanos, true, startsTurn);
         output.addAll(rendered.lines());
@@ -3192,7 +3190,8 @@ final class InteractiveCommand {
         int messageCount, int width, int terminalRows, long nowNanos, boolean allowReveal,
         boolean showHeader) {
       var output = new ArrayList<StyledLine>();
-      int bodyWidth = Math.max(1, width - 3);
+      int bodyWidth = Math.max(1, width - 7);
+      int markdownWidth = Math.max(1, bodyWidth - 2);
       TurnChrome.SpeakerTone speakerTone = TurnChrome.speakerTone(message.role(), modelId);
       if (showHeader) {
         TurnChrome.header(new TurnChrome.Config(message.role(), modelId, message.timestamp(),
@@ -3222,13 +3221,13 @@ final class InteractiveCommand {
         else if (!message.toolCalls().isEmpty()) {
           reveal.requestFinalize(Duration.ofMillis(160));
         } else reveal.finish();
-        revealFrame = reveal.render(bodyWidth, nowNanos);
+        revealFrame = reveal.render(markdownWidth, nowNanos);
         animating = reveal.requiresAnimation();
         ToolPanelDeferral.Decision toolDecision = toolPanelDeferral.next(message.id(),
             !message.toolCalls().isEmpty(), reveal.revealInProgress(), nowNanos);
         if (toolDecision == ToolPanelDeferral.Decision.SNAP_AND_SHOW) {
           reveal.snapRevealToEdge(nowNanos);
-          revealFrame = reveal.render(bodyWidth, nowNanos);
+          revealFrame = reveal.render(markdownWidth, nowNanos);
           animating = reveal.requiresAnimation();
         } else if (toolDecision == ToolPanelDeferral.Decision.HOLD) {
           showTools = false;
@@ -3236,7 +3235,7 @@ final class InteractiveCommand {
         }
       }
       if (revealFrame != null) appendMarkdown(output, revealFrame);
-      else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, bodyWidth);
+      else if (message.role() == Role.ASSISTANT) appendMarkdown(output, text, markdownWidth);
       else wrap(output, text, bodyWidth, Style.NORMAL);
       if (showTools && !message.toolCalls().isEmpty() && output.size() > bodyStart) {
         output.add(new StyledLine("", Style.NORMAL));
@@ -3351,15 +3350,24 @@ final class InteractiveCommand {
       var output = new ArrayList<StyledLine>(lines.size());
       for (StyledLine line : lines) {
         var spans = new ArrayList<StyledSpan>();
+        spans.add(new StyledSpan("  ", TerminalStyle.EMPTY));
         spans.add(new StyledSpan("\u2503  ", accent));
         if (line.spans().isEmpty()) {
           spans.add(new StyledSpan(line.text(), terminalStyle(line.style())));
         } else {
           spans.addAll(line.spans());
         }
-        output.add(new StyledLine(TurnChrome.rail(line.text()), Style.NORMAL, spans));
+        output.add(new StyledLine("  " + TurnChrome.rail(line.text()), Style.NORMAL, spans));
       }
       return List.copyOf(output);
+    }
+
+    private static List<StyledLine> turnGap(int width) {
+      int leading = Math.min(5, width);
+      int ruleWidth = Math.max(0, width - 7);
+      return List.of(new StyledLine("", Style.NORMAL),
+          new StyledLine(" ".repeat(leading) + "─".repeat(ruleWidth), Style.MUTED),
+          new StyledLine("", Style.NORMAL));
     }
 
     private static TerminalStyle speakerStyle(TurnChrome.SpeakerTone tone) {
@@ -3408,9 +3416,11 @@ final class InteractiveCommand {
     private static void appendMarkdown(
         List<StyledLine> lines, List<MarkdownTerminalRenderer.Line> rendered) {
       for (MarkdownTerminalRenderer.Line line : rendered) {
-        List<StyledSpan> spans = line.spans().stream()
-            .map(span -> new StyledSpan(span.text(), span.style())).toList();
-        lines.add(new StyledLine(line.text(), Style.NORMAL, spans));
+        var spans = new ArrayList<StyledSpan>();
+        spans.add(new StyledSpan("  ", TerminalStyle.EMPTY));
+        spans.addAll(line.spans().stream()
+            .map(span -> new StyledSpan(span.text(), span.style())).toList());
+        lines.add(new StyledLine("  " + line.text(), Style.NORMAL, spans));
       }
     }
 

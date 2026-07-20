@@ -108,9 +108,32 @@ final class AgentReducerTest {
     assertThat(step.state().thread().messages()).extracting(message -> message.role())
         .containsExactly(Role.USER, Role.ASSISTANT);
     assertThat(step.state().thread().messages().getFirst().text()).isEqualTo("hello");
+    assertThat(step.state().thread().title()).isEqualTo("Test");
     assertThat(step.effects()).satisfiesExactly(
         effect -> assertThat(effect).isInstanceOf(RuntimeEffect.Persist.class),
         effect -> assertThat(effect).isInstanceOf(RuntimeEffect.StartStream.class));
+  }
+
+  @Test void firstSubmitDerivesTheNativeDisplayTitleOnceIncludingAttachmentChips() {
+    var attachment = new Attachment(Attachment.Kind.FILE_REF, new byte[0],
+        "src/Main.java", "", "", 0, 0, 0);
+    String text = "inspect\n" + AttachmentText.placeholder(0);
+    Thread base = thread();
+    Thread untitled = new Thread(base.id(), "", base.messages(), base.createdAt(),
+        base.updatedAt(), base.compactions());
+    AgentReducer.Step first = reducer(PermissionVerdict.ALLOW).update(
+        AgentState.initial(untitled),
+        new RuntimeMessage.Submit(text, List.of(), List.of(attachment)));
+
+    assertThat(first.state().thread().title()).isEqualTo("inspect [@Main.java]");
+
+    AgentState idle = new AgentState(first.state().thread(), new SessionPhase.Idle(), 0,
+        first.state().turnCounter(), first.state().tokensIn(), first.state().tokensOut(),
+        first.state().lastTickNanos(), "", Optional.empty(), List.of(),
+        first.state().compaction(), false, Set.of(), Set.of());
+    AgentReducer.Step second = reducer(PermissionVerdict.ALLOW).update(idle,
+        new RuntimeMessage.Submit("replacement title", List.of()));
+    assertThat(second.state().thread().title()).isEqualTo("inspect [@Main.java]");
   }
 
   @Test void checkpointedSubmitUsesOneIdentityForTheUserTurnAndSnapshot() {

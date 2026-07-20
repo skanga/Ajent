@@ -21,7 +21,7 @@ final class TurnChromeTest {
     assertThat(user.label()).isEqualTo("You");
     assertThat(user.tone()).isEqualTo(TurnChrome.SpeakerTone.USER);
     assertThat(user.meta()).isEqualTo("12:34  ·  turn 1  ·  ↺ checkpoint");
-    assertThat(user.text()).startsWith("❯ You").endsWith(user.meta()).hasSize(72);
+    assertThat(user.text()).startsWith("❯ You").endsWith(user.meta() + " ").hasSize(72);
 
     TurnChrome.Header assistant = TurnChrome.header(new TurnChrome.Config(
         Role.ASSISTANT, "claude-opus-4-6", Instant.parse("2026-07-19T12:34:00Z"),
@@ -30,7 +30,7 @@ final class TurnChromeTest {
     assertThat(assistant.label()).isEqualTo("Opus 4.6");
     assertThat(assistant.tone()).isEqualTo(TurnChrome.SpeakerTone.OPUS);
     assertThat(assistant.meta()).isEqualTo("12:34  ·  4.2s  ·  turn 1");
-    assertThat(assistant.text()).startsWith("✦ Opus 4.6").endsWith(assistant.meta());
+    assertThat(assistant.text()).startsWith("✦ Opus 4.6").endsWith(assistant.meta() + " ");
   }
 
   @Test

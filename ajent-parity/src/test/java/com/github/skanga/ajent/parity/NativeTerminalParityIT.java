@@ -2,9 +2,11 @@ package com.github.skanga.ajent.parity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sun.net.httpserver.HttpServer;
 import com.pty4j.PtyProcess;
 import com.pty4j.PtyProcessBuilder;
 import java.io.ByteArrayOutputStream;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -183,11 +185,65 @@ final class NativeTerminalParityIT {
         .containsExactlyElementsOf(stableRegion(nativeViewport.lines()));
   }
 
+  @Test
+  void settledStreamedProviderTurnMatchesTheNativeViewport(@TempDir Path root)
+      throws Exception {
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    HttpServer provider = streamedTextProvider(requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      Path repository = repositoryRoot();
+      Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+      Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+      Path javaHome = Files.createDirectories(root.resolve("java-home"));
+      Path nativeLauncher = launcher(root.resolve("native-streamed-turn.cmd"),
+          List.of(nativeBinary.toString()));
+
+      Capture nativeCapture = capture(
+          List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+          Files.createDirectories(root.resolve("native-workspace")), nativeHome,
+          endpoint, "parity-model", "say hello\r", "terminal parity response");
+      Capture javaCapture = capturePiped(List.of(javaExecutable(),
+              "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+              "-Dajent.terminal.fixedSize=" + COLUMNS + "x" + ROWS,
+              "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+          Files.createDirectories(root.resolve("java-workspace")), javaHome,
+          endpoint, "parity-model", "say hello\r", "terminal parity response");
+
+      assertCleanExit(nativeCapture, "native");
+      assertCleanExit(javaCapture, "Java");
+      assertThat(requests).hasSize(2).allMatch(request -> request.contains("say hello"));
+      var nativeViewport = new AnsiViewport(COLUMNS, ROWS);
+      nativeViewport.feed(nativeCapture.frame());
+      var javaViewport = new AnsiViewport(COLUMNS, ROWS);
+      javaViewport.feed(javaCapture.frame());
+      assertThat(nativeViewport.lines()).anyMatch(
+          line -> line.contains("terminal parity response"));
+      assertThat(javaViewport.lines()).anyMatch(
+          line -> line.contains("terminal parity response"));
+      assertThat(regionFrom(javaViewport.lines(), "say hello")).as(
+              "native viewport:%n%s%nJava viewport:%n%s",
+              numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+          .containsExactlyElementsOf(regionFrom(nativeViewport.lines(), "say hello"));
+    } finally {
+      provider.stop(0);
+    }
+  }
+
   private static Capture capture(List<String> executable, Path workspace, Path home,
                                  String interaction, String expected)
       throws Exception {
+    return capture(executable, workspace, home, "ollama", "qwen2.5-coder:7b",
+        interaction, expected);
+  }
+
+  private static Capture capture(List<String> executable, Path workspace, Path home,
+                                 String provider, String model,
+                                 String interaction, String expected)
+      throws Exception {
     var command = new ArrayList<>(executable);
-    command.addAll(List.of("--provider", "ollama", "--model", "qwen2.5-coder:7b",
+    command.addAll(List.of("--provider", provider, "--model", model,
         "--workspace", workspace.toString()));
     Map<String, String> environment = new HashMap<>(System.getenv());
     environment.put("APPDATA", home.toString());
@@ -250,8 +306,16 @@ final class NativeTerminalParityIT {
   private static Capture capturePiped(List<String> executable, Path workspace, Path home,
                                       String interaction, String expected)
       throws Exception {
+    return capturePiped(executable, workspace, home, "ollama", "qwen2.5-coder:7b",
+        interaction, expected);
+  }
+
+  private static Capture capturePiped(List<String> executable, Path workspace, Path home,
+                                      String provider, String model,
+                                      String interaction, String expected)
+      throws Exception {
     var command = new ArrayList<>(executable);
-    command.addAll(List.of("--provider", "ollama", "--model", "qwen2.5-coder:7b",
+    command.addAll(List.of("--provider", provider, "--model", model,
         "--workspace", workspace.toString()));
     ProcessBuilder builder = new ProcessBuilder(command).directory(workspace.toFile())
         .redirectErrorStream(true);
@@ -368,6 +432,29 @@ final class NativeTerminalParityIT {
     assertThat(capture.output()).doesNotContain("failed to initialize terminal");
   }
 
+  private static HttpServer streamedTextProvider(List<String> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        requests.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String body = "data: {\"choices\":[{\"delta\":{\"content\":"
+            + "\"terminal parity \"}}]}\n\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"response\"}}]}\n\n"
+            + "data: {\"usage\":{\"prompt_tokens\":21,\"completion_tokens\":3},"
+            + "\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+            + "data: [DONE]\n\n";
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, 0);
+        for (int offset = 0; offset < bytes.length; offset += 11) {
+          exchange.getResponseBody().write(bytes, offset, Math.min(11, bytes.length - offset));
+          exchange.getResponseBody().flush();
+        }
+      }
+    });
+    return server;
+  }
+
   private static Path repositoryRoot() {
     Path current = Path.of("").toAbsolutePath().normalize();
     while (current != null) {
@@ -414,6 +501,17 @@ final class NativeTerminalParityIT {
 
   private static List<String> linesBeforeTagline(List<String> lines) {
     return lines.subList(0, taglineRow(lines));
+  }
+
+  private static List<String> regionFrom(List<String> lines, String anchor) {
+    int start = 0;
+    while (start < lines.size() && !lines.get(start).contains(anchor)) start++;
+    if (start == lines.size()) {
+      throw new AssertionError("anchor missing from viewport: " + anchor + "\n" + numbered(lines));
+    }
+    int end = lines.size();
+    while (end > start && lines.get(end - 1).isBlank()) end--;
+    return lines.subList(start, end);
   }
 
   private static int taglineRow(List<String> lines) {

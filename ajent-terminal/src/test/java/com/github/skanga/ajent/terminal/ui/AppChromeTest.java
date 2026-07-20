@@ -75,6 +75,10 @@ final class AppChromeTest {
         .contains("● Ollama · CTX", "░".repeat(10), "———%")
         .hasSize(78);
     assertThat(status.getLast().text()).isEqualTo("─".repeat(78));
+
+    List<AppChrome.Row> titled = AppChrome.statusPanel(new AppChrome.Status(
+        "say hello", "OpenAI", AppChrome.Phase.IDLE, "", 0, 128_000, 0, "", 78));
+    assertThat(titled.get(1).text()).startsWith(" ▎ say hello   ·   ▌ ● Ready");
   }
 
   @Test

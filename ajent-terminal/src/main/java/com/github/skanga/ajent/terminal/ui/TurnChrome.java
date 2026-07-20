@@ -110,8 +110,8 @@ public final class TurnChrome {
 
   private static String headerLine(String left, String meta, int width) {
     int leftWidth = columns(left), metaWidth = columns(meta);
-    if (leftWidth + metaWidth <= width) {
-      return left + " ".repeat(width - leftWidth - metaWidth) + meta;
+    if (leftWidth + metaWidth < width) {
+      return left + " ".repeat(width - leftWidth - metaWidth - 1) + meta + " ";
     }
     if (leftWidth >= width) return truncate(left, width);
     int remaining = width - leftWidth;

@@ -36,6 +36,7 @@ import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -131,9 +132,14 @@ public final class ThreadStore {
   }
 
   public String titleFromFirstMessage(String text) {
-    String title = text.replace('\n', ' ').replace('\r', ' ');
-    byte[] bytes = title.getBytes(StandardCharsets.UTF_8);
-    if (bytes.length > 60) title = utf8Prefix(title, 57) + "...";
+    return deriveTitleFromFirstMessage(text);
+  }
+
+  public static String deriveTitleFromFirstMessage(String text) {
+    String title = Objects.requireNonNull(text, "text").replace('\n', ' ').replace('\r', ' ');
+    if (title.getBytes(StandardCharsets.UTF_8).length > 60) {
+      title = utf8Prefix(title, 57) + "...";
+    }
     return title.isEmpty() ? "New thread" : title;
   }
 

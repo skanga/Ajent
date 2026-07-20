@@ -205,7 +205,7 @@ final class RevealScrollbackTest {
     harness.settle();
     harness.assertNoDuplicates();
     assertThat(harness.ui.renderedText()).as("logical failed tool output at %dx%d",
-        shape[0], shape[1]).contains("fatal: pathspec did not match any files");
+        shape[0], shape[1]).contains("git commit failed while adding paths");
   }
 
   private static void forEachShape(boolean includeTall, java.util.function.Consumer<int[]> scenario) {

@@ -155,17 +155,17 @@
     },
     {
       "id": "terminal",
-      "status": "native-executable-stable-viewport-green-source-oracles-green",
+      "status": "native-executable-scripted-turn-green-source-oracles-green",
       "sources": ["agentty/src/runtime/view", "agentty/maya", "agentty/tests/scrollback_oracle_test.cpp"],
       "cases": ["welcome", "composer", "streaming markdown", "tool cards", "permissions", "pickers", "diff review", "thread switch", "resize", "cancel", "shutdown", "append-only scrollback"],
       "javaEvidence": [
         "com.github.skanga.ajent.parity.NativeTerminalParityIT",
         "com.github.skanga.ajent.terminal.JLineTerminalSessionTest",
         "translated terminal oracle suites enumerated in test-manifest.json",
-        "mvn -q verify -Pcharacterization: launches the pinned Windows executable under a real 80x24 pseudo-console and shaded Ajent through a deterministic 80x24 stream terminal in isolated fresh homes, decodes both ANSI streams through the same Unicode-width viewport emulator, compares the tagline-anchored stable startup region cell-for-cell, scripts cursor editing, Shift+Enter multiline input, Unicode-width soft wrapping and Backspace, verifies nonblank wordmark regions, and delivers bounded Ctrl-C shutdown"
+        "mvn -q verify -Pcharacterization: launches the pinned Windows executable under a real 80x24 pseudo-console and shaded Ajent through a deterministic 80x24 stream terminal in isolated fresh homes, decodes both ANSI streams through the same Unicode-width viewport emulator, compares the tagline-anchored stable startup region cell-for-cell, scripts cursor editing, Shift+Enter multiline input, Unicode-width soft wrapping and Backspace, drives both clients through a fragmented loopback OpenAI-compatible SSE turn, compares the settled turn and bottom chrome cell-for-cell, verifies nonblank wordmark regions, and delivers bounded Ctrl-C shutdown"
       ],
-      "coveredExecutableCases": ["real Windows pseudo-console startup", "deterministic Java stream-terminal startup", "80x24 geometry", "fresh isolated home and workspace", "Unicode-width ANSI viewport decoding", "tagline-anchored stable startup region exact cell comparison", "visible welcome tagline", "configured local provider/model badge", "six-row bordered composer", "single-line cursor editing", "Shift+Enter multiline continuation rail and line-count caption", "wide-Unicode soft wrapping and Backspace", "three-row provider/context status panel", "Ctrl-C shutdown"],
-      "remainingExecutableCases": ["time-dependent animated wordmark frame comparison", "queued and attachment composer interactions", "streamed provider turn", "tool cards and permissions", "pickers", "diff review", "thread switch", "resize", "append-only scrollback"]
+      "coveredExecutableCases": ["real Windows pseudo-console startup", "deterministic Java stream-terminal startup", "80x24 geometry", "fresh isolated home and workspace", "Unicode-width ANSI viewport decoding", "tagline-anchored stable startup region exact cell comparison", "visible welcome tagline", "configured local provider/model badge", "six-row bordered composer", "single-line cursor editing", "Shift+Enter multiline continuation rail and line-count caption", "wide-Unicode soft wrapping and Backspace", "fragmented loopback OpenAI-compatible SSE provider turn", "settled user and assistant turn exact cell comparison", "conversation insets, rails, separator, header alignment, and assistant Markdown padding", "first-message title derivation and status title chip", "three-row provider/context status panel", "Ctrl-C shutdown"],
+      "remainingExecutableCases": ["time-dependent animated wordmark frame comparison", "queued and attachment composer interactions", "tool cards and permissions", "pickers", "diff review", "thread switch", "resize", "append-only scrollback"]
     }
   ]
 }

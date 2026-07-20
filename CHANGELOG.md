@@ -74,11 +74,16 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched executable composer editing for cursor insertion, Shift+Enter
   continuation rows, multiline border captions, wide-Unicode soft wrapping,
   Backspace, and Maya's pre-wrap two-logical-row height floor.
+- Matched a complete settled provider turn cell-for-cell against AgenTTY,
+  including fragmented OpenAI-compatible SSE, conversation insets and rails,
+  turn separators, header alignment, assistant Markdown padding, first-message
+  title derivation, the title-chip edge, and bottom chrome placement.
 
 ### Known limitations
 
-- Animated wordmark-frame and scripted live terminal differentials remain under
-  parity work; the tagline-anchored stable startup and composer regions now
+- Animated wordmark-frame and richer tool, permission, picker, review, thread,
+  resize, and scrollback terminal differentials remain under parity work;
+  startup, composer interactions, and a settled streamed provider turn now
   compare cell-for-cell.
 - OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's
   OpenAI-compatible transport uses Chat Completions and API keys.

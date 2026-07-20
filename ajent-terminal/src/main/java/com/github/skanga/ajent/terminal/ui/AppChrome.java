@@ -244,7 +244,7 @@ public final class AppChrome {
     if (config.contextMax() > 0) right += " · "
         + compactNativeContextGauge(config.tokensIn(), config.contextMax());
     String left = "▌ " + phaseSlot;
-    String title = config.title().isBlank() ? "" : config.title() + "   ·   ";
+    String title = config.title().isBlank() ? "" : "▎ " + config.title() + "   ·   ";
     int spaces = Math.max(1, config.width() - columns(title) - columns(left) - columns(right) - 2);
     return fit(" " + title + left + " ".repeat(spaces) + right + " ", config.width());
   }
