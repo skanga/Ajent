@@ -261,7 +261,7 @@ final class NativeTerminalParityIT {
 
       assertCleanExit(nativeCapture.exitCode(), nativeCapture.output(), "native");
       assertCleanExit(javaCapture.exitCode(), javaCapture.output(), "Java");
-      assertThat(requests).hasSize(6);
+      assertThat(requests).hasSize(10);
 
       assertMatchingRegion(nativeCapture.permissionFrame(), javaCapture.permissionFrame(),
           "E X E C U T E 1", "permission viewport");
@@ -288,6 +288,11 @@ final class NativeTerminalParityIT {
           "Run Code Block", "code-block picker viewport");
       assertMatchingRegion(nativeCapture.codeResultFrame(), javaCapture.codeResultFrame(),
           "Run Result", "code-block result viewport");
+      assertViewportContains(nativeCapture.diffPendingFrame(), "no pending changes to review");
+      assertViewportContains(javaCapture.diffPendingFrame(), "Review Changes");
+      assertViewportContains(javaCapture.diffPendingFrame(), "[ pending ]");
+      assertViewportContains(javaCapture.diffAcceptedFrame(), "[✓ accepted]");
+      assertViewportContains(javaCapture.diffRejectedFrame(), "[✗ rejected]");
     } finally {
       provider.stop(0);
     }
@@ -547,6 +552,41 @@ final class NativeTerminalParityIT {
     process.getOutputStream().write(closePicker);
     process.getOutputStream().flush();
     Thread.sleep(400);
+    process.getOutputStream().write("make edit\r".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "review.txt", Duration.ofSeconds(8));
+    process.getOutputStream().write('y');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "edit parity complete", Duration.ofSeconds(8));
+    process.getOutputStream().write(18); // Ctrl+R
+    process.getOutputStream().flush();
+    String diffPendingFrame;
+    String diffAcceptedFrame;
+    String diffRejectedFrame;
+    if (enhancedControlC) {
+      awaitViewportText(output, error, "Review Changes", Duration.ofSeconds(5));
+      Thread.sleep(250);
+      diffPendingFrame = combined(output, error);
+      process.getOutputStream().write('y');
+      process.getOutputStream().flush();
+      awaitViewportText(output, error, "[✓ accepted]", Duration.ofSeconds(5));
+      Thread.sleep(250);
+      diffAcceptedFrame = combined(output, error);
+      process.getOutputStream().write('n');
+      process.getOutputStream().flush();
+      awaitViewportText(output, error, "[✗ rejected]", Duration.ofSeconds(5));
+      Thread.sleep(250);
+      diffRejectedFrame = combined(output, error);
+      process.getOutputStream().write(closePicker);
+      process.getOutputStream().flush();
+      Thread.sleep(400);
+    } else {
+      awaitViewportText(output, error, "no pending changes to review", Duration.ofSeconds(5));
+      Thread.sleep(250);
+      diffPendingFrame = combined(output, error);
+      diffAcceptedFrame = diffPendingFrame;
+      diffRejectedFrame = diffPendingFrame;
+    }
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -566,7 +606,8 @@ final class NativeTerminalParityIT {
     if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
-        threadFrame, modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame);
+        threadFrame, modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame,
+        diffPendingFrame, diffAcceptedFrame, diffRejectedFrame);
   }
 
   private static void seedPickerWorkspace(Path workspace) throws java.io.IOException {
@@ -730,7 +771,20 @@ final class NativeTerminalParityIT {
             StandardCharsets.UTF_8);
         requests.add(request);
         String body;
-        if (request.contains("show code")) {
+        if (request.contains("tc_write_review") && request.contains("\"role\":\"tool\"")) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":"
+              + "\"edit parity complete\"}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else if (request.contains("make edit")) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":\"Creating review file. \","
+              + "\"tool_calls\":[{\"index\":0,\"id\":\"tc_write_review\","
+              + "\"type\":\"function\",\"function\":{\"name\":\"write\","
+              + "\"arguments\":\"{\\\"path\\\":\\\"review.txt\\\","
+              + "\\\"content\\\":\\\"review parity\\\\n\\\"}\"}}]}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else if (request.contains("show code")) {
           body = "data: {\"choices\":[{\"delta\":{\"content\":"
               + "\"```powershell\\n[Console]::Write('code-parity')\\n```\"}}]}\n\n"
               + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
@@ -885,5 +939,7 @@ final class NativeTerminalParityIT {
                                String movedPickerFrame, String commandFrame,
                                String filteredCommandFrame, String threadFrame,
                                String modelFrame, String mentionFrame, String symbolFrame,
-                               String codeBlockFrame, String codeResultFrame) {}
+                               String codeBlockFrame, String codeResultFrame,
+                               String diffPendingFrame, String diffAcceptedFrame,
+                               String diffRejectedFrame) {}
 }

@@ -192,6 +192,18 @@ card, including command, exit/line/UTF-8-byte status, output, Maya heavy-thumb
 scrollbar gutter, attach/copy/discard hints, and border. Code-block picker and
 run-result rendering are executable-proven.
 
+Ctrl+R now renders the complete source-defined Review Changes panel in the
+production Java client: full-width round border and title, file path and
+addition/removal counters, two-axis file/hunk cursor, every structured hunk,
+nested file-titled numbered diff views, pending/accepted/rejected tags, and the
+exact arrow/Y/N/A/X/Escape footer. The executable characterization drives a
+real permissioned `write`, verifies Ajent's pending → accepted → rejected
+workflow, and also pins an upstream defect instead of hiding it: AgenTTY's
+checked-in runtime only reads and clears `pending_changes` and never appends a
+tool result, so the pinned 0.2.8 binary answers Ctrl+R with “no pending changes
+to review.” Reducer, renderer, narrow-width, bulk-decision, and live key-routing
+tests cover the intended workflow completely.
+
 `TurnChromeTest` and live `InteractiveCommandTest` coverage now pin the native
 turn shell independently of the broader renderer: `❯ You` and model-aware
 `✦` identity, native per-speaker rail colors, muted metadata, local time,

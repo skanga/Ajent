@@ -952,6 +952,7 @@ final class InteractiveCommandTest {
   @Test void liveDiffReviewRoutesExactNativeHunkAndBulkKeys() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 24);
     var ui = new InteractiveCommand.Ui(terminal, state,
         new InteractiveCommand.PermissionGate());
     var agent = new FakeAgent(state);
@@ -971,14 +972,15 @@ final class InteractiveCommandTest {
         .isEqualTo(com.github.skanga.ajent.terminal.ui.DiffReview.Status.ACCEPTED);
     assertThat(agent.changes.get(1).hunks().getFirst().status())
         .isEqualTo(com.github.skanga.ajent.terminal.ui.DiffReview.Status.REJECTED);
+    assertThat(terminal.bytes.toString()).contains("@@ -1,0 +1,0");
+    terminal.size = new JLineTerminalSession.Size(40, 24);
+    ui.render();
+    terminal.size = new JLineTerminalSession.Size(80, 24);
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
-    assertThat(terminal.bytes.toString()).contains(
-        "hanges  a.txt", "[y] accept", "[n] reject", "@@ -1,0 +1,0 @@");
 
     selectCommand(ui, agent, "review changes");
     ui.key(character('a'), agent);
-    assertThat(terminal.bytes.toString()).contains("accepted 2 hunks");
     assertThat(agent.changes).allSatisfy(file -> assertThat(file.hunks())
         .allSatisfy(hunk -> assertThat(hunk.status())
             .isEqualTo(com.github.skanga.ajent.terminal.ui.DiffReview.Status.ACCEPTED)));

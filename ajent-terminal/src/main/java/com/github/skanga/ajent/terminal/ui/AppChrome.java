@@ -417,6 +417,45 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
+  /** Maya's two-axis pending-change review panel. */
+  public static List<Row> diffReview(
+      DiffReview.File file, int fileIndex, int fileCount, int hunkIndex, int width) {
+    Objects.requireNonNull(file, "file");
+    if (width < 40) throw new IllegalArgumentException("diff review width must be at least 40");
+    if (fileIndex < 0 || fileIndex >= fileCount) {
+      throw new IllegalArgumentException("invalid diff review file index");
+    }
+    if (hunkIndex < 0 || hunkIndex >= file.hunks().size()) {
+      throw new IllegalArgumentException("invalid diff review hunk index");
+    }
+    var rows = pickerStart(" Review Changes ", width);
+    String counts = "+" + file.added() + " -" + file.removed();
+    String position = "file " + (fileIndex + 1) + "/" + fileCount;
+    rows.add(pickerBody(spaced(file.path(), counts + "  " + position, width - 8),
+        width, Tone.NORMAL));
+    rows.add(pickerBody("─".repeat(width - 8), width, Tone.MUTED));
+    for (int index = 0; index < file.hunks().size(); index++) {
+      DiffReview.Hunk hunk = file.hunks().get(index);
+      String status = switch (hunk.status()) {
+        case PENDING -> "[ pending ]";
+        case ACCEPTED -> "[✓ accepted]";
+        case REJECTED -> "[✗ rejected]";
+      };
+      rows.add(pickerBody((index == hunkIndex ? "› " : "  ")
+          + hunk.header().replace(" @@", "") + "  " + status, width, Tone.MUTED));
+      appendDiffView(rows, file.path(), hunk.patch(), width);
+      rows.add(pickerBody("", width, Tone.NORMAL));
+      rows.add(pickerBody("", width, Tone.NORMAL));
+    }
+    rows.add(pickerBody("─".repeat(width - 8), width, Tone.MUTED));
+    rows.add(pickerBody(
+        "↑↓ hunk  ←→ file  Y accept  N reject  A all  X none  Esc close",
+        width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBottom(width));
+    return List.copyOf(rows);
+  }
+
   public static List<Row> changes(List<Change> changes, int width) {
     List<Change> values = List.copyOf(Objects.requireNonNull(changes, "changes"));
     if (values.isEmpty()) return List.of();
@@ -466,6 +505,38 @@ public final class AppChrome {
 
   private static Row pickerScrollBody(String content, int width, Tone tone) {
     return row("  │  " + fit(content, width - 9) + "┃  │", tone);
+  }
+
+  private static void appendDiffView(
+      List<Row> rows, String path, String patch, int width) {
+    int nestedWidth = width - 8;
+    String title = " " + truncate(path, Math.max(1, nestedWidth - 4)) + " ";
+    rows.add(pickerBody("╭─" + title
+        + "─".repeat(Math.max(0, nestedWidth - columns(title) - 3)) + "╮",
+        width, Tone.MUTED));
+    int newLine = 0;
+    for (String line : patch.lines().toList()) {
+      if (line.isEmpty()) continue;
+      String rendered;
+      Tone tone;
+      if (line.charAt(0) == '+') {
+        rendered = String.format(java.util.Locale.ROOT, "%4d %s", newLine++, line);
+        tone = Tone.SUCCESS;
+      } else if (line.charAt(0) == '-') {
+        rendered = "     " + line;
+        tone = Tone.DANGER;
+      } else {
+        rendered = String.format(java.util.Locale.ROOT, "%4d %s", newLine++, line);
+        tone = Tone.MUTED;
+      }
+      rows.add(pickerBody("│ " + fit(rendered, nestedWidth - 4) + " │", width, tone));
+    }
+    rows.add(pickerBody("╰" + "─".repeat(nestedWidth - 2) + "╯", width, Tone.MUTED));
+  }
+
+  private static String spaced(String leading, String trailing, int width) {
+    String left = truncate(leading, Math.max(1, width - columns(trailing) - 1));
+    return left + " ".repeat(Math.max(1, width - columns(left) - columns(trailing))) + trailing;
   }
 
   private static List<Row> searchablePicker(String title, String prefix, String placeholder,

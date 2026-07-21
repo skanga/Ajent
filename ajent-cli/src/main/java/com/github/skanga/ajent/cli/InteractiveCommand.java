@@ -2570,26 +2570,12 @@ final class InteractiveCommand {
                 lines.add(new StyledLine("error: " + failed.message(), Style.DANGER));
             case LoginModal.Closed ignored -> { }
         }
-        if (diffReview instanceof PickerState.OpenAtCell cell && !diffFiles.isEmpty()) {
+        if (diffReview instanceof PickerState.OpenAtCell cell) {
           DiffReview.File file = diffFiles.get(cell.fileIndex());
-          DiffReview.Hunk hunk = file.hunks().get(cell.hunkIndex());
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Changes  " + file.path() + "  +" + file.added()
-              + " -" + file.removed() + "  file " + (cell.fileIndex() + 1) + "/"
-              + diffFiles.size(), Style.ACCENT));
-          lines.add(new StyledLine(
-              "[y] accept  [n] reject  [a] all  [x] none  ←/→ file", Style.MUTED));
-          lines.add(new StyledLine(hunk.header() + "  " + switch (hunk.status()) {
-            case PENDING -> "[ pending ]";
-            case ACCEPTED -> "[✓ accepted]";
-            case REJECTED -> "[✗ rejected]";
-          }, Style.MUTED));
-          wrap(lines, hunk.patch(), width, switch (hunk.status()) {
-            case PENDING -> Style.NORMAL;
-            case ACCEPTED -> Style.ACCENT;
-            case REJECTED -> Style.DANGER;
-          });
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.diffReview(file, cell.fileIndex(), diffFiles.size(),
+              cell.hunkIndex(), Math.max(40, width - 2)));
+          lines = overlayBottom(lines, overlay);
         }
         var canvas = new TerminalCanvas(width, Math.max(1, lines.size()));
         int normal = 0;

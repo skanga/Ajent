@@ -100,14 +100,20 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched the executable Ctrl+G code-block picker and post-run result view
   cell-for-cell, including numbered language/line metadata, real PowerShell
   execution, exit/line/byte status, output scrollbar gutter, and decision hints.
+- Replaced the live diff-review placeholder with AgenTTY's complete bordered
+  two-axis panel: file counters, every structured hunk, nested numbered diffs,
+  pending/accepted/rejected tags, navigation, and exact Y/N/A/X workflow.
 
 ### Known limitations
 
 - Animated wordmark-frame and checkpoint picker,
-  review, resize, attachment, queue, and scrollback terminal
+  resize, attachment, queue, and scrollback terminal
   differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live
   permissioned Bash-tool turn now compare cell-for-cell.
+- AgenTTY's checked-in runtime never adds tool changes to `pending_changes`;
+  its pinned executable therefore reports no changes after a successful write.
+  Ajent retains the intended, fully wired source-defined diff-review workflow.
 - OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's
   OpenAI-compatible transport uses Chat Completions and API keys.
 - The pinned AgenTTY 0.2.8 Windows binary has a positive `find_definition`

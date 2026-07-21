@@ -229,6 +229,51 @@ final class AppChromeTest {
   }
 
   @Test
+  void rendersNativeDiffReviewPanel() {
+    var file = new DiffReview.File("src/Main.java", 1, 1, List.of(
+        new DiffReview.Hunk(4, 1, 4, 1, "-old\n+new", DiffReview.Status.PENDING)));
+
+    List<AppChrome.Row> review = AppChrome.diffReview(file, 0, 2, 0, 78);
+
+    assertThat(review).hasSize(15).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(review.getFirst().text()).contains(" Review Changes ");
+    assertThat(review.get(2).text()).contains("src/Main.java", "+1", "-1", "file 1/2");
+    assertThat(review.get(4).text()).contains("› ", "@@ -4,1 +4,1", "[ pending ]");
+    assertThat(review.get(5).text()).contains(" src/Main.java ");
+    assertThat(review.get(6).text()).contains("     -old");
+    assertThat(review.get(7).text()).contains("   0 +new");
+    assertThat(review.get(12).text()).contains(
+        "↑↓ hunk", "←→ file", "Y accept", "N reject", "A all", "X none", "Esc close");
+  }
+
+  @Test
+  void rendersAllDiffReviewStatusesAndValidatesCoordinates() {
+    var file = new DiffReview.File("a/very/long/path/Main.java", 2, 1, List.of(
+        new DiffReview.Hunk(2, 2, 2, 1, " context\n\n-removed",
+            DiffReview.Status.ACCEPTED),
+        new DiffReview.Hunk(8, 0, 7, 2, "+added\n plain",
+            DiffReview.Status.REJECTED)));
+
+    List<AppChrome.Row> review = AppChrome.diffReview(file, 0, 1, 1, 40);
+
+    assertThat(review).extracting(AppChrome.Row::text)
+        .anyMatch(line -> line.contains("[✓ accepted]"))
+        .anyMatch(line -> line.contains("[✗ rejected]"))
+        .anyMatch(line -> line.contains(" context"))
+        .anyMatch(line -> line.contains("+added"));
+    assertThatThrownBy(() -> AppChrome.diffReview(file, 0, 1, 0, 39))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> AppChrome.diffReview(file, -1, 1, 0, 40))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> AppChrome.diffReview(file, 1, 1, 0, 40))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> AppChrome.diffReview(file, 0, 1, -1, 40))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> AppChrome.diffReview(file, 0, 1, 2, 40))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
   void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
     AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);
