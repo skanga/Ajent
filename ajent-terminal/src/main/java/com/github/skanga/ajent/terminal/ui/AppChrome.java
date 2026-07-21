@@ -2,6 +2,7 @@ package com.github.skanga.ajent.terminal.ui;
 
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.terminal.ModelLabels;
+import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
 import com.github.skanga.ajent.terminal.render.UnicodeWidth;
 import java.util.ArrayList;
 import java.util.List;
@@ -456,6 +457,78 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
+  /** AgenTTY's responsive interactive authentication modal. */
+  public static List<Row> login(LoginModal.State state, int width) {
+    Objects.requireNonNull(state, "state");
+    if (state instanceof LoginModal.Closed) return List.of();
+    if (width < 48) throw new IllegalArgumentException("login width must be at least 48");
+    var rows = pickerStart(" Sign in to agentty ", width);
+    switch (state) {
+      case LoginModal.Picking ignored -> appendLoginPicking(rows, "", width);
+      case LoginModal.Failed failed -> appendLoginPicking(rows, failed.message(), width);
+      case LoginModal.OAuthCode oauth -> {
+        rows.add(pickerBody("OAuth via claude.ai", width, Tone.NORMAL));
+        appendLoginText(rows, "Step 1 — open this URL and authorize agentty:", width,
+            Tone.MUTED);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginBox(rows, oauth.authorizeUri().toString(), width, Tone.ACCENT);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginText(rows, "Step 2 — paste the callback code below:", width, Tone.MUTED);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginInput(rows, oauth.code().text(), true,
+            "paste the code from claude.ai", width);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginText(rows, "c copy URL   ·   o open browser   ·   ^Y copy   ·   ^O open",
+            width, Tone.MUTED);
+        appendLoginText(rows, "Enter submit code   ·   Esc cancel", width, Tone.MUTED);
+      }
+      case LoginModal.OAuthExchanging ignored -> {
+        rows.add(pickerBody("Exchanging authorization code…", width, Tone.NORMAL));
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginText(rows, "Talking to platform.claude.com — this should take a second.",
+            width, Tone.MUTED);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        rows.add(pickerBody("Esc cancel", width, Tone.MUTED));
+      }
+      case LoginModal.ApiKeyInput key -> {
+        boolean anthropic = key.provider().isEmpty();
+        String label = anthropic ? "Anthropic" : key.providerLabel();
+        rows.add(pickerBody(label + " API key", width, Tone.NORMAL));
+        appendLoginText(rows, anthropic
+            ? "Paste an sk-ant-… key. It will be saved to "
+                + "~/.config/agentty/credentials.json (0600)."
+            : "Paste your " + label + " API key to switch to it. It's saved to "
+                + "~/.config/agentty settings so you won't be asked again.",
+            width, Tone.MUTED);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginInput(rows, key.key().text(), true,
+            anthropic ? "sk-ant-…" : "paste API key…", width);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        rows.add(pickerBody("Enter submit   ·   Esc cancel", width, Tone.MUTED));
+      }
+      case LoginModal.CustomHostInput host -> {
+        rows.add(pickerBody("Custom OpenAI-compatible host", width, Tone.NORMAL));
+        appendLoginText(rows,
+            "Enter a host or host:port for any server that speaks the OpenAI chat API — "
+                + "llama.cpp, vLLM, LM Studio, a proxy, or a remote box. A non-443 port uses "
+                + "plain HTTP (the local-server convention); a bare host uses HTTPS on 443.",
+            width, Tone.MUTED);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginInput(rows, host.host().text(), false, "localhost:8080", width);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        appendLoginText(rows,
+            "Examples:  localhost:8080  ·  127.0.0.1:1234  ·  inference.example.com",
+            width, Tone.MUTED);
+        rows.add(pickerBody("", width, Tone.NORMAL));
+        rows.add(pickerBody("Enter connect   ·   Esc cancel", width, Tone.MUTED));
+      }
+      case LoginModal.Closed ignored -> throw new AssertionError("handled above");
+    }
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBottom(width));
+    return List.copyOf(rows);
+  }
+
   public static List<Row> changes(List<Change> changes, int width) {
     List<Change> values = List.copyOf(Objects.requireNonNull(changes, "changes"));
     if (values.isEmpty()) return List.of();
@@ -532,6 +605,72 @@ public final class AppChrome {
       rows.add(pickerBody("│ " + fit(rendered, nestedWidth - 4) + " │", width, tone));
     }
     rows.add(pickerBody("╰" + "─".repeat(nestedWidth - 2) + "╯", width, Tone.MUTED));
+  }
+
+  private static void appendLoginPicking(List<Row> rows, String failure, int width) {
+    rows.add(pickerBody("Authenticate with Claude", width, Tone.NORMAL));
+    appendLoginText(rows,
+        "Pick how you want to sign in. You can change this any time from the command palette.",
+        width, Tone.MUTED);
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    if (!failure.isEmpty()) {
+      appendLoginText(rows, "⚠ " + failure, width, Tone.DANGER);
+      rows.add(pickerBody("", width, Tone.NORMAL));
+    }
+    rows.add(pickerBody("1) OAuth via claude.ai", width, Tone.NORMAL));
+    rows.add(pickerBody("   for Claude Pro / Max subscribers", width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBody("2) Paste an Anthropic API key", width, Tone.NORMAL));
+    rows.add(pickerBody("   starts with sk-ant-…", width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    appendLoginText(rows,
+        "Using OpenAI, Groq, OpenRouter or a local model instead? Press Esc, then Ctrl-P "
+            + "to pick it — you can paste its key right there.", width, Tone.MUTED);
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBody("1/2 choose   ·   Esc close", width, Tone.MUTED));
+  }
+
+  private static void appendLoginText(
+      List<Row> rows, String text, int width, Tone tone) {
+    for (String line : wrapWords(text, width - 8)) rows.add(pickerBody(line, width, tone));
+  }
+
+  private static void appendLoginBox(List<Row> rows, String text, int width, Tone tone) {
+    int nestedWidth = width - 8;
+    rows.add(pickerBody("╭" + "─".repeat(nestedWidth - 2) + "╮", width, tone));
+    for (String line : ColumnTextWrapper.wrap(text, nestedWidth - 4)) {
+      rows.add(pickerBody("│ " + fit(line, nestedWidth - 4) + " │", width, tone));
+    }
+    rows.add(pickerBody("╰" + "─".repeat(nestedWidth - 2) + "╯", width, tone));
+  }
+
+  private static void appendLoginInput(List<Row> rows, String value, boolean secret,
+      String placeholder, int width) {
+    String display = secret
+        ? "*".repeat(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length) : value;
+    String content = "› " + (display.isEmpty() ? " " + placeholder : display);
+    appendLoginBox(rows, content, width, Tone.ACCENT);
+  }
+
+  private static List<String> wrapWords(String text, int width) {
+    var output = new ArrayList<String>();
+    var line = new StringBuilder();
+    for (String word : text.split(" ")) {
+      if (line.isEmpty() && columns(word) > width) {
+        output.addAll(ColumnTextWrapper.wrap(word, width));
+      } else if (line.isEmpty()) {
+        line.append(word);
+      } else if (columns(line + " " + word) <= width) {
+        line.append(' ').append(word);
+      } else {
+        output.add(line.toString());
+        line.setLength(0);
+        if (columns(word) > width) output.addAll(ColumnTextWrapper.wrap(word, width));
+        else line.append(word);
+      }
+    }
+    if (!line.isEmpty()) output.add(line.toString());
+    return List.copyOf(output);
   }
 
   private static String spaced(String leading, String trailing, int width) {

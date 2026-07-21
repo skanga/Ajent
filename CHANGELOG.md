@@ -14,6 +14,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   providers, and native Ollama transport.
 - Interactive saved threads, queued prompts, attachments, plans, permissions,
   checkpoints, diff review, code-block execution, skills, memory, and RAG.
+- Native-responsive interactive login panels with exact method/API-key views,
+  UTF-8-byte secret masking, OAuth URL copy/reopen shortcuts, asynchronous
+  exchange/failure recovery, and executable terminal comparison.
 - Windows and POSIX launchers, cross-platform CI, source provenance, parity
   ledger, and subsystem documentation.
 - Reproducible ZIP and TAR.GZ distributions, a CycloneDX 1.6 SBOM, SHA-256

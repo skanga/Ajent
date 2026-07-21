@@ -274,6 +274,48 @@ final class AppChromeTest {
   }
 
   @Test
+  void rendersNativeLoginAndOAuthPanelsWithoutExposingSecrets() {
+    List<AppChrome.Row> picking = AppChrome.login(new LoginModal.Picking(), 78);
+    assertThat(picking).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(picking.getFirst().text()).contains(" Sign in to agentty ");
+    assertThat(picking).extracting(AppChrome.Row::text)
+        .anyMatch(line -> line.contains("Authenticate with Claude"))
+        .anyMatch(line -> line.contains("1) OAuth via claude.ai"))
+        .anyMatch(line -> line.contains("2) Paste an Anthropic API key"))
+        .anyMatch(line -> line.contains("1/2 choose") && line.contains("Esc close"));
+
+    var oauth = new LoginModal.OAuthCode("verifier", "state",
+        java.net.URI.create("https://claude.ai/oauth/authorize?code=true"),
+        new Utf8Editor("secret", 6));
+    List<AppChrome.Row> code = AppChrome.login(oauth, 78);
+    assertThat(code).extracting(AppChrome.Row::text)
+        .anyMatch(line -> line.contains("OAuth via claude.ai"))
+        .anyMatch(line -> line.contains("https://claude.ai/oauth/authorize?code=true"))
+        .anyMatch(line -> line.contains("› ******"))
+        .anyMatch(line -> line.contains("c copy URL") && line.contains("o open browser"))
+        .noneMatch(line -> line.contains("secret"));
+
+    assertThat(AppChrome.login(new LoginModal.OAuthExchanging(), 78))
+        .extracting(AppChrome.Row::text)
+        .anyMatch(line -> line.contains("Exchanging authorization code…"))
+        .anyMatch(line -> line.contains("platform.claude.com"));
+    assertThat(AppChrome.login(new LoginModal.ApiKeyInput(
+        new Utf8Editor("sk-ant-test", 11), "", ""), 78))
+        .extracting(AppChrome.Row::text)
+        .anyMatch(line -> line.contains("Anthropic API key"))
+        .anyMatch(line -> line.contains("› ***********"))
+        .noneMatch(line -> line.contains("sk-ant-test"));
+    assertThat(AppChrome.login(new LoginModal.CustomHostInput(
+        new Utf8Editor("localhost:8080", 14)), 78))
+        .extracting(AppChrome.Row::text)
+        .anyMatch(line -> line.contains("Custom OpenAI-compatible host"))
+        .anyMatch(line -> line.contains("› localhost:8080"));
+    assertThat(AppChrome.login(new LoginModal.Failed("exchange failed"), 78))
+        .extracting(AppChrome.Row::text)
+        .anyMatch(line -> line.contains("⚠ exchange failed"));
+  }
+
+  @Test
   void activeStatusUsesFixedVerbAndElapsedSlotsBeforeBreadcrumb() {
     AppChrome.Status status = new AppChrome.Status("test permission", "127.0.0.1:10501",
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);

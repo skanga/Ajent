@@ -291,6 +291,12 @@ final class NativeTerminalParityIT {
       assertViewportContains(nativeCapture.diffPendingFrame(), "no pending changes to review");
       assertViewportContains(javaCapture.diffPendingFrame(), "Review Changes");
       assertViewportContains(javaCapture.diffPendingFrame(), "[ pending ]");
+      assertMatchingRegion(nativeCapture.loginPickingFrame(), javaCapture.loginPickingFrame(),
+          "Sign in to agentty", "login method picker viewport");
+      assertMatchingRegion(nativeCapture.loginApiKeyFrame(), javaCapture.loginApiKeyFrame(),
+          "Anthropic API key", "login API-key viewport");
+      assertMatchingRegion(nativeCapture.loginMaskedFrame(), javaCapture.loginMaskedFrame(),
+          "Anthropic API key", "masked login API-key viewport");
       assertViewportContains(javaCapture.diffAcceptedFrame(), "[✓ accepted]");
       assertViewportContains(javaCapture.diffRejectedFrame(), "[✗ rejected]");
     } finally {
@@ -587,6 +593,30 @@ final class NativeTerminalParityIT {
       diffAcceptedFrame = diffPendingFrame;
       diffRejectedFrame = diffPendingFrame;
     }
+    process.getOutputStream().write(11); // Ctrl+K
+    process.getOutputStream().flush();
+    awaitAnyViewportText(output, error, List.of("Command Palette", "Commands"),
+        Duration.ofSeconds(5));
+    process.getOutputStream().write("login".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    Thread.sleep(150);
+    process.getOutputStream().write('\r');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Sign in to agentty", Duration.ofSeconds(5));
+    Thread.sleep(250);
+    String loginPickingFrame = combined(output, error);
+    process.getOutputStream().write('2');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Anthropic API key", Duration.ofSeconds(5));
+    Thread.sleep(250);
+    String loginApiKeyFrame = combined(output, error);
+    process.getOutputStream().write("parity-secret".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    Thread.sleep(250);
+    String loginMaskedFrame = combined(output, error);
+    process.getOutputStream().write(closePicker);
+    process.getOutputStream().flush();
+    Thread.sleep(400);
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -607,7 +637,8 @@ final class NativeTerminalParityIT {
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
         threadFrame, modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame,
-        diffPendingFrame, diffAcceptedFrame, diffRejectedFrame);
+        diffPendingFrame, diffAcceptedFrame, diffRejectedFrame, loginPickingFrame,
+        loginApiKeyFrame, loginMaskedFrame);
   }
 
   private static void seedPickerWorkspace(Path workspace) throws java.io.IOException {
@@ -941,5 +972,6 @@ final class NativeTerminalParityIT {
                                String modelFrame, String mentionFrame, String symbolFrame,
                                String codeBlockFrame, String codeResultFrame,
                                String diffPendingFrame, String diffAcceptedFrame,
-                               String diffRejectedFrame) {}
+                               String diffRejectedFrame, String loginPickingFrame,
+                               String loginApiKeyFrame, String loginMaskedFrame) {}
 }

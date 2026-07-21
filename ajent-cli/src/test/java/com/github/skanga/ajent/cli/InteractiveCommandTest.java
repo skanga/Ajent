@@ -34,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -245,7 +246,7 @@ final class InteractiveCommandTest {
     agent.failCustomHost = true;
     ui.paste("https://host.test/v1");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("save failed");
+    assertThat(ui.loginText()).contains("⚠ save failed");
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
     agent.failCustomHost = false;
     ui.key(character('k', true), agent);
@@ -267,7 +268,7 @@ final class InteractiveCommandTest {
     agent.failProviderKey = true;
     ui.paste("provider-key");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("save failed");
+    assertThat(ui.loginText()).contains("⚠ save failed");
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
     agent.failProviderKey = false;
     ui.key(character('k', true), agent);
@@ -315,6 +316,7 @@ final class InteractiveCommandTest {
     var ui = new InteractiveCommand.Ui(terminal, state,
         new InteractiveCommand.PermissionGate());
     var agent = new FakeAgent(state);
+    assertThat(ui.loginText()).isEmpty();
 
     ui.key(character('a'), agent);
     ui.key(character('b'), agent);
@@ -1466,7 +1468,17 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     ui.key(character('1'), agent);
     assertThat(agent.browser).isNotNull();
+    ui.key(character('c'), agent);
+    assertThat(terminal.bytes.toString()).contains(
+        Base64.getEncoder().encodeToString(agent.browser.toString().getBytes(StandardCharsets.UTF_8)));
+    ui.key(character('o'), agent);
+    assertThat(agent.browserOpens).isEqualTo(2);
     ui.paste("oauth-code");
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('y'),
+        new TerminalKey.Modifiers(true, false, false)), agent);
+    ui.key(new TerminalKey(new TerminalKey.CharacterKey('o'),
+        new TerminalKey.Modifiers(true, false, false)), agent);
+    assertThat(agent.browserOpens).isEqualTo(3);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(agent.oauthCode).isEqualTo("oauth-code");
     assertThat(terminal.bytes.toString()).contains("OAuth");
@@ -1487,12 +1499,12 @@ final class InteractiveCommandTest {
     ui.key(new TerminalKey(new TerminalKey.CharacterKey('x'),
         new TerminalKey.Modifiers(true, false, false)), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("no key entered");
+    assertThat(ui.loginText()).contains("⚠ no key entered");
     ui.key(character('2'), agent);
     ui.paste("key");
     agent.failAnthropicKey = true;
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("save failed");
+    assertThat(ui.loginText()).contains("⚠ save failed");
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
 
     openLogin(ui, agent);
@@ -1500,9 +1512,9 @@ final class InteractiveCommandTest {
     ui.paste("code");
     agent.deferOAuth = true;
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
-    assertThat(terminal.bytes.toString()).contains("Exchanging OAuth code");
+    assertThat(ui.loginText()).contains("Exchanging authorization code…");
     agent.completeOAuth("exchange failed");
-    assertThat(terminal.bytes.toString()).contains("exchange failed");
+    assertThat(ui.loginText()).contains("⚠ exchange failed");
     ui.key(character('x'), agent); // Failed routes through the picking reducer.
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
   }
@@ -2165,6 +2177,7 @@ final class InteractiveCommandTest {
     private String anthropicKey = "";
     private String providerKey = "";
     private URI browser;
+    private int browserOpens;
     private String oauthCode = "";
     private boolean failAnthropicKey;
     private boolean failProviderKey;
@@ -2289,7 +2302,7 @@ final class InteractiveCommandTest {
       return new LoginModal.OAuthAttempt("verifier", "state",
           URI.create("https://example.test/authorize"));
     }
-    @Override public void openBrowser(URI value) { browser = value; }
+    @Override public void openBrowser(URI value) { browser = value; browserOpens++; }
     @Override public boolean installAnthropicKey(String key) {
       if (failAnthropicKey) return false;
       anthropicKey = key;

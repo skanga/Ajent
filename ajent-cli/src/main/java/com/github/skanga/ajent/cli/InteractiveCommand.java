@@ -1878,6 +1878,23 @@ final class InteractiveCommand {
     }
 
     private boolean loginKey(TerminalKey key, AgentControl loop) {
+      if (login instanceof LoginModal.OAuthCode oauth
+          && key.key() instanceof TerminalKey.CharacterKey character) {
+        int codePoint = Character.toLowerCase(character.codePoint());
+        boolean empty = oauth.code().text().isEmpty();
+        if ((key.modifiers().ctrl() && codePoint == 'y') || (empty && codePoint == 'c')) {
+          writeClipboard(oauth.authorizeUri().toString());
+          uiStatus = "authorize URL copied to clipboard";
+          render();
+          return true;
+        }
+        if ((key.modifiers().ctrl() && codePoint == 'o') || (empty && codePoint == 'o')) {
+          loop.openBrowser(oauth.authorizeUri());
+          uiStatus = "opening browser…";
+          render();
+          return true;
+        }
+      }
       if (key.key() == TerminalKey.SpecialKey.ESCAPE) {
         login = LoginModal.close(login);
       } else if (key.key() == TerminalKey.SpecialKey.ENTER) {
@@ -2545,30 +2562,9 @@ final class InteractiveCommand {
           lines.add(new StyledLine("\u2191\u2193 move  Enter rewind  Esc close", Style.MUTED));
         }
         if (LoginModal.isOpen(login)) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Login", Style.ACCENT));
-        }
-        switch (login) {
-            case LoginModal.Picking ignored -> {
-              lines.add(new StyledLine("1  OAuth via claude.ai", Style.NORMAL));
-              lines.add(new StyledLine("2  Paste API key", Style.NORMAL));
-            }
-            case LoginModal.OAuthCode oauth -> {
-              wrap(lines, oauth.authorizeUri().toString(), width, Style.MUTED);
-              wrap(lines, "Code: " + oauth.code().text(), width, Style.NORMAL);
-            }
-            case LoginModal.OAuthExchanging ignored ->
-                lines.add(new StyledLine("Exchanging OAuth code…", Style.MUTED));
-            case LoginModal.ApiKeyInput key -> lines.add(new StyledLine(
-                (key.providerLabel().isEmpty() ? "Anthropic" : key.providerLabel())
-                    + " API key: " + "•".repeat(key.key().text().codePointCount(
-                        0, key.key().text().length())), Style.NORMAL));
-            case LoginModal.CustomHostInput host ->
-                lines.add(new StyledLine("Host: " + host.host().text(), Style.NORMAL));
-            case LoginModal.Failed failed ->
-                lines.add(new StyledLine("error: " + failed.message(), Style.DANGER));
-            case LoginModal.Closed ignored -> { }
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.login(login, Math.max(48, width - 2)));
+          lines = overlayBottom(lines, overlay);
         }
         if (diffReview instanceof PickerState.OpenAtCell cell) {
           DiffReview.File file = diffFiles.get(cell.fileIndex());
@@ -2674,6 +2670,14 @@ final class InteractiveCommand {
 
     String renderedText() {
       synchronized (lock) { return renderedText; }
+    }
+
+    String loginText() {
+      synchronized (lock) {
+        if (!LoginModal.isOpen(login)) return "";
+        return AppChrome.login(login, 78).stream()
+            .map(AppChrome.Row::text).collect(java.util.stream.Collectors.joining("\n"));
+      }
     }
 
     boolean frameSynced() {

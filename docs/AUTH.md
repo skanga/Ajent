@@ -69,12 +69,21 @@ entry. OAuth uses a public client with PKCE:
 4. Ajent verifies state and exchanges the code for access/refresh tokens.
 5. The encrypted credential, token type, and calculated expiry are persisted.
 
-If browser launch is unavailable, copy the displayed URL manually. The login
-modal includes a copy action and never paints an entered API key.
+If browser launch is unavailable, copy the displayed URL manually. While the
+authorization-code field is empty, `c` copies the URL and `o` opens it again;
+`Ctrl-Y` and `Ctrl-O` provide those actions after code entry has started. The
+responsive login modal renders the same method picker, URL/code panel,
+exchange state, masked API-key input, and recoverable failure panel as AgenTTY.
+Secrets are masked by UTF-8 byte length and are never painted in clear text.
 
 Ajent currently does not implement ChatGPT/Codex OAuth. OpenAI-compatible
-providers use API keys. This is not an AgenTTY parity omission; adding it would
-be an Ajent extension requiring a separately supported public OAuth contract.
+providers use API keys. OpenAI's public Codex documentation describes browser
+and device-code sign-in for supported Codex clients, but does not publish a
+third-party OAuth client contract that Ajent can safely embed. Ajent therefore
+does not copy Codex client credentials, scrape its credential cache, or claim
+another application's tokens. This is not an AgenTTY parity omission; adding
+it would be an Ajent extension requiring a separately supported public OAuth
+contract.
 
 ## Refresh during a turn
 
