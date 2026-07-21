@@ -16,10 +16,10 @@ import java.util.Optional;
 public final class NativeToolWireCatalog {
   private static final String RESOURCE = "native-tools.json";
   private static final List<String> STANDALONE_MCP_ORDER = List.of(
-      "todo", "read", "list_dir", "edit", "grep", "write", "bash", "glob",
-      "web_fetch", "remember", "web_search", "find_definition", "diagnostics",
-      "git_status", "git_diff", "git_log", "git_commit", "task", "forget",
-      "wipe_memory", "skill", "search_docs");
+      "read", "edit", "write", "bash", "grep", "glob", "list_dir", "repo_map",
+      "todo", "web_fetch", "web_search", "find_definition", "diagnostics",
+      "git_status", "git_diff", "git_log", "git_commit", "remember", "forget",
+      "wipe_memory", "task", "skill", "search_docs");
   private static final List<String> PROVIDER_FACING_ORDER = List.of(
       "read", "edit", "write", "bash", "grep", "glob", "list_dir", "todo",
       "web_fetch", "web_search", "find_definition", "diagnostics", "git_status",
@@ -33,7 +33,7 @@ public final class NativeToolWireCatalog {
     return CATALOG.all();
   }
 
-  /** Exact registration order advertised by AgenTTY's standalone MCP server. */
+  /** Registration order in the checked-in AgenTTY source's standalone MCP server. */
   public static List<ToolSpecification> standaloneMcp() {
     return ordered(STANDALONE_MCP_ORDER, "standalone MCP");
   }

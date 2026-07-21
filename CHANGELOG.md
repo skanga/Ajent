@@ -26,6 +26,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   progress, list refresh, timeouts, sessions, headers, and JSON/SSE envelopes.
 - Native-executable standalone MCP characterization that executes every one of
   the 22 published tool families against paired deterministic workspaces.
+- Executable skills, durable-memory, document-RAG, memory-fusion, and
+  repository-map characterization; `mcp-serve` now follows the checked-in
+  source's full 23-tool registry while recording the pinned binary's omission.
 - Native-executable Ollama characterization for `/api/chat` request bodies,
   fragmented NDJSON, persisted images, native and weak-model JSON-protocol tool
   execution/continuation, HTTP errors, and live cancellation.

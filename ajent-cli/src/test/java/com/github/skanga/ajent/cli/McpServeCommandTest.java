@@ -24,13 +24,16 @@ class McpServeCommandTest {
       throws Exception {
     Path workspace = Files.createDirectories(root.resolve("workspace"));
     Path home = Files.createDirectories(root.resolve("home"));
+    Files.writeString(workspace.resolve("ParityMap.cpp"),
+        "int parityAnswer() {\n  return 42;\n}\n");
     String input = String.join("\n",
         frame(1, "initialize", "{\"protocolVersion\":\"2025-11-25\"}"),
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}",
         frame(2, "tools/list", "{}"),
         frame(3, "tools/call", "{\"name\":\"write\",\"arguments\":{"
             + "\"path\":\"served.txt\",\"content\":\"through MCP\"}}"),
-        frame(4, "tools/call", "{\"name\":\"task\",\"arguments\":{}}")) + "\n";
+        frame(4, "tools/call", "{\"name\":\"repo_map\",\"arguments\":{}}"),
+        frame(5, "tools/call", "{\"name\":\"task\",\"arguments\":{}}")) + "\n";
     var stdout = new ByteArrayOutputStream();
     var stderr = new ByteArrayOutputStream();
     var parsed = CliArguments.parse(new String[] {
@@ -45,17 +48,19 @@ class McpServeCommandTest {
     for (String line : stdout.toString(StandardCharsets.UTF_8).lines().toList()) {
       messages.add(JSON.readTree(line));
     }
-    assertThat(messages).hasSize(4);
+    assertThat(messages).hasSize(5);
     assertThat(messages.get(0).path("result").path("serverInfo").path("name").asText())
         .isEqualTo("ajent");
     assertThat(messages.get(1).path("result").path("tools"))
         .extracting(node -> node.path("name").asText())
-        .containsExactly("todo", "read", "list_dir", "edit", "grep", "write", "bash",
-            "glob", "web_fetch", "remember", "web_search", "find_definition",
-            "diagnostics", "git_status", "git_diff", "git_log", "git_commit", "task",
-            "forget", "wipe_memory", "skill", "search_docs");
+        .containsExactly("read", "edit", "write", "bash", "grep", "glob", "list_dir",
+            "repo_map", "todo", "web_fetch", "web_search", "find_definition",
+            "diagnostics", "git_status", "git_diff", "git_log", "git_commit", "remember",
+            "forget", "wipe_memory", "task", "skill", "search_docs");
     assertThat(messages.get(2).path("result").path("isError").asBoolean()).isFalse();
     assertThat(messages.get(3).path("result").path("content").path(0).path("text").asText())
+        .contains("Repository map", "ParityMap.cpp", "parityAnswer");
+    assertThat(messages.get(4).path("result").path("content").path(0).path("text").asText())
         .isEqualTo("[unknown] task: subagent unavailable "
             + "(not configured, or max nesting depth reached).");
     assertThat(Files.readString(workspace.resolve("served.txt"))).isEqualTo("through MCP");

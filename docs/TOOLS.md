@@ -41,7 +41,8 @@ unchanged unbounded retry from consuming another turn.
 Literal/regex grep, glob/path discovery, symbol context, and PageRank-style
 repository mapping. Search filters binary/NUL input, merges context ranges,
 adds enclosing-symbol breadcrumbs, and uses bounded pagination/inter-file
-guards.
+guards. The standalone MCP server publishes `repo_map` from the checked-in
+AgenTTY 23-tool registry; the older 0.2.8 Windows binary omitted that entry.
 
 ### Processes and diagnostics
 

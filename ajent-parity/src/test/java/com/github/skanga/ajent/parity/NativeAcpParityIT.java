@@ -2225,8 +2225,34 @@ final class NativeAcpParityIT {
     List<List<JsonNode>> exchanges = normalized.exchanges().stream()
         .map(exchange -> exchange.stream()
             .map(frame -> normalizePromptFrame(frame, workspace)).toList())
+        .map(NativeAcpParityIT::mergeAdjacentAgentMessageChunks)
         .toList();
     return new Transcript(normalized.sessionId(), exchanges);
+  }
+
+  private static List<JsonNode> mergeAdjacentAgentMessageChunks(List<JsonNode> frames) {
+    var merged = new ArrayList<JsonNode>();
+    for (JsonNode frame : frames) {
+      if (!merged.isEmpty() && isAgentMessageChunk(merged.getLast())
+          && isAgentMessageChunk(frame) && merged.getLast().path("params").path("update")
+              .path("messageId").equals(
+                  frame.path("params").path("update").path("messageId"))) {
+        ObjectNode previous = merged.removeLast().deepCopy();
+        ObjectNode content = (ObjectNode) previous.path("params").path("update").path("content");
+        content.put("text", content.path("text").asText()
+            + frame.path("params").path("update").path("content").path("text").asText());
+        merged.add(previous);
+      } else {
+        merged.add(frame);
+      }
+    }
+    return List.copyOf(merged);
+  }
+
+  private static boolean isAgentMessageChunk(JsonNode frame) {
+    return "session/update".equals(frame.path("method").asText())
+        && "agent_message_chunk".equals(
+            frame.path("params").path("update").path("sessionUpdate").asText());
   }
 
   private static List<JsonNode> normalizeRequests(

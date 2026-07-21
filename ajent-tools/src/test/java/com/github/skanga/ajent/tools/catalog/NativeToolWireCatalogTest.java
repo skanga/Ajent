@@ -16,10 +16,10 @@ class NativeToolWireCatalogTest {
       "git_status", "git_diff", "git_log", "git_commit", "remember", "forget",
       "wipe_memory", "task", "skill", "search_docs");
   private static final List<String> STANDALONE_MCP_ORDER = List.of(
-      "todo", "read", "list_dir", "edit", "grep", "write", "bash", "glob",
-      "web_fetch", "remember", "web_search", "find_definition", "diagnostics",
-      "git_status", "git_diff", "git_log", "git_commit", "task", "forget",
-      "wipe_memory", "skill", "search_docs");
+      "read", "edit", "write", "bash", "grep", "glob", "list_dir", "repo_map",
+      "todo", "web_fetch", "web_search", "find_definition", "diagnostics",
+      "git_status", "git_diff", "git_log", "git_commit", "remember", "forget",
+      "wipe_memory", "task", "skill", "search_docs");
   private static final List<String> PROVIDER_FACING_ORDER = List.of(
       "read", "edit", "write", "bash", "grep", "glob", "list_dir", "todo",
       "web_fetch", "web_search", "find_definition", "diagnostics", "git_status",
@@ -40,7 +40,7 @@ class NativeToolWireCatalogTest {
     assertThat(NativeToolWireCatalog.standaloneMcp())
         .extracting(ToolSpecification::name)
         .containsExactlyElementsOf(STANDALONE_MCP_ORDER)
-        .doesNotContain("repo_map");
+        .contains("repo_map");
     assertThat(NativeToolWireCatalog.standaloneMcp()).isUnmodifiable();
   }
 

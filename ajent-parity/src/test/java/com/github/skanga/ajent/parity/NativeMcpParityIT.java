@@ -57,8 +57,67 @@ final class NativeMcpParityIT {
 
     Transcript nativeNormalized = normalize(nativeTranscript, nativeWorkspace, true);
     Transcript javaNormalized = normalize(javaTranscript, javaWorkspace, false);
-    assertThat(toolNames(nativeNormalized)).containsExactlyElementsOf(toolNames(javaNormalized));
-    assertThat(firstDifference(nativeNormalized, javaNormalized)).isEmpty();
+    assertThat(toolNames(nativeNormalized)).doesNotContain("repo_map");
+    assertThat(toolNames(javaNormalized)).contains("repo_map");
+    assertThat(firstDifference(sortToolCatalog(nativeNormalized),
+        sortToolCatalog(withoutCatalogTool(javaNormalized, "repo_map")))).isEmpty();
+  }
+
+  @Test
+  void skillsMemoryRagAndRepositoryMapExecutableBehaviorIsCharacterized(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path ajentJar = repository.resolve("ajent-cli/target/ajent.jar");
+    Path nativeWorkspace = Files.createDirectories(root.resolve("native-knowledge-workspace"));
+    Path javaWorkspace = Files.createDirectories(root.resolve("java-knowledge-workspace"));
+    prepareToolWorkspace(nativeWorkspace);
+    prepareToolWorkspace(javaWorkspace);
+
+    KnowledgeCapture nativeCapture;
+    try (var process = McpProcess.start(command(nativeBinary, nativeWorkspace),
+        root.resolve("native-knowledge-home"), false, toolEnvironment(nativeWorkspace))) {
+      nativeCapture = exerciseKnowledge(process, nativeWorkspace);
+    }
+    KnowledgeCapture javaCapture;
+    try (var process = McpProcess.start(javaCommand(ajentJar, javaWorkspace),
+        root.resolve("java-knowledge-home"), true, toolEnvironment(javaWorkspace))) {
+      javaCapture = exerciseKnowledge(process, javaWorkspace);
+    }
+
+    assertThat(jsonDifference(
+        normalize(nativeCapture.skill(), nativeWorkspace.toString(), true),
+        normalize(javaCapture.skill(), javaWorkspace.toString(), false), "skill")).isEmpty();
+    assertThat(jsonDifference(
+        normalize(nativeCapture.remember(), nativeWorkspace.toString(), true),
+        normalize(javaCapture.remember(), javaWorkspace.toString(), false), "remember")).isEmpty();
+    assertThat(jsonDifference(
+        normalize(nativeCapture.forgetPreview(), nativeWorkspace.toString(), true),
+        normalize(javaCapture.forgetPreview(), javaWorkspace.toString(), false),
+        "forget-preview")).isEmpty();
+    assertThat(jsonDifference(
+        normalize(nativeCapture.forget(), nativeWorkspace.toString(), true),
+        normalize(javaCapture.forget(), javaWorkspace.toString(), false), "forget")).isEmpty();
+    assertThat(jsonDifference(
+        normalize(nativeCapture.wipe(), nativeWorkspace.toString(), true),
+        normalize(javaCapture.wipe(), javaWorkspace.toString(), false), "wipe")).isEmpty();
+
+    assertThat(toolText(nativeCapture.skill())).contains("quartz parity skill instructions");
+    assertThat(toolText(javaCapture.skill())).contains("quartz parity skill instructions");
+    assertThat(toolText(nativeCapture.docsRag())).contains("zebra", "BM25-only");
+    assertThat(toolText(javaCapture.docsRag())).contains("zebra", "BM25-only", "confidence");
+    assertThat(toolText(nativeCapture.memoryRag())).doesNotContain("memory://");
+    assertThat(toolText(javaCapture.memoryRag()))
+        .contains("flux capacitor", "memory://", "confidence");
+
+    assertThat(nativeCapture.repoMap().path("error").path("message").asText())
+        .isEqualTo("unknown tool: repo_map");
+    assertThat(toolText(javaCapture.repoMap()))
+        .contains("Repository map", "ParityCode.java", "parityAnswer");
+    assertThat(Files.readString(repository.resolve("agentty/src/mcp/serve.cpp")))
+        .contains("Register every native tool");
+    assertThat(Files.readString(repository.resolve("agentty/src/tool/mcp_tools_bridge.cpp")))
+        .contains("\"repo_map\"");
   }
 
   @Test
@@ -142,6 +201,23 @@ final class NativeMcpParityIT {
     return new Transcript(List.copyOf(frames));
   }
 
+  private static Transcript withoutCatalogTool(Transcript transcript, String name) {
+    var frames = new ArrayList<JsonNode>();
+    for (JsonNode original : transcript.frames()) {
+      JsonNode frame = original.deepCopy();
+      JsonNode tools = frame.path("result").path("tools");
+      if (tools.isArray()) {
+        var retained = JSON.createArrayNode();
+        tools.forEach(tool -> {
+          if (!name.equals(tool.path("name").asText())) retained.add(tool);
+        });
+        ((ObjectNode) frame.path("result")).set("tools", retained);
+      }
+      frames.add(frame);
+    }
+    return new Transcript(List.copyOf(frames));
+  }
+
   private static List<String> toolNames(Transcript transcript) {
     JsonNode tools = transcript.frames().stream()
         .map(frame -> frame.path("result").path("tools"))
@@ -192,9 +268,10 @@ final class NativeMcpParityIT {
         normalize(nativeTranscript, nativeWorkspace, true));
     Transcript javaNormalized = sortToolCatalog(
         normalize(javaTranscript, javaWorkspace, false));
-    assertThat(toolNames(nativeNormalized))
-        .containsExactlyInAnyOrderElementsOf(toolNames(javaNormalized));
-    assertThat(firstDifference(nativeNormalized, javaNormalized)).isEmpty();
+    assertThat(toolNames(nativeNormalized)).doesNotContain("repo_map");
+    assertThat(toolNames(javaNormalized)).contains("repo_map");
+    assertThat(firstDifference(nativeNormalized,
+        sortToolCatalog(withoutCatalogTool(javaNormalized, "repo_map")))).isEmpty();
   }
 
   @Test
@@ -230,9 +307,10 @@ final class NativeMcpParityIT {
           normalize(nativeTranscript, nativeWorkspace, true));
       Transcript javaNormalized = sortToolCatalog(
           normalize(javaTranscript, javaWorkspace, false));
-      assertThat(toolNames(javaNormalized))
-          .containsExactlyInAnyOrderElementsOf(toolNames(nativeNormalized));
-      assertThat(firstDifference(nativeNormalized, javaNormalized)).isEmpty();
+      assertThat(toolNames(nativeNormalized)).doesNotContain("repo_map");
+      assertThat(toolNames(javaNormalized)).contains("repo_map");
+      assertThat(firstDifference(nativeNormalized,
+          sortToolCatalog(withoutCatalogTool(javaNormalized, "repo_map")))).isEmpty();
     }
   }
 
@@ -304,6 +382,48 @@ final class NativeMcpParityIT {
     assertThat(exchanges).hasSize(25);
   }
 
+  private static KnowledgeCapture exerciseKnowledge(McpProcess process, Path workspace)
+      throws Exception {
+    process.call("initialize", JSON.readTree("""
+        {"protocolVersion":"2025-11-25","capabilities":{},
+         "clientInfo":{"name":"ajent-knowledge-parity","version":"1"}}
+        """));
+    process.notify("notifications/initialized", JSON.createObjectNode());
+    JsonNode skill = process.call("tools/call", toolCall("skill", "name", "parity-skill"));
+    ObjectNode rememberCall = toolCall("remember", "text",
+        "the flux capacitor requires gigawatt plutonium calibration");
+    rememberCall.withObject("arguments").put("scope", "project");
+    JsonNode remember = process.call("tools/call", rememberCall);
+    JsonNode memoryRag = process.call("tools/call",
+        toolCall("search_docs", "query", "flux capacitor plutonium"));
+    JsonNode docsRag = process.call("tools/call",
+        toolCall("search_docs", "query", "zebra quagga migration"));
+    ObjectNode previewCall = toolCall("forget", "substring", "flux capacitor");
+    previewCall.withObject("arguments").put("dry_run", true);
+    JsonNode forgetPreview = process.call("tools/call", previewCall);
+    JsonNode forget = process.call("tools/call",
+        toolCall("forget", "substring", "flux capacitor"));
+    ObjectNode wipeSeed = toolCall("remember", "text", "wipe knowledge parity sentinel");
+    wipeSeed.withObject("arguments").put("scope", "project");
+    process.call("tools/call", wipeSeed);
+    ObjectNode wipeCall = toolCall("wipe_memory", "scope", "project");
+    wipeCall.withObject("arguments").put("confirm", true);
+    JsonNode wipe = process.call("tools/call", wipeCall);
+    ObjectNode repoMapCall = toolCall("repo_map", "path", workspace.toString());
+    repoMapCall.withObject("arguments").put("budget", 1000);
+    JsonNode repoMap = process.call("tools/call", repoMapCall);
+    return new KnowledgeCapture(skill, remember, memoryRag, docsRag, forgetPreview,
+        forget, wipe, repoMap);
+  }
+
+  private static String toolText(JsonNode response) {
+    JsonNode content = response.path("result").path("content");
+    if (!content.isArray()) return "";
+    var text = new StringBuilder();
+    content.forEach(block -> text.append(block.path("text").asText()));
+    return text.toString();
+  }
+
   private static void recordTool(
       McpProcess process, List<JsonNode> exchanges, ObjectNode call) throws Exception {
     JsonNode response = process.call("tools/call", call);
@@ -318,9 +438,12 @@ final class NativeMcpParityIT {
     Files.writeString(source.resolve("seed.txt"), "alpha\nbeta\ngamma\n");
     Files.writeString(source.resolve("ParityCode.java"),
         "final class ParityCode {\n  static int parityAnswer() { return 42; }\n}\n");
+    Files.writeString(source.resolve("ParityMap.cpp"),
+        "int parityAnswer() {\n  return 42;\n}\n");
     Path docs = Files.createDirectories(workspace.resolve("docs"));
     Files.writeString(docs.resolve("parity.md"),
-        "# Quartz guide\nThe quartz parity knowledge sentinel is deterministic.\n");
+        "# Quartz guide\nThe quartz parity knowledge sentinel is deterministic.\n\n"
+            + "The zebra quagga migrates across the savanna every solstice season.\n");
     Path skill = Files.createDirectories(
         workspace.resolve(".agents/skills/parity-skill"));
     Files.writeString(skill.resolve("SKILL.md"), """
@@ -739,6 +862,10 @@ final class NativeMcpParityIT {
   }
 
   private record Transcript(List<JsonNode> frames) {}
+
+  private record KnowledgeCapture(
+      JsonNode skill, JsonNode remember, JsonNode memoryRag, JsonNode docsRag,
+      JsonNode forgetPreview, JsonNode forget, JsonNode wipe, JsonNode repoMap) {}
 
   private record HttpRecord(
       String method, String path, String accept, String contentType, String session,
