@@ -116,6 +116,65 @@ final class NativeTerminalParityIT {
   }
 
   @Test
+  void wideFirstRunChromeMatchesTheNativeViewport(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+    Path javaHome = Files.createDirectories(root.resolve("java-home"));
+    Path nativeLauncher = launcher(root.resolve("native-wide-first-run.cmd"),
+        List.of(nativeBinary.toString()));
+
+    Capture nativeCapture = captureAtSize(
+        List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+        Files.createDirectories(root.resolve("native-workspace")), nativeHome, 96, 28);
+    Capture javaCapture = captureAtSize(List.of(javaExecutable(),
+            "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+            "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+        Files.createDirectories(root.resolve("java-workspace")), javaHome, 96, 28);
+
+    assertCleanExit(nativeCapture, "native wide first run");
+    assertCleanExit(javaCapture, "Java wide first run");
+    var nativeViewport = new AnsiViewport(96, 28);
+    nativeViewport.feed(nativeCapture.frame());
+    var javaViewport = new AnsiViewport(96, 28);
+    javaViewport.feed(javaCapture.frame());
+    assertThat(stableRegion(javaViewport.lines())).as(
+            "native viewport:%n%s%nJava viewport:%n%s",
+            numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+        .containsExactlyElementsOf(stableRegion(nativeViewport.lines()));
+  }
+
+  @Test
+  void bothExecutablesAnimateTheWelcomeWordmarkUnderARealPty(@TempDir Path root)
+      throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+    Path javaHome = Files.createDirectories(root.resolve("java-home"));
+    Path nativeLauncher = launcher(root.resolve("native-wordmark.cmd"),
+        List.of(nativeBinary.toString()));
+
+    AnimatedCapture nativeCapture = captureWordmark(
+        List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+        Files.createDirectories(root.resolve("native-workspace")), nativeHome);
+    AnimatedCapture javaCapture = captureWordmark(List.of(javaExecutable(),
+            "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+            "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+        Files.createDirectories(root.resolve("java-workspace")), javaHome);
+
+    assertCleanExit(nativeCapture.exitCode(), nativeCapture.output(), "native wordmark");
+    assertCleanExit(javaCapture.exitCode(), javaCapture.output(), "Java wordmark");
+    assertThat(nativeCapture.frames().stream().distinct().count())
+        .as("native animated wordmark frames").isGreaterThanOrEqualTo(3);
+    assertThat(javaCapture.frames().stream().distinct().count())
+        .as("Java animated wordmark frames").isGreaterThanOrEqualTo(3);
+    assertThat(javaCapture.frames()).allSatisfy(frame ->
+        assertThat(frame).as("Java wordmark frame").hasSize(5));
+    assertThat(nativeCapture.frames()).allSatisfy(frame ->
+        assertThat(frame).as("native wordmark frame").hasSize(5));
+  }
+
+  @Test
   void committedScrollbackOnlyAppendsAcrossRealProviderTurns(@TempDir Path root)
       throws Exception {
     var requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
@@ -434,6 +493,75 @@ final class NativeTerminalParityIT {
     }
     reader.join(Duration.ofSeconds(3));
     return new Capture(process.exitValue(), text(output), frame);
+  }
+
+  private static Capture captureAtSize(
+      List<String> executable, Path workspace, Path home, int columns, int rows)
+      throws Exception {
+    var command = new ArrayList<>(executable);
+    command.addAll(List.of("--provider", "ollama", "--model", "qwen2.5-coder:7b",
+        "--workspace", workspace.toString()));
+    Map<String, String> environment = terminalEnvironment(home);
+    environment.put("COLUMNS", Integer.toString(columns));
+    environment.put("LINES", Integer.toString(rows));
+    PtyProcess process = new PtyProcessBuilder(command.toArray(String[]::new))
+        .setDirectory(workspace.toString()).setEnvironment(environment)
+        .setInitialColumns(columns).setInitialRows(rows).setConsole(false)
+        .setRedirectErrorStream(true).start();
+    var output = new ByteArrayOutputStream();
+    Thread reader = startDrain(process.getInputStream(), output);
+    var emptyError = new ByteArrayOutputStream();
+    awaitViewportText(output, emptyError, "Explain what this project", Duration.ofSeconds(8),
+        columns, rows);
+    awaitViewportText(output, emptyError, "type a message", Duration.ofSeconds(5),
+        columns, rows);
+    Thread.sleep(750);
+    String frame = text(output);
+    if (process.isAlive()) {
+      process.getOutputStream().write("\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII));
+      process.getOutputStream().flush();
+    }
+    if (!process.waitFor(8, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      process.waitFor(3, TimeUnit.SECONDS);
+    }
+    reader.join(Duration.ofSeconds(3));
+    return new Capture(process.exitValue(), text(output), frame);
+  }
+
+  private static AnimatedCapture captureWordmark(
+      List<String> executable, Path workspace, Path home) throws Exception {
+    int columns = 100;
+    int rows = 40;
+    var command = new ArrayList<>(executable);
+    command.addAll(List.of("--provider", "ollama", "--model", "qwen2.5-coder:7b",
+        "--workspace", workspace.toString()));
+    PtyProcess process = new PtyProcessBuilder(command.toArray(String[]::new))
+        .setDirectory(workspace.toString()).setEnvironment(terminalEnvironment(home))
+        .setInitialColumns(columns).setInitialRows(rows).setConsole(false)
+        .setRedirectErrorStream(true).start();
+    var output = new ByteArrayOutputStream();
+    Thread reader = startDrain(process.getInputStream(), output);
+    var error = new ByteArrayOutputStream();
+    awaitViewportText(output, error, TAGLINE, Duration.ofSeconds(8), columns, rows);
+    var frames = new ArrayList<List<String>>();
+    for (int sample = 0; sample < 8; sample++) {
+      Thread.sleep(140);
+      var viewport = new AnsiViewport(columns, rows);
+      viewport.feed(text(output));
+      List<String> before = linesBeforeTagline(viewport.lines());
+      frames.add(List.copyOf(before.subList(Math.max(0, before.size() - 5), before.size())));
+    }
+    if (process.isAlive()) {
+      process.getOutputStream().write("\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII));
+      process.getOutputStream().flush();
+    }
+    if (!process.waitFor(8, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      process.waitFor(3, TimeUnit.SECONDS);
+    }
+    reader.join(Duration.ofSeconds(3));
+    return new AnimatedCapture(process.exitValue(), text(output), List.copyOf(frames));
   }
 
   private static ScrollbackCapture captureScrollbackPty(
@@ -1419,6 +1547,11 @@ final class NativeTerminalParityIT {
   }
 
   private record Capture(int exitCode, String output, String frame) {}
+  private record AnimatedCapture(int exitCode, String output, List<List<String>> frames) {
+    private AnimatedCapture {
+      frames = frames.stream().map(List::copyOf).toList();
+    }
+  }
   private record ScrollbackCapture(
       int exitCode, String output, List<List<String>> snapshots, String frame) {
     private ScrollbackCapture {

@@ -26,11 +26,18 @@ public final class AppChrome {
     }
   }
 
-  public record Welcome(String modelId, Profile profile, boolean firstRun, int width, int maxRows) {
+  public record Welcome(String modelId, Profile profile, boolean firstRun, int width, int maxRows,
+                        long animationAgeMillis) {
+    public Welcome(String modelId, Profile profile, boolean firstRun, int width, int maxRows) {
+      this(modelId, profile, firstRun, width, maxRows, -1);
+    }
+
     public Welcome {
       modelId = Objects.requireNonNull(modelId, "modelId");
       profile = Objects.requireNonNull(profile, "profile");
-      if (width < 1 || maxRows < 1) throw new IllegalArgumentException("invalid welcome bounds");
+      if (width < 1 || maxRows < 1 || animationAgeMillis < -1) {
+        throw new IllegalArgumentException("invalid welcome bounds or animation age");
+      }
     }
   }
 
@@ -118,7 +125,9 @@ public final class AppChrome {
     var rows = new ArrayList<Row>();
     if (b3) rows.add(row("", Tone.NORMAL));
     if (pixels) {
-      for (String line : pixelWordmark()) rows.add(row(center(line, config.width()), Tone.BRAND));
+      for (String line : pixelWordmark(config.animationAgeMillis())) {
+        rows.add(row(center(line, config.width()), Tone.BRAND));
+      }
     } else {
       rows.add(row(center("» A G E N T T Y", config.width()), Tone.BRAND));
     }
@@ -132,12 +141,7 @@ public final class AppChrome {
     if (b2) rows.add(row("", Tone.NORMAL));
     if (b5) rows.add(row("", Tone.NORMAL));
     if (config.firstRun() && spare >= 6) {
-      rows.add(row(center("NEW HERE? TRY ONE OF THESE", config.width()), Tone.MUTED));
-      rows.add(row(center("• Explain what this project does and how it's structured",
-          config.width()), Tone.NORMAL));
-      rows.add(row(center("• Find and fix the bug in <file> — it <symptom>",
-          config.width()), Tone.NORMAL));
-      rows.add(row(center("• Add a <feature> and run the tests", config.width()), Tone.NORMAL));
+      addStarterCard(rows, config.width());
       rows.add(row("", Tone.NORMAL));
       rows.add(row("", Tone.NORMAL));
     }
@@ -857,6 +861,11 @@ public final class AppChrome {
       return fit("▎ " + banner.stripTrailing(), config.width());
     }
     String phase = phase(config);
+    String full = " ▌ " + phase + " " + idleTokenStream() + "   ·   "
+        + fullStatusRight(config);
+    if (columns(full) <= config.width()) {
+      return fit(full, config.width());
+    }
     int gaugeCells = 10;
     String right = statusRight(config, gaugeCells);
     String left = "▌ " + phase;
@@ -883,6 +892,36 @@ public final class AppChrome {
     if (config.contextMax() > 0) right += " · "
         + compactNativeContextGauge(config.tokensIn(), config.contextMax(), gaugeCells);
     return right + " ";
+  }
+
+  private static String fullStatusRight(Status config) {
+    String right = "● " + config.provider();
+    if (config.contextMax() > 0) {
+      right += " · " + fullNativeContextGauge(config.tokensIn(), config.contextMax());
+    }
+    return right;
+  }
+
+  private static String idleTokenStream() {
+    return "⚡   0.0 t/s " + "▁".repeat(16);
+  }
+
+  private static String fullNativeContextGauge(int used, int maximum) {
+    if (maximum <= 0) return "";
+    String compact = compactNativeContextGauge(used, maximum);
+    String tokens = used <= 0 ? "  ——/  ——  "
+        : formatTokens5(used) + "/" + formatTokens5(maximum) + " ";
+    return "CTX " + tokens + compact.substring("CTX ".length());
+  }
+
+  private static String formatTokens5(int tokens) {
+    if (tokens >= 1_000_000) {
+      return String.format(Locale.ROOT, "%5.1fM", tokens / 1_000_000.0);
+    }
+    if (tokens >= 1_000) {
+      return String.format(Locale.ROOT, "%5.1fk", tokens / 1_000.0);
+    }
+    return String.format(Locale.ROOT, "%5d", tokens);
   }
 
   private static String formatElapsed5(long millis) {
@@ -995,6 +1034,26 @@ public final class AppChrome {
         .mapToObj(codePoint -> Character.toString(codePoint)).toList());
   }
 
+  private static void addStarterCard(List<Row> rows, int width) {
+    String title = " " + letterSpaced("New here? Try one of these") + " ";
+    List<String> content = List.of(
+        title,
+        "",
+        "• Explain what this project does and how it's structured",
+        "• Find and fix the bug in <file> — it <symptom>",
+        "• Add a <feature> and run the tests");
+    int innerWidth = 60;
+    String top = "╭" + "─".repeat(innerWidth) + "╮";
+    rows.add(row(center(top, width), Tone.MUTED));
+    for (int index = 0; index < content.size(); index++) {
+      String value = content.get(index);
+      String padded = "  " + value;
+      String line = "│" + fit(padded, innerWidth) + "│";
+      rows.add(row(center(line, width), index == 0 ? Tone.MUTED : Tone.NORMAL));
+    }
+    rows.add(row(center("╰" + "─".repeat(innerWidth) + "╯", width), Tone.MUTED));
+  }
+
   private static String contextGauge(int used, int maximum) {
     double fraction = maximum == 0 ? 0 : Math.min(1.0, (double) used / maximum);
     int cells = (int) Math.round(fraction * 10);
@@ -1054,15 +1113,19 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
-  private static List<String> pixelWordmark() {
+  private static List<String> pixelWordmark(long animationAgeMillis) {
     int width = pixelWidth();
     boolean[][] pixels = new boolean[10][width];
     for (int glyphIndex = 0; glyphIndex < WORDMARK.length(); glyphIndex++) {
       String[] glyph = glyph(WORDMARK.charAt(glyphIndex));
       int x = glyphIndex * (FONT_WIDTH + 1);
+      int dy = animationAgeMillis < 0 ? 0 : wordmarkOffset(glyphIndex, animationAgeMillis);
       for (int row = 0; row < FONT_HEIGHT; row++) {
         for (int column = 0; column < FONT_WIDTH; column++) {
-          if (glyph[row].charAt(column) == '#') pixels[row + 1][x + column] = true;
+          int y = row + 1 + dy;
+          if (glyph[row].charAt(column) == '#' && y >= 0 && y < pixels.length) {
+            pixels[y][x + column] = true;
+          }
         }
       }
     }
@@ -1076,6 +1139,24 @@ public final class AppChrome {
       rows.add(line.toString().stripTrailing());
     }
     return List.copyOf(rows);
+  }
+
+  private static int wordmarkOffset(int glyphIndex, long ageMillis) {
+    int dropStart = glyphIndex * 100;
+    int dropEnd = dropStart + 500;
+    if (ageMillis < dropStart) return -9;
+    if (ageMillis < dropEnd) {
+      double progress = (ageMillis - dropStart) / 500.0;
+      double eased = 1.0 - Math.pow(1.0 - progress, 3);
+      return roundAwayFromZero(-9.0 * (1.0 - eased));
+    }
+    double phase = 2.0 * Math.PI * (ageMillis - dropEnd) / 2_200.0
+        + glyphIndex * 0.7;
+    return roundAwayFromZero(Math.sin(phase) * 1.5);
+  }
+
+  private static int roundAwayFromZero(double value) {
+    return value < 0 ? (int) Math.ceil(value - 0.5) : (int) Math.floor(value + 0.5);
   }
 
   private static String[] glyph(char value) {

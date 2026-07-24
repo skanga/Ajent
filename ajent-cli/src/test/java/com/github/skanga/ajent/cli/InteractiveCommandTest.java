@@ -306,7 +306,8 @@ final class InteractiveCommandTest {
     ui.render();
 
     assertThat(terminal.bytes.toString()).contains(
-        "NEW HERE? TRY ONE OF THESE", "Changes (1 files)", "M src/Main.java  +12 -3",
+        "N E W   H E R E ?   T R Y   O N E   O F   T H E S E",
+        "Changes (1 files)", "M src/Main.java  +12 -3",
         "Anthropic", "CTX", "18%");
   }
 

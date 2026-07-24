@@ -19,12 +19,20 @@ final class AppChromeTest {
         .contains("a calm middleware between you and the model")
         .contains("● Opus")
         .contains("▌ Write ▐")
-        .contains("NEW HERE? TRY ONE OF THESE")
+        .contains("N E W   H E R E ?   T R Y   O N E   O F   T H E S E")
         .contains("Explain what this project does and how it's structured")
         .contains("Find and fix the bug in <file> — it <symptom>")
         .contains("Add a <feature> and run the tests")
         .contains("^K palette")
         .contains("^C quit");
+    int starter = text(roomy).indexOf("╭" + "─".repeat(60) + "╮");
+    assertThat(starter).isGreaterThanOrEqualTo(0);
+    assertThat(roomy.stream().map(AppChrome.Row::text).toList()).containsSubsequence(
+        " ".repeat(19) + "╭" + "─".repeat(60) + "╮",
+        " ".repeat(19) + "│   N E W   H E R E ?   T R Y   O N E   O F   T H E S E      │",
+        " ".repeat(19) + "│" + " ".repeat(60) + "│",
+        " ".repeat(19) + "│  • Explain what this project does and how it's structured  │",
+        " ".repeat(19) + "╰" + "─".repeat(60) + "╯");
     assertThat(roomy.stream().filter(row -> row.tone() == AppChrome.Tone.BRAND)).isNotEmpty();
 
     List<AppChrome.Row> narrow = AppChrome.welcome(new AppChrome.Welcome(
@@ -33,6 +41,20 @@ final class AppChromeTest {
     assertThat(text(narrow)).contains("● GPT", "▌ Ask ▐", "^K", "^J", "^C")
         .doesNotContain("palette", "NEW HERE");
     assertThat(narrow).hasSize(6);
+  }
+
+  @Test
+  void animatesTheNativeCascadingWordmarkFromTheProvidedMountAge() {
+    List<String> initial = brandRows(0);
+    List<String> cascade = brandRows(650);
+    List<String> settled = brandRows(1_200);
+    List<String> bob = brandRows(1_750);
+
+    assertThat(initial).allMatch(String::isBlank);
+    assertThat(cascade).isNotEqualTo(initial);
+    assertThat(settled).isNotEqualTo(cascade);
+    assertThat(bob).isNotEqualTo(settled);
+    assertThat(brandRows(-1)).anyMatch(line -> line.contains("█"));
   }
 
   @Test
@@ -63,6 +85,10 @@ final class AppChromeTest {
     assertThat(AppChrome.status(new AppChrome.Status(
         "", "OpenAI", AppChrome.Phase.STREAMING, "", 300,
         0, 128_000, 0, "", 78)).getFirst().text()).contains("⠸ Streaming");
+    assertThat(AppChrome.statusPanel(new AppChrome.Status(
+        "", "Ollama", AppChrome.Phase.IDLE, "", 0, 200_000, 0, "", 94)).get(1).text())
+        .isEqualTo(" ▌ ● Ready      ⚡   0.0 t/s " + "▁".repeat(16)
+            + "   ·   ● Ollama · CTX   ——/  ——  " + "░".repeat(10) + " ———% ");
 
     List<AppChrome.Row> multiline = AppChrome.composer(new AppChrome.Composer(
         "first\nsecond", 12, Profile.WRITE, AppChrome.Phase.IDLE, 0, true, 78));
@@ -484,5 +510,13 @@ final class AppChromeTest {
 
   private static String text(List<AppChrome.Row> rows) {
     return String.join("\n", rows.stream().map(AppChrome.Row::text).toList());
+  }
+
+  private static List<String> brandRows(long ageMillis) {
+    return AppChrome.welcome(new AppChrome.Welcome(
+            "model", Profile.WRITE, false, 100, 20, ageMillis)).stream()
+        .filter(row -> row.tone() == AppChrome.Tone.BRAND)
+        .map(AppChrome.Row::text)
+        .toList();
   }
 }

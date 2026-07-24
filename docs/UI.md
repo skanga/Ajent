@@ -60,13 +60,17 @@ rather than exposing an orphaned body.
 
 An empty thread uses AgenTTY's 6×7 half-block `» AGENTTY` wordmark, the
 “a calm middleware between you and the model” tagline, model and profile
-chips, and the native shortcut inventory. The wordmark collapses to a
+chips, and the native shortcut inventory. The wordmark enters with the native
+100 ms-per-letter cascade and then continues the 2.2-second staggered
+per-letter bob while the welcome screen remains mounted. It collapses to a
 one-row form on short or narrow terminals. Shortcut labels collapse before
 their keys, and the row wraps by measured Unicode cell width.
 
 The three starter prompts appear only after saved-thread discovery completes
-and proves this is a genuine first run. Returning users keep the quieter
-welcome even when the currently selected thread is empty.
+and proves this is a genuine first run. On a roomy terminal they occupy the
+same centered 62-column rounded card as AgenTTY, including its letter-spaced
+heading and two-row separation before the shortcuts. Returning users keep the
+quieter welcome even when the currently selected thread is empty.
 
 ### Changes and status chrome
 
@@ -78,7 +82,10 @@ the terminal is too narrow; file facts remain visible.
 The bottom activity row prioritizes permission, compaction, streaming, tool
 execution, authentication, queued work, and idle state. It includes the
 thread title when space permits, the active provider, and a ten-cell context
-gauge derived from input tokens and the selected model's context limit.
+gauge derived from input tokens and the selected model's context limit. At
+wide sizes the idle row also retains AgenTTY's fixed-width token-rate
+sparkline and raw context-token slots; the measured degradation path removes
+those verbose fields when the terminal cannot hold them.
 Runtime and UI notifications replace the activity detail with a full-width
 severity banner and truncate by terminal-cell width instead of wrapping the
 fixed chrome.

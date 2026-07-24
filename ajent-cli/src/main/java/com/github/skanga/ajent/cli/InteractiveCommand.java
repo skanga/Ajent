@@ -986,6 +986,7 @@ final class InteractiveCommand {
     private boolean visualHashInitialized;
     private long lastVisualHash;
     private long renderPasses;
+    private long welcomeMountedNanos = Long.MIN_VALUE;
     private com.github.skanga.ajent.domain.MessageId revealMessage;
     private StreamingMarkdown reveal;
     private final ToolPanelDeferral toolPanelDeferral = new ToolPanelDeferral();
@@ -2695,7 +2696,8 @@ final class InteractiveCommand {
           .map(InteractiveVisualHash::messageKey).toList();
       boolean active = !(state.phase() instanceof SessionPhase.Idle);
       boolean revealAnimating = reveal != null && reveal.requiresAnimation();
-      long animationBucket = revealAnimating ? 1 + nowNanos / 16_000_000L
+      boolean welcomeAnimating = messages.isEmpty();
+      long animationBucket = revealAnimating || welcomeAnimating ? 1 + nowNanos / 16_000_000L
           : active ? 1 + nowNanos / 100_000_000L : 0;
 
       var surfaces = new EnumMap<InteractiveVisualHash.Surface,
@@ -2891,9 +2893,14 @@ final class InteractiveCommand {
       reconcileFrozenSurface(state, messages, width, terminalRows, nowNanos);
       int chromeWidth = Math.max(8, width - 2);
       if (messages.isEmpty()) {
+        if (welcomeMountedNanos == Long.MIN_VALUE) welcomeMountedNanos = nowNanos;
+        long welcomeAgeMillis = Math.max(0, nowNanos - welcomeMountedNanos) / 1_000_000L;
         appendInsetChrome(output, AppChrome.welcome(new AppChrome.Welcome(
             modelId, profile, !threadsLoading && threadRows.isEmpty(), chromeWidth,
-            Math.max(4, terminalRows - 11))));
+            Math.max(4, terminalRows - 11), welcomeAgeMillis)));
+        animating = true;
+      } else {
+        welcomeMountedNanos = Long.MIN_VALUE;
       }
 
       int freezeLimit = freezeLimit(state, messages);
