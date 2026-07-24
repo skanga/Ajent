@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.sun.net.httpserver.HttpServer;
 import com.pty4j.PtyProcess;
 import com.pty4j.PtyProcessBuilder;
+import com.pty4j.WinSize;
 import java.io.ByteArrayOutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -77,6 +78,41 @@ final class NativeTerminalParityIT {
         .containsExactlyElementsOf(stableRegion(nativeViewport.lines()));
     assertThat(linesBeforeTagline(nativeViewport.lines())).anyMatch(line -> !line.isBlank());
     assertThat(linesBeforeTagline(javaViewport.lines())).anyMatch(line -> !line.isBlank());
+  }
+
+  @Test
+  void bothExecutablesReflowAfterARealPtyResize(@TempDir Path root) throws Exception {
+    Path repository = repositoryRoot();
+    Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+    Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+    Path javaHome = Files.createDirectories(root.resolve("java-home"));
+    seedSavedThread(nativeHome);
+    seedSavedThread(javaHome);
+    Path nativeLauncher = launcher(root.resolve("native-resize.cmd"),
+        List.of(nativeBinary.toString()));
+
+    Capture nativeCapture = captureResized(
+        List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+        Files.createDirectories(root.resolve("native-workspace")), nativeHome);
+    Capture javaCapture = captureResized(List.of(javaExecutable(),
+            "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+            "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+        Files.createDirectories(root.resolve("java-workspace")), javaHome);
+
+    assertCleanExit(nativeCapture, "native resize");
+    assertCleanExit(javaCapture, "Java resize");
+    var nativeViewport = new AnsiViewport(96, 28);
+    nativeViewport.feed(nativeCapture.frame());
+    var javaViewport = new AnsiViewport(96, 28);
+    javaViewport.feed(javaCapture.frame());
+    assertThat(shortcutRegion(javaViewport.lines())).as(
+            "native viewport:%n%s%nJava viewport:%n%s",
+            numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+        .containsExactlyElementsOf(shortcutRegion(nativeViewport.lines()));
+    assertThat(composerRegion(javaViewport.lines())).as(
+            "native viewport:%n%s%nJava viewport:%n%s",
+            numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
+        .containsExactlyElementsOf(composerRegion(nativeViewport.lines()));
   }
 
   @Test
@@ -328,6 +364,36 @@ final class NativeTerminalParityIT {
       throws Exception {
     return capture(executable, workspace, home, "ollama", "qwen2.5-coder:7b",
         interaction, expected);
+  }
+
+  private static Capture captureResized(
+      List<String> executable, Path workspace, Path home) throws Exception {
+    var command = new ArrayList<>(executable);
+    command.addAll(List.of("--provider", "ollama", "--model", "qwen2.5-coder:7b",
+        "--workspace", workspace.toString()));
+    PtyProcess process = new PtyProcessBuilder(command.toArray(String[]::new))
+        .setDirectory(workspace.toString()).setEnvironment(terminalEnvironment(home))
+        .setInitialColumns(COLUMNS).setInitialRows(ROWS).setConsole(false)
+        .setRedirectErrorStream(true).start();
+    var output = new ByteArrayOutputStream();
+    Thread reader = startDrain(process.getInputStream(), output);
+    var emptyError = new ByteArrayOutputStream();
+    awaitWelcome(output, emptyError, Duration.ofSeconds(8));
+    awaitStableChrome(output, emptyError, Duration.ofSeconds(5));
+    process.setWinSize(new WinSize(96, 28));
+    Thread.sleep(750);
+    awaitViewportText(output, emptyError, TAGLINE, Duration.ofSeconds(5), 96, 28);
+    String frame = text(output);
+    if (process.isAlive()) {
+      process.getOutputStream().write("\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII));
+      process.getOutputStream().flush();
+    }
+    if (!process.waitFor(8, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      process.waitFor(3, TimeUnit.SECONDS);
+    }
+    reader.join(Duration.ofSeconds(3));
+    return new Capture(process.exitValue(), text(output), frame);
   }
 
   private static Capture capture(List<String> executable, Path workspace, Path home,
@@ -805,9 +871,16 @@ final class NativeTerminalParityIT {
   private static void awaitViewportText(ByteArrayOutputStream output,
                                         ByteArrayOutputStream error, String expected,
                                         Duration timeout) throws InterruptedException {
+    awaitViewportText(output, error, expected, timeout, COLUMNS, ROWS);
+  }
+
+  private static void awaitViewportText(ByteArrayOutputStream output,
+                                        ByteArrayOutputStream error, String expected,
+                                        Duration timeout, int columns, int rows)
+      throws InterruptedException {
     long deadline = System.nanoTime() + timeout.toNanos();
     while (System.nanoTime() < deadline) {
-      var viewport = new AnsiViewport(COLUMNS, ROWS);
+      var viewport = new AnsiViewport(columns, rows);
       viewport.feed(combined(output, error));
       if (viewport.lines().stream()
           .map(NativeTerminalParityIT::withoutPaintedCursor)
@@ -1083,6 +1156,26 @@ final class NativeTerminalParityIT {
     int end = lines.size();
     while (end > start && lines.get(end - 1).isBlank()) end--;
     return lines.subList(start, end);
+  }
+
+  private static List<String> shortcutRegion(List<String> lines) {
+    int start = indexContaining(lines, "type to begin");
+    return lines.subList(start, Math.min(lines.size(), start + 2));
+  }
+
+  private static List<String> composerRegion(List<String> lines) {
+    int body = indexContaining(lines, "type a message");
+    int start = Math.max(0, body - 1);
+    int end = body;
+    while (end < lines.size() && !lines.get(end).stripLeading().startsWith("╰")) end++;
+    return lines.subList(start, Math.min(lines.size(), end + 1));
+  }
+
+  private static int indexContaining(List<String> lines, String text) {
+    for (int index = 0; index < lines.size(); index++) {
+      if (lines.get(index).contains(text)) return index;
+    }
+    throw new AssertionError("viewport does not contain " + text + ":\n" + numbered(lines));
   }
 
   private static List<String> linesBeforeTagline(List<String> lines) {

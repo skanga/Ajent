@@ -298,6 +298,8 @@ slower animation cadence to reduce progressive repaint and wire traffic.
 On resize, Ajent rehydrates the mutable surface at the new width rather than
 diffing incompatible cell geometry. If display corruption occurs, press
 `Ctrl-L`; this intentionally clears Ajent's inline scrollback region.
+The executable parity gate performs a real 80x24 to 96x28 PTY resize and
+compares the reflowed shortcut and composer regions against AgenTTY.
 
 ## Accessibility and diagnostics
 
