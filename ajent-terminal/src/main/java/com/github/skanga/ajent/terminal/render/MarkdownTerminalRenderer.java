@@ -148,7 +148,7 @@ public final class MarkdownTerminalRenderer {
     if (block instanceof Heading) {
       output.addAll(wrap(inline(block, HEADING), width, ""));
     } else if (block instanceof Paragraph) {
-      output.addAll(wrap(inline(block, TerminalStyle.EMPTY), width, ""));
+      output.addAll(wrapParagraph(inline(block, TerminalStyle.EMPTY), width));
     } else if (block instanceof FencedCodeBlock fenced) {
       String source = fenced.getContentChars().toString();
       int lines = codeLines(source);
@@ -300,6 +300,15 @@ public final class MarkdownTerminalRenderer {
   }
 
   private static List<Line> wrap(List<Span> source, int width, String firstPrefix) {
+    return wrap(source, width, firstPrefix, true);
+  }
+
+  private static List<Line> wrapParagraph(List<Span> source, int width) {
+    return wrap(source, width, "", false);
+  }
+
+  private static List<Line> wrap(
+      List<Span> source, int width, String firstPrefix, boolean wordAware) {
     var lines = new ArrayList<Line>();
     var current = new ArrayList<Span>();
     int columns = 0;
@@ -313,13 +322,14 @@ public final class MarkdownTerminalRenderer {
         int codePoint = span.text().codePointAt(offset);
         offset += Character.charCount(codePoint);
         if (codePoint == '\n') {
-          flushToken(token, span.style(), width, lines, current, columns);
+          flushToken(token, span.style(), width, lines, current, columns, wordAware);
           columns = widthOf(current);
           lines.add(new Line(coalesce(current)));
           current = new ArrayList<>();
           columns = 0;
         } else if (Character.isWhitespace(codePoint)) {
-          columns = flushToken(token, span.style(), width, lines, current, columns);
+          columns = flushToken(
+              token, span.style(), width, lines, current, columns, wordAware);
           if (columns > 0) {
             if (columns + 1 > width) {
               lines.add(new Line(coalesce(current)));
@@ -334,7 +344,7 @@ public final class MarkdownTerminalRenderer {
           token.appendCodePoint(codePoint);
         }
       }
-      columns = flushToken(token, span.style(), width, lines, current, columns);
+      columns = flushToken(token, span.style(), width, lines, current, columns, wordAware);
     }
     trimTrailingSpace(current);
     if (!current.isEmpty() || lines.isEmpty()) lines.add(new Line(coalesce(current)));
@@ -342,7 +352,12 @@ public final class MarkdownTerminalRenderer {
   }
 
   private static int flushToken(StringBuilder token, TerminalStyle style, int width,
-      List<Line> lines, List<Span> current, int columns) {
+      List<Line> lines, List<Span> current, int columns, boolean wordAware) {
+    if (!wordAware) {
+      columns = flushParagraphToken(token, style, width, lines, current, columns);
+      token.setLength(0);
+      return columns;
+    }
     int tokenWidth = UnicodeWidth.stringWidth(token.toString(), UnicodeWidth.Mode.MODERN);
     if (columns > 0 && columns + tokenWidth > width && tokenWidth <= width) {
       trimTrailingSpace(current);
@@ -366,6 +381,70 @@ public final class MarkdownTerminalRenderer {
     }
     token.setLength(0);
     return columns;
+  }
+
+  private static int flushParagraphToken(StringBuilder token, TerminalStyle style, int width,
+      List<Line> lines, List<Span> current, int columns) {
+    int available = width - columns;
+    int tokenWidth = UnicodeWidth.stringWidth(token.toString(), UnicodeWidth.Mode.MODERN);
+    if (columns > 0 && tokenWidth > available && !hasHyphenBreak(token, available)) {
+      trimTrailingSpace(current);
+      lines.add(new Line(coalesce(current)));
+      current.clear();
+      columns = 0;
+    }
+    int offset = 0;
+    while (offset < token.length()) {
+      int cut = paragraphCut(token, offset, width - columns);
+      String chunk = token.substring(offset, cut);
+      add(current, chunk, style);
+      columns += UnicodeWidth.stringWidth(chunk, UnicodeWidth.Mode.MODERN);
+      offset = cut;
+      if (offset < token.length()) {
+        if (token.charAt(offset) == '-') offset++;
+        trimTrailingSpace(current);
+        lines.add(new Line(coalesce(current)));
+        current.clear();
+        columns = 0;
+      }
+    }
+    return columns;
+  }
+
+  private static boolean hasHyphenBreak(CharSequence token, int available) {
+    if (available <= 0) return false;
+    int columns = 0;
+    for (int offset = 0; offset < token.length();) {
+      int codePoint = Character.codePointAt(token, offset);
+      if (codePoint == '-' && offset > 0 && columns <= available) return true;
+      columns += UnicodeWidth.of(codePoint);
+      offset += Character.charCount(codePoint);
+      if (codePoint == '-' && columns <= available) return true;
+      if (columns > available) return false;
+    }
+    return false;
+  }
+
+  private static int paragraphCut(CharSequence token, int offset, int available) {
+    int columns = 0;
+    int hardCut = offset;
+    int hyphenCut = -1;
+    for (int cursor = offset; cursor < token.length();) {
+      int codePoint = Character.codePointAt(token, cursor);
+      int next = cursor + Character.charCount(codePoint);
+      int glyphWidth = UnicodeWidth.of(codePoint);
+      if (codePoint == '-' && cursor > offset) hyphenCut = cursor;
+      if (columns + glyphWidth > available) break;
+      columns += glyphWidth;
+      hardCut = next;
+      if (codePoint == '-') hyphenCut = next;
+      cursor = next;
+    }
+    if (hardCut == token.length()) return hardCut;
+    if (hardCut == offset && available > 0) {
+      return offset + Character.charCount(Character.codePointAt(token, offset));
+    }
+    return hyphenCut > offset ? hyphenCut : hardCut;
   }
 
   private static int widthOf(List<Span> spans) {

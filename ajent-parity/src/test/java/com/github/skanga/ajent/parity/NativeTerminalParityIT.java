@@ -116,6 +116,46 @@ final class NativeTerminalParityIT {
   }
 
   @Test
+  void committedScrollbackOnlyAppendsAcrossRealProviderTurns(@TempDir Path root)
+      throws Exception {
+    var requests = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    HttpServer provider = scrollbackProvider(requests);
+    provider.start();
+    String endpoint = "127.0.0.1:" + provider.getAddress().getPort();
+    try {
+      Path repository = repositoryRoot();
+      Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
+      Path nativeHome = Files.createDirectories(root.resolve("native-home"));
+      Path javaHome = Files.createDirectories(root.resolve("java-home"));
+      Path nativeLauncher = launcher(root.resolve("native-scrollback.cmd"),
+          List.of(nativeBinary.toString()));
+
+      ScrollbackCapture nativeCapture = captureScrollbackPty(
+          List.of("cmd.exe", "/d", "/c", nativeLauncher.toString()),
+          Files.createDirectories(root.resolve("native-workspace")), nativeHome, endpoint);
+      ScrollbackCapture javaCapture = captureScrollbackPiped(List.of(javaExecutable(),
+              "--enable-native-access=ALL-UNNAMED", "-Duser.home=" + javaHome,
+              "-Dajent.terminal.fixedSize=" + COLUMNS + "x" + ROWS,
+              "-jar", repository.resolve("ajent-cli/target/ajent.jar").toString()),
+          Files.createDirectories(root.resolve("java-workspace")), javaHome, endpoint);
+
+      assertCleanExit(nativeCapture.exitCode(), nativeCapture.output(), "native scrollback");
+      assertCleanExit(javaCapture.exitCode(), javaCapture.output(), "Java scrollback");
+      assertThat(requests).hasSize(6);
+      assertAppendOnly(nativeCapture.snapshots(), "native");
+      assertAppendOnly(javaCapture.snapshots(), "Java");
+      List<String> nativeCommitted = committedFrom(nativeCapture.snapshots().getLast(), "turn one");
+      List<String> javaCommitted = committedFrom(javaCapture.snapshots().getLast(), "turn one");
+      assertThat(normalizeDynamicCells(javaCommitted)).as(
+              "native committed:%n%s%nJava committed:%n%s",
+              numbered(nativeCommitted), numbered(javaCommitted))
+          .containsExactlyElementsOf(normalizeDynamicCells(nativeCommitted));
+    } finally {
+      provider.stop(0);
+    }
+  }
+
+  @Test
   void typedComposerEditingMatchesTheNativeViewport(@TempDir Path root) throws Exception {
     Path repository = repositoryRoot();
     Path nativeBinary = Path.of(requiredProperty("agentty.binary")).toAbsolutePath().normalize();
@@ -394,6 +434,92 @@ final class NativeTerminalParityIT {
     }
     reader.join(Duration.ofSeconds(3));
     return new Capture(process.exitValue(), text(output), frame);
+  }
+
+  private static ScrollbackCapture captureScrollbackPty(
+      List<String> executable, Path workspace, Path home, String provider) throws Exception {
+    var command = new ArrayList<>(executable);
+    command.addAll(List.of("--provider", provider, "--model", "parity-model",
+        "--workspace", workspace.toString()));
+    PtyProcess process = new PtyProcessBuilder(command.toArray(String[]::new))
+        .setDirectory(workspace.toString()).setEnvironment(terminalEnvironment(home))
+        .setInitialColumns(COLUMNS).setInitialRows(ROWS).setConsole(false)
+        .setRedirectErrorStream(true).start();
+    var output = new ByteArrayOutputStream();
+    var error = new ByteArrayOutputStream();
+    Thread reader = startDrain(process.getInputStream(), output);
+    Thread errorReader = startDrain(process.getErrorStream(), error);
+    return driveScrollback(process, output, error, reader, errorReader, false);
+  }
+
+  private static ScrollbackCapture captureScrollbackPiped(
+      List<String> executable, Path workspace, Path home, String provider) throws Exception {
+    var command = new ArrayList<>(executable);
+    command.addAll(List.of("--provider", provider, "--model", "parity-model",
+        "--workspace", workspace.toString()));
+    ProcessBuilder builder = new ProcessBuilder(command).directory(workspace.toFile())
+        .redirectErrorStream(true);
+    builder.environment().putAll(terminalEnvironment(home));
+    Process process = builder.start();
+    var output = new ByteArrayOutputStream();
+    var error = new ByteArrayOutputStream();
+    Thread reader = startDrain(process.getInputStream(), output);
+    return driveScrollback(process, output, error, reader, null, true);
+  }
+
+  private static ScrollbackCapture driveScrollback(
+      Process process, ByteArrayOutputStream output, ByteArrayOutputStream error,
+      Thread reader, Thread errorReader, boolean enhancedControlC) throws Exception {
+    awaitWelcome(output, error, Duration.ofSeconds(8));
+    awaitStableChrome(output, error, Duration.ofSeconds(5));
+    var snapshots = new ArrayList<List<String>>();
+    for (int turn = 1; turn <= 3; turn++) {
+      String word = switch (turn) {
+        case 1 -> "one";
+        case 2 -> "two";
+        default -> "three";
+      };
+      String marker = Character.toString('A' + turn - 1) + "19-END";
+      process.getOutputStream().write(
+          ("turn " + word + "\r").getBytes(StandardCharsets.US_ASCII));
+      process.getOutputStream().flush();
+      awaitViewportText(output, error, marker, Duration.ofSeconds(12));
+      Thread.sleep(250);
+      var viewport = new AnsiViewport(COLUMNS, ROWS);
+      viewport.feed(combined(output, error));
+      snapshots.add(viewport.scrollback());
+    }
+    String frame = combined(output, error);
+    if (process.isAlive()) {
+      byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
+          : new byte[] {3};
+      process.getOutputStream().write(quit);
+      process.getOutputStream().flush();
+    }
+    if (!process.waitFor(8, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      process.waitFor(3, TimeUnit.SECONDS);
+    }
+    reader.join(Duration.ofSeconds(3));
+    if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
+    return new ScrollbackCapture(
+        process.exitValue(), combined(output, error), List.copyOf(snapshots), frame);
+  }
+
+  private static void assertAppendOnly(List<List<String>> snapshots, String implementation) {
+    assertThat(snapshots).hasSize(3);
+    for (int index = 1; index < snapshots.size(); index++) {
+      List<String> previous = snapshots.get(index - 1);
+      List<String> current = snapshots.get(index);
+      assertThat(current).as("%s scrollback after turn %s", implementation, index + 1)
+          .hasSizeGreaterThanOrEqualTo(previous.size())
+          .startsWith(previous.toArray(String[]::new));
+    }
+  }
+
+  private static List<String> committedFrom(List<String> lines, String marker) {
+    int start = indexContaining(lines, marker);
+    return lines.subList(start, lines.size());
   }
 
   private static Capture capture(List<String> executable, Path workspace, Path home,
@@ -1033,6 +1159,37 @@ final class NativeTerminalParityIT {
     return server;
   }
 
+  private static HttpServer scrollbackProvider(List<String> requests) throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.setExecutor(command ->
+        Thread.ofVirtual().name("scrollback-provider").start(command));
+    server.createContext("/v1/chat/completions", exchange -> {
+      try (exchange) {
+        String request = new String(
+            exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        requests.add(request);
+        char prefix = request.contains("turn three") ? 'C'
+            : request.contains("turn two") ? 'B' : 'A';
+        var content = new StringBuilder();
+        for (int line = 0; line < 20; line++) {
+          if (line > 0) content.append("\\n");
+          content.append(prefix).append(String.format(java.util.Locale.ROOT, "%02d", line));
+          if (line == 19) content.append("-END");
+          else content.append("-committed-scrollback-row");
+        }
+        String body = "data: {\"choices\":[{\"delta\":{\"content\":\""
+            + content + "\"}}]}\n\n"
+            + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+            + "data: [DONE]\n\n";
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+      }
+    });
+    return server;
+  }
+
   private static HttpServer permissionProvider(List<String> requests) throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/v1/models", exchange -> {
@@ -1262,6 +1419,12 @@ final class NativeTerminalParityIT {
   }
 
   private record Capture(int exitCode, String output, String frame) {}
+  private record ScrollbackCapture(
+      int exitCode, String output, List<List<String>> snapshots, String frame) {
+    private ScrollbackCapture {
+      snapshots = snapshots.stream().map(List::copyOf).toList();
+    }
+  }
   private record StagedCapture(int exitCode, String output, String permissionFrame,
                                String finalFrame, String pickerFrame,
                                String movedPickerFrame, String commandFrame,

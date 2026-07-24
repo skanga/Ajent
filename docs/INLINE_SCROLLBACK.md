@@ -122,6 +122,8 @@ The scrollback contract is covered by:
 - oversized-entry and fresh-frame cases;
 - active-stream mutable-tail tests;
 - mid-run seam, wire, and freeze transitions;
+- a three-turn real AgenTTY/Ajent provider differential whose physical
+  scrollback snapshots must grow by exact prefix extension;
 - width-change rehydration;
 - long-session and real-thread probes.
 

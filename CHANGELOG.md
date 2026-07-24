@@ -114,6 +114,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
   queue placeholder/count, animated Braille phase glyphs, and automatic drain.
 - Added a real 80x24 → 96x28 PTY resize differential proving WINCH-driven
   shortcut and composer reflow in both executables.
+- Added a three-turn real-provider scrollback differential proving that both
+  executables only append committed rows, plus AgenTTY-compatible
+  hyphen-boundary wrapping for settled assistant prose.
 - Replaced the live diff-review placeholder with AgenTTY's complete bordered
   two-axis panel: file counters, every structured hunk, nested numbered diffs,
   pending/accepted/rejected tags, navigation, and exact Y/N/A/X workflow.
@@ -124,8 +127,8 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 
 ### Known limitations
 
-- Animated wordmark-frame, append-only scrollback, and wide-only first-run/status
-  density terminal differentials remain under parity work;
+- Animated wordmark-frame and wide-only first-run/status density terminal
+  differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live
   permissioned Bash-tool turn now compare cell-for-cell.
 - AgenTTY's checked-in runtime never adds tool changes to `pending_changes`;

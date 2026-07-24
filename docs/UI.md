@@ -300,6 +300,9 @@ diffing incompatible cell geometry. If display corruption occurs, press
 `Ctrl-L`; this intentionally clears Ajent's inline scrollback region.
 The executable parity gate performs a real 80x24 to 96x28 PTY resize and
 compares the reflowed shortcut and composer regions against AgenTTY.
+It also runs three loopback-provider turns and verifies that physical
+scrollback grows by exact prefix extension while the final committed
+conversation matches AgenTTY cell-for-cell.
 
 ## Accessibility and diagnostics
 
