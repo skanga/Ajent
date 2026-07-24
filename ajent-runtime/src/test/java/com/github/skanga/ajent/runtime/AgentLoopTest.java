@@ -19,6 +19,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 final class AgentLoopTest {
+  @Test void decidesTickEligibilityWithoutSchedulerTiming() {
+    assertThat(AgentLoop.shouldDispatchTick(false, false)).isTrue();
+    assertThat(AgentLoop.shouldDispatchTick(false, true)).isFalse();
+    assertThat(AgentLoop.shouldDispatchTick(true, false)).isFalse();
+  }
+
   @Test void interpretsACompleteProviderTurnAndPersistsState() throws Exception {
     var idle = new CountDownLatch(1);
     var saves = new AtomicInteger();

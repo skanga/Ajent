@@ -238,10 +238,14 @@ public final class AgentLoop implements AutoCloseable {
 
   private void dispatchTickIfActive() {
     synchronized (lock) {
-      if (closed || state.phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle)
-        return;
+      if (!shouldDispatchTick(
+          closed, state.phase() instanceof com.github.skanga.ajent.domain.SessionPhase.Idle)) return;
     }
     dispatchIfOpen(new RuntimeMessage.Tick());
+  }
+
+  static boolean shouldDispatchTick(boolean closed, boolean idle) {
+    return !closed && !idle;
   }
 
   @Override public void close() {
