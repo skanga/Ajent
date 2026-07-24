@@ -212,7 +212,9 @@ public final class RepoMapTools {
   }
 
   private static String extension(Path path) {
-    String name = path.getFileName().toString();
+    Path fileName = path.getFileName();
+    if (fileName == null) return "";
+    String name = fileName.toString();
     int dot = name.lastIndexOf('.');
     return dot < 0 ? "" : name.substring(dot).toLowerCase(Locale.ROOT);
   }

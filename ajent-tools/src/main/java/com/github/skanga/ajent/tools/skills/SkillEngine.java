@@ -109,9 +109,10 @@ public final class SkillEngine {
         || skill.name().charAt(skill.name().length() - 1) == '-'))
       diagnostics.add("name must not start or end with a hyphen");
     if (doubleHyphen) diagnostics.add("name contains consecutive hyphens");
-    if (skill.directory() != null && skill.directory().getFileName() != null
-        && !skill.directory().getFileName().toString().equals(skill.name()))
-      diagnostics.add("name does not match parent directory '" + skill.directory().getFileName() + "'");
+    Path directoryName = skill.directory() == null ? null : skill.directory().getFileName();
+    if (directoryName != null && !directoryName.toString().equals(skill.name())) {
+      diagnostics.add("name does not match parent directory '" + directoryName + "'");
+    }
     if (skill.description().isEmpty()) diagnostics.add("description is missing");
     if (utf8Length(skill.description()) > 1024) diagnostics.add("description exceeds 1024 characters");
     if (utf8Length(skill.compatibility()) > 500)
@@ -160,7 +161,9 @@ public final class SkillEngine {
       if (output.size() >= MAX_SKILLS) return;
       String raw = readCapped(directory.resolve("SKILL.md"));
       if (raw.isEmpty()) continue;
-      Parsed parsed = parse(raw, directory.getFileName().toString());
+      Path directoryName = directory.getFileName();
+      if (directoryName == null) continue;
+      Parsed parsed = parse(raw, directoryName.toString());
       if (parsed.name().isEmpty() || !names.add(parsed.name())) continue;
       Path canonical = canonical(directory);
       List<String> resources = resources(canonical);

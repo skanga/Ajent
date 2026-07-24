@@ -334,10 +334,10 @@ public final class FileTools {
     }
     entries.sort(Comparator
         .comparing((Path path) -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
-        .thenComparing(path -> path.getFileName().toString()));
+        .thenComparing(FileTools::fileName));
     for (Path entry : entries) {
       if (total[0] > 1000) { output.append("[>1000 entries, truncated]\n"); break; }
-      String name = entry.getFileName().toString();
+      String name = fileName(entry);
       output.append("  ".repeat(depth));
       if (Files.isSymbolicLink(entry)) {
         output.append(name).append(" -> ").append(Files.readSymbolicLink(entry)).append('\n');
@@ -356,6 +356,11 @@ public final class FileTools {
       total[0]++;
     }
     return total[0];
+  }
+
+  private static String fileName(Path path) {
+    Path value = path.getFileName();
+    return value == null ? path.toString() : value.toString();
   }
 
   private List<Edit> parseEdits(JsonNode arguments, ArgReader args) {

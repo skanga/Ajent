@@ -18,6 +18,8 @@ import java.util.function.LongSupplier;
 
 /** Blocking native-compatible login, logout, and credential-status commands. */
 public final class AuthCommands {
+  private static final System.Logger LOGGER = System.getLogger(AuthCommands.class.getName());
+
   interface LoginFlow {
     AnthropicOAuthLogin.Attempt newAttempt();
     OAuthTokenClient.Result exchange(String code, String verifier, String state);
@@ -123,6 +125,10 @@ public final class AuthCommands {
   private static String stripTrailing(String value) { return value.stripTrailing(); }
   private static void openBrowser(URI uri) {
     if (!Desktop.isDesktopSupported()) return;
-    try { Desktop.getDesktop().browse(uri); } catch (IOException | UnsupportedOperationException ignored) {}
+    try {
+      Desktop.getDesktop().browse(uri);
+    } catch (IOException | UnsupportedOperationException exception) {
+      LOGGER.log(System.Logger.Level.DEBUG, "Could not open OAuth URL", exception);
+    }
   }
 }

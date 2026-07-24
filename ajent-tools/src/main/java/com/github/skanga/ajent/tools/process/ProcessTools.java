@@ -110,8 +110,7 @@ public final class ProcessTools {
       // The native tool still returns a bounded preview when persistence is unavailable.
     }
     String head = utf8Slice(bytes, 0, Math.min(SPILL_PREVIEW_HEAD, bytes.length));
-    String tail = bytes.length > SPILL_PREVIEW_HEAD + SPILL_PREVIEW_TAIL + 100
-        ? utf8Slice(bytes, bytes.length - SPILL_PREVIEW_TAIL, bytes.length) : "";
+    String tail = utf8Slice(bytes, bytes.length - SPILL_PREVIEW_TAIL, bytes.length);
     var errors = output.lines().filter(ProcessTools::looksLikeError).limit(10).toList();
     var envelope = new StringBuilder("<persisted-output>\nOutput too large (")
         .append(bytes.length / 1024).append(" KB total). ");

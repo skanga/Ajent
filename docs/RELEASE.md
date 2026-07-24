@@ -27,8 +27,21 @@ mvn -q verify
 ```
 
 This compiles every module, runs unit and integration tests, checks dependency
-convergence, and enforces aggregate 80 percent line and branch coverage. Also
-verify the packaged CLI:
+convergence and deterministic whitespace, runs maximum-effort SpotBugs, enforces
+aggregate 80 percent line and branch coverage, packages the distribution, and
+emits its CycloneDX SBOM.
+
+Run the aggregate dependency vulnerability gate as well:
+
+```text
+mvn -q -Psecurity -DskipTests verify
+```
+
+It fails for dependencies at CVSS 7 or higher and writes HTML and JSON reports
+under `target`. Set `NVD_API_KEY` when available; CI caches the NVD data directory
+at `~/.m2/dependency-check-data`.
+
+Also verify the packaged CLI:
 
 ```text
 mvn -q package -Djacoco.skip=true

@@ -28,7 +28,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -249,8 +248,9 @@ final class RoutedHttpClient extends HttpClient {
     private final okhttp3.Response response;
     private final Call call;
     private final HttpResponse.BodySubscriber<?> subscriber;
-    private final AtomicLong demand = new AtomicLong();
+    private final Object demandMonitor = new Object();
     private final AtomicBoolean started = new AtomicBoolean();
+    private long demand;
     private volatile boolean cancelled;
 
     private ResponseSubscription(
@@ -266,21 +266,23 @@ final class RoutedHttpClient extends HttpClient {
         subscriber.onError(new IllegalArgumentException("non-positive response demand"));
         return;
       }
-      demand.getAndUpdate(current -> {
+      synchronized (demandMonitor) {
         try {
-          return Math.addExact(current, count);
+          demand = Math.addExact(demand, count);
         } catch (ArithmeticException overflow) {
-          return Long.MAX_VALUE;
+          demand = Long.MAX_VALUE;
         }
-      });
-      synchronized (demand) { demand.notifyAll(); }
+        demandMonitor.notifyAll();
+      }
       if (started.compareAndSet(false, true)) java.lang.Thread.startVirtualThread(this::read);
     }
 
     @Override public void cancel() {
-      cancelled = true;
+      synchronized (demandMonitor) {
+        cancelled = true;
+        demandMonitor.notifyAll();
+      }
       call.cancel();
-      synchronized (demand) { demand.notifyAll(); }
     }
 
     private void read() {
@@ -295,7 +297,9 @@ final class RoutedHttpClient extends HttpClient {
             return;
           }
           subscriber.onNext(List.of(ByteBuffer.wrap(buffer, 0, count).asReadOnlyBuffer()));
-          demand.updateAndGet(current -> current == Long.MAX_VALUE ? current : current - 1);
+          synchronized (demandMonitor) {
+            if (demand != Long.MAX_VALUE) demand--;
+          }
         }
       } catch (IOException | RuntimeException failure) {
         reportUnlessCancelled(failure);
@@ -310,8 +314,8 @@ final class RoutedHttpClient extends HttpClient {
     }
 
     private void awaitDemand() throws InterruptedException {
-      synchronized (demand) {
-        while (!cancelled && demand.get() == 0) demand.wait();
+      synchronized (demandMonitor) {
+        while (!cancelled && demand == 0) demandMonitor.wait();
       }
     }
   }

@@ -99,14 +99,17 @@ public final class CredentialStore {
   }
 
   private boolean writePrivate(String content) throws IOException {
-    Path parent = path.getParent();
+    Path parent = java.util.Objects.requireNonNull(path.getParent(),
+        "credential path must have a parent");
+    Path fileName = java.util.Objects.requireNonNull(path.getFileName(),
+        "credential path must have a file name");
     Files.createDirectories(parent);
     Path temporary;
     if (Files.getFileStore(parent).supportsFileAttributeView("posix")) {
-      temporary = Files.createTempFile(parent, path.getFileName().toString(), ".tmp",
+      temporary = Files.createTempFile(parent, fileName.toString(), ".tmp",
           PosixFilePermissions.asFileAttribute(PRIVATE_PERMISSIONS));
     } else {
-      temporary = Files.createTempFile(parent, path.getFileName().toString(), ".tmp");
+      temporary = Files.createTempFile(parent, fileName.toString(), ".tmp");
     }
     try {
       byte[] bytes = content.getBytes(StandardCharsets.UTF_8);

@@ -216,8 +216,10 @@ public final class JsonlMemoryStore implements MemoryStore {
   }
 
   private static void write(Path path, List<StoredRecord> records) throws IOException {
-    Files.createDirectories(path.getParent());
-    Path temporary = Files.createTempFile(path.getParent(), "memory-", ".tmp");
+    Path parent = java.util.Objects.requireNonNull(path.getParent(),
+        "memory path must have a parent");
+    Files.createDirectories(parent);
+    Path temporary = Files.createTempFile(parent, "memory-", ".tmp");
     try {
       var output = new StringBuilder();
       for (StoredRecord record : records) output.append(serialize(record)).append('\n');

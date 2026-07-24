@@ -115,7 +115,9 @@ public final class WorkspaceIndex {
         @Override public FileVisitResult preVisitDirectory(
             Path directory, BasicFileAttributes attributes) {
           if (directory.equals(root)) return FileVisitResult.CONTINUE;
-          String name = directory.getFileName().toString();
+          Path fileName = directory.getFileName();
+          if (fileName == null) return FileVisitResult.CONTINUE;
+          String name = fileName.toString();
           int depth = root.relativize(directory).getNameCount() - 1;
           return WorkspaceSandbox.shouldSkipDirectory(name) || depth > 0 && name.startsWith(".")
               ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
@@ -156,7 +158,9 @@ public final class WorkspaceIndex {
   }
 
   private static String extension(Path file) {
-    String name = file.getFileName().toString();
+    Path fileName = file.getFileName();
+    if (fileName == null) return "";
+    String name = fileName.toString();
     int dot = name.lastIndexOf('.');
     return dot < 0 ? "" : name.substring(dot).toLowerCase(Locale.ROOT);
   }

@@ -16,8 +16,8 @@ public final class TerminalStylePool {
   private final List<TerminalStyle> styles = new ArrayList<>();
   private final List<String> sgrCache = new ArrayList<>();
   private final Map<TerminalStyle, Integer> ids = new HashMap<>();
-  private long poolId;
-  private boolean overflowed;
+  private volatile long poolId;
+  private volatile boolean overflowed;
 
   public TerminalStylePool() { this(3); }
 

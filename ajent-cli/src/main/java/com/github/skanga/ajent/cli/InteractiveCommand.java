@@ -113,6 +113,8 @@ import java.util.function.Supplier;
 
 /** Interactive terminal composition root. */
 final class InteractiveCommand {
+  private static final System.Logger LOGGER =
+      System.getLogger(InteractiveCommand.class.getName());
   private static final int USAGE_ERROR = 2;
   private static final int SOFTWARE_ERROR = 70;
   private static final String DEFAULT_MODEL = "claude-opus-4-5";
@@ -430,8 +432,11 @@ final class InteractiveCommand {
         }
         @Override public void openBrowser(URI uri) {
           if (!Desktop.isDesktopSupported()) return;
-          try { Desktop.getDesktop().browse(uri); }
-          catch (IOException | UnsupportedOperationException ignored) { }
+          try {
+            Desktop.getDesktop().browse(uri);
+          } catch (IOException | UnsupportedOperationException exception) {
+            LOGGER.log(System.Logger.Level.DEBUG, "Could not open OAuth URL", exception);
+          }
         }
         @Override public boolean installAnthropicKey(String key) {
           if (!credentials.save(new Credential.ApiKey(key))) return false;
@@ -1062,230 +1067,232 @@ final class InteractiveCommand {
     }
 
     boolean key(TerminalKey key, AgentControl loop) {
-      ToolUse pending = permission.current();
-      if (pending != null) {
-        if (key.key() == TerminalKey.SpecialKey.ESCAPE) permission.resolve(false, false);
-        if (key.key() instanceof TerminalKey.CharacterKey character) {
-          switch (Character.toLowerCase(character.codePoint())) {
-            case 'y' -> permission.resolve(true, false);
-            case 'a' -> permission.resolve(true, true);
-            case 'n' -> permission.resolve(false, false);
+      synchronized (lock) {
+        ToolUse pending = permission.current();
+        if (pending != null) {
+          if (key.key() == TerminalKey.SpecialKey.ESCAPE) permission.resolve(false, false);
+          if (key.key() instanceof TerminalKey.CharacterKey character) {
+            switch (Character.toLowerCase(character.codePoint())) {
+              case 'y' -> permission.resolve(true, false);
+              case 'a' -> permission.resolve(true, true);
+              case 'n' -> permission.resolve(false, false);
+              default -> { }
+            }
+          }
+          return true;
+        }
+        if (plan instanceof PickerState.OpenModal) {
+          if (key.key() == TerminalKey.SpecialKey.ESCAPE) plan = PlanModal.close(plan);
+          render();
+          return true;
+        }
+        if (mentions instanceof MentionPicker.Open) return mentionKey(key);
+        if (symbols instanceof SymbolPicker.Open) return symbolKey(key);
+        if (codeBlocks instanceof CodeBlockPicker.Open) return codeBlockKey(key, loop);
+        if (codeBlocks instanceof CodeBlockPicker.Result) return codeResultKey(key);
+        if (checkpoints instanceof CheckpointPicker.Open) return checkpointKey(key, loop);
+        if (LoginModal.isOpen(login)) return loginKey(key, loop);
+        if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key, loop);
+        if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
+        if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
+        if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
+        if (threadPicker instanceof PickerState.OpenAt) return threadPickerKey(key, loop);
+        if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
+        if (key.key() instanceof TerminalKey.CharacterKey character
+            && isSmartPasteKey(character.codePoint(), key.modifiers())) {
+          smartPaste();
+          return true;
+        }
+        if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
+          int codePoint = Character.toLowerCase(character.codePoint());
+          if (codePoint == 'c') return false;
+          if (codePoint == '/') { openModelPicker(loop); render(); return true; }
+          if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
+          if (codePoint == 'j') { openThreadPicker(loop); render(); return true; }
+          if (codePoint == 'p') {
+            providerRows = loop.providers();
+            providerPicker = ProviderPicker.open(providerRows, loop.provider());
+            render();
+            return true;
+          }
+          if (codePoint == 'l') {
+            frame = new InlineFrameRenderer.Empty();
+            visualHashInitialized = false;
+            terminal.write("\u001b[2J\u001b[3J\u001b[H");
+            render();
+            return true;
+          }
+          if (codePoint == 'r') {
+            DiffReview.Result opened = DiffReview.open(loop.pendingChanges());
+            diffReview = opened.state();
+            diffFiles = opened.files();
+            uiStatus = opened.status();
+            render();
+            return true;
+          }
+          if (codePoint == 'n') {
+            loop.newThread();
+            resetForThreadSwap();
+            return true;
+          }
+          if (codePoint == 'e') {
+            composerExpanded = !composerExpanded;
+            render();
+            return true;
+          }
+          if (codePoint == 't') { plan = PlanModal.open(); render(); return true; }
+          if (codePoint == 'g') { openCodeBlocks(loop); render(); return true; }
+          if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
+          if (codePoint == 'u') {
+            int lineStart = cursor > 0 ? composer.lastIndexOf('\n', cursor - 1) + 1 : 0;
+            if (lineStart < cursor) {
+              beginComposerEdit();
+              composer = composer.substring(0, lineStart) + composer.substring(cursor);
+              cursor = lineStart;
+              render();
+            }
+            return true;
+          }
+          if (codePoint == 'w') { deleteComposerRange(wordLeft(cursor), cursor); return true; }
+          if (codePoint == 'z') {
+            if (key.modifiers().shift()) redoComposer();
+            else undoComposer();
+            return true;
+          }
+          if (codePoint == 'y') { redoComposer(); return true; }
+        }
+        if (key.key() instanceof TerminalKey.SpecialKey special) {
+          if (key.modifiers().shift()
+              && (special == TerminalKey.SpecialKey.TAB
+                  || special == TerminalKey.SpecialKey.BACK_TAB)) {
+            profile = loop.cycleProfile();
+            uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
+            render();
+            return true;
+          }
+          if (key.modifiers().ctrl() && !key.modifiers().alt() && composer.isEmpty()
+              && loop.state().phase() instanceof SessionPhase.Idle
+              && (special == TerminalKey.SpecialKey.LEFT
+                  || special == TerminalKey.SpecialKey.RIGHT)) {
+            cycleThread(loop, special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
+            return true;
+          }
+          if (key.modifiers().alt()
+              && (special == TerminalKey.SpecialKey.LEFT
+                  || special == TerminalKey.SpecialKey.RIGHT)) {
+            cycleThread(loop, special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
+            return true;
+          }
+          switch (special) {
+            case ENTER -> {
+              if (key.modifiers().shift() || key.modifiers().alt()) {
+                composerExpanded = true;
+                insert("\n");
+              }
+              else if (!composer.isEmpty()) {
+                String submitted = composer;
+                List<Attachment> attachments = composerAttachments;
+                if (queuePeekIndex >= 0 && queuePeekIndex < queuePeekItems.size()) {
+                  var queued = new ArrayList<>(queuePeekItems);
+                  queued.remove(queuePeekIndex);
+                  loop.dispatch(new RuntimeMessage.ReplaceQueued(queued));
+                }
+                clearComposer();
+                uiStatus = "";
+                loop.dispatch(new RuntimeMessage.Submit(submitted, List.of(), attachments));
+              }
+            }
+            case BACKSPACE -> {
+              if (key.modifiers().alt() && composer.isEmpty()
+                  && queuePeekIndex < 0 && !loop.state().queued().isEmpty()) {
+                var queued = new ArrayList<>(loop.state().queued());
+                queued.removeLast();
+                loop.dispatch(new RuntimeMessage.ReplaceQueued(queued));
+                render();
+                break;
+              }
+              if (cursor > 0) {
+                beginComposerEdit();
+                int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
+                int previous = chipLength > 0 ? cursor - chipLength
+                    : composer.offsetByCodePoints(cursor, -1);
+                composer = composer.substring(0, previous) + composer.substring(cursor);
+                cursor = previous;
+                render();
+              }
+            }
+            case LEFT -> {
+              if (key.modifiers().ctrl()) {
+                cursor = wordLeft(cursor);
+                render();
+                break;
+              }
+              if (cursor > 0) {
+                int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
+                cursor = chipLength > 0 ? cursor - chipLength
+                    : composer.offsetByCodePoints(cursor, -1);
+              }
+              render();
+            }
+            case RIGHT -> {
+              if (key.modifiers().ctrl()) {
+                cursor = wordRight(cursor);
+                render();
+                break;
+              }
+              if (cursor < composer.length()) {
+                int chipLength = AttachmentText.placeholderLengthAt(composer, cursor);
+                cursor = chipLength > 0 ? cursor + chipLength
+                    : composer.offsetByCodePoints(cursor, 1);
+              }
+              render();
+            }
+            case HOME -> { cursor = 0; render(); }
+            case END -> { cursor = composer.length(); render(); }
+            case UP -> {
+              if (key.modifiers().alt()
+                  && (!loop.state().queued().isEmpty() || queuePeekIndex >= 0)) {
+                queuePeekPrevious(loop);
+              } else if (composer.isEmpty() && !loop.state().queued().isEmpty()
+                  && historyIndex < 0) {
+                recallQueued(loop);
+              } else if (historyIndex >= 0 || composer.isEmpty()) {
+                historyPrevious(loop.state());
+              }
+            }
+            case DOWN -> {
+              if (key.modifiers().alt() && queuePeekIndex >= 0) queuePeekNext(loop);
+              else if (historyIndex >= 0) historyNext(loop.state());
+            }
+            case ESCAPE -> {
+              if (!(loop.state().phase() instanceof SessionPhase.Idle)) loop.dispatch(new RuntimeMessage.Cancel());
+            }
             default -> { }
           }
-        }
-        return true;
-      }
-      if (plan instanceof PickerState.OpenModal) {
-        if (key.key() == TerminalKey.SpecialKey.ESCAPE) plan = PlanModal.close(plan);
-        render();
-        return true;
-      }
-      if (mentions instanceof MentionPicker.Open) return mentionKey(key);
-      if (symbols instanceof SymbolPicker.Open) return symbolKey(key);
-      if (codeBlocks instanceof CodeBlockPicker.Open) return codeBlockKey(key, loop);
-      if (codeBlocks instanceof CodeBlockPicker.Result) return codeResultKey(key);
-      if (checkpoints instanceof CheckpointPicker.Open) return checkpointKey(key, loop);
-      if (LoginModal.isOpen(login)) return loginKey(key, loop);
-      if (diffReview instanceof PickerState.OpenAtCell) return diffReviewKey(key, loop);
-      if (palette instanceof CommandPalette.Open) return paletteKey(key, loop);
-      if (modelPicker instanceof PickerState.OpenAt) return modelPickerKey(key, loop);
-      if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
-      if (threadPicker instanceof PickerState.OpenAt) return threadPickerKey(key, loop);
-      if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
-      if (key.key() instanceof TerminalKey.CharacterKey character
-          && isSmartPasteKey(character.codePoint(), key.modifiers())) {
-        smartPaste();
-        return true;
-      }
-      if (key.key() instanceof TerminalKey.CharacterKey character && key.modifiers().ctrl()) {
-        int codePoint = Character.toLowerCase(character.codePoint());
-        if (codePoint == 'c') return false;
-        if (codePoint == '/') { openModelPicker(loop); render(); return true; }
-        if (codePoint == 'k') { palette = CommandPalette.open(); render(); return true; }
-        if (codePoint == 'j') { openThreadPicker(loop); render(); return true; }
-        if (codePoint == 'p') {
-          providerRows = loop.providers();
-          providerPicker = ProviderPicker.open(providerRows, loop.provider());
-          render();
           return true;
         }
-        if (codePoint == 'l') {
-          frame = new InlineFrameRenderer.Empty();
-          visualHashInitialized = false;
-          terminal.write("\u001b[2J\u001b[3J\u001b[H");
-          render();
+        if (key.key() instanceof TerminalKey.CharacterKey character
+            && key.modifiers().alt() && !key.modifiers().ctrl()
+            && Character.toLowerCase(character.codePoint()) == 'd') {
+          deleteComposerRange(cursor, wordRight(cursor));
           return true;
         }
-        if (codePoint == 'r') {
-          DiffReview.Result opened = DiffReview.open(loop.pendingChanges());
-          diffReview = opened.state();
-          diffFiles = opened.files();
-          uiStatus = opened.status();
-          render();
-          return true;
-        }
-        if (codePoint == 'n') {
-          loop.newThread();
-          resetForThreadSwap();
-          return true;
-        }
-        if (codePoint == 'e') {
-          composerExpanded = !composerExpanded;
-          render();
-          return true;
-        }
-        if (codePoint == 't') { plan = PlanModal.open(); render(); return true; }
-        if (codePoint == 'g') { openCodeBlocks(loop); render(); return true; }
-        if (codePoint == 'o') { openToolViewer(loop.state()); render(); return true; }
-        if (codePoint == 'u') {
-          int lineStart = cursor > 0 ? composer.lastIndexOf('\n', cursor - 1) + 1 : 0;
-          if (lineStart < cursor) {
-            beginComposerEdit();
-            composer = composer.substring(0, lineStart) + composer.substring(cursor);
-            cursor = lineStart;
+        if (key.key() instanceof TerminalKey.CharacterKey character && !key.modifiers().alt()) {
+          int codePoint = character.codePoint();
+          if (codePoint == '/' && composer.isEmpty() && composerAttachments.isEmpty()
+              && cursor == 0) {
+            palette = CommandPalette.open();
             render();
-          }
-          return true;
-        }
-        if (codePoint == 'w') { deleteComposerRange(wordLeft(cursor), cursor); return true; }
-        if (codePoint == 'z') {
-          if (key.modifiers().shift()) redoComposer();
-          else undoComposer();
-          return true;
-        }
-        if (codePoint == 'y') { redoComposer(); return true; }
-      }
-      if (key.key() instanceof TerminalKey.SpecialKey special) {
-        if (key.modifiers().shift()
-            && (special == TerminalKey.SpecialKey.TAB
-                || special == TerminalKey.SpecialKey.BACK_TAB)) {
-          profile = loop.cycleProfile();
-          uiStatus = "profile: " + profile.name().toLowerCase(java.util.Locale.ROOT);
-          render();
-          return true;
-        }
-        if (key.modifiers().ctrl() && !key.modifiers().alt() && composer.isEmpty()
-            && loop.state().phase() instanceof SessionPhase.Idle
-            && (special == TerminalKey.SpecialKey.LEFT
-                || special == TerminalKey.SpecialKey.RIGHT)) {
-          cycleThread(loop, special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
-          return true;
-        }
-        if (key.modifiers().alt()
-            && (special == TerminalKey.SpecialKey.LEFT
-                || special == TerminalKey.SpecialKey.RIGHT)) {
-          cycleThread(loop, special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
-          return true;
-        }
-        switch (special) {
-          case ENTER -> {
-            if (key.modifiers().shift() || key.modifiers().alt()) {
-              composerExpanded = true;
-              insert("\n");
-            }
-            else if (!composer.isEmpty()) {
-              String submitted = composer;
-              List<Attachment> attachments = composerAttachments;
-              if (queuePeekIndex >= 0 && queuePeekIndex < queuePeekItems.size()) {
-                var queued = new ArrayList<>(queuePeekItems);
-                queued.remove(queuePeekIndex);
-                loop.dispatch(new RuntimeMessage.ReplaceQueued(queued));
-              }
-              clearComposer();
-              uiStatus = "";
-              loop.dispatch(new RuntimeMessage.Submit(submitted, List.of(), attachments));
-            }
-          }
-          case BACKSPACE -> {
-            if (key.modifiers().alt() && composer.isEmpty()
-                && queuePeekIndex < 0 && !loop.state().queued().isEmpty()) {
-              var queued = new ArrayList<>(loop.state().queued());
-              queued.removeLast();
-              loop.dispatch(new RuntimeMessage.ReplaceQueued(queued));
-              render();
-              break;
-            }
-            if (cursor > 0) {
-              beginComposerEdit();
-              int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
-              int previous = chipLength > 0 ? cursor - chipLength
-                  : composer.offsetByCodePoints(cursor, -1);
-              composer = composer.substring(0, previous) + composer.substring(cursor);
-              cursor = previous;
-              render();
-            }
-          }
-          case LEFT -> {
-            if (key.modifiers().ctrl()) {
-              cursor = wordLeft(cursor);
-              render();
-              break;
-            }
-            if (cursor > 0) {
-              int chipLength = AttachmentText.placeholderLengthEndingAt(composer, cursor);
-              cursor = chipLength > 0 ? cursor - chipLength
-                  : composer.offsetByCodePoints(cursor, -1);
-            }
+          } else if ((codePoint == '@' || codePoint == '#') && atWordBoundary()) {
+            if (codePoint == '@') mentions = MentionPicker.open(loop.workspaceFiles());
+            else symbols = SymbolPicker.open(loop.workspaceSymbols());
             render();
+          } else {
+            insert(new String(Character.toChars(codePoint)));
           }
-          case RIGHT -> {
-            if (key.modifiers().ctrl()) {
-              cursor = wordRight(cursor);
-              render();
-              break;
-            }
-            if (cursor < composer.length()) {
-              int chipLength = AttachmentText.placeholderLengthAt(composer, cursor);
-              cursor = chipLength > 0 ? cursor + chipLength
-                  : composer.offsetByCodePoints(cursor, 1);
-            }
-            render();
-          }
-          case HOME -> { cursor = 0; render(); }
-          case END -> { cursor = composer.length(); render(); }
-          case UP -> {
-            if (key.modifiers().alt()
-                && (!loop.state().queued().isEmpty() || queuePeekIndex >= 0)) {
-              queuePeekPrevious(loop);
-            } else if (composer.isEmpty() && !loop.state().queued().isEmpty()
-                && historyIndex < 0) {
-              recallQueued(loop);
-            } else if (historyIndex >= 0 || composer.isEmpty()) {
-              historyPrevious(loop.state());
-            }
-          }
-          case DOWN -> {
-            if (key.modifiers().alt() && queuePeekIndex >= 0) queuePeekNext(loop);
-            else if (historyIndex >= 0) historyNext(loop.state());
-          }
-          case ESCAPE -> {
-            if (!(loop.state().phase() instanceof SessionPhase.Idle)) loop.dispatch(new RuntimeMessage.Cancel());
-          }
-          default -> { }
         }
         return true;
       }
-      if (key.key() instanceof TerminalKey.CharacterKey character
-          && key.modifiers().alt() && !key.modifiers().ctrl()
-          && Character.toLowerCase(character.codePoint()) == 'd') {
-        deleteComposerRange(cursor, wordRight(cursor));
-        return true;
-      }
-      if (key.key() instanceof TerminalKey.CharacterKey character && !key.modifiers().alt()) {
-        int codePoint = character.codePoint();
-        if (codePoint == '/' && composer.isEmpty() && composerAttachments.isEmpty()
-            && cursor == 0) {
-          palette = CommandPalette.open();
-          render();
-        } else if ((codePoint == '@' || codePoint == '#') && atWordBoundary()) {
-          if (codePoint == '@') mentions = MentionPicker.open(loop.workspaceFiles());
-          else symbols = SymbolPicker.open(loop.workspaceSymbols());
-          render();
-        } else {
-          insert(new String(Character.toChars(codePoint)));
-        }
-      }
-      return true;
     }
 
     private boolean atWordBoundary() {

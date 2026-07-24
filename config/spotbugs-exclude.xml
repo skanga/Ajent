@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!-- JMH annotation-generated harnesses contain deliberate cache-line padding and
+       reflection-driven fields that appear unused to bytecode-only analysis. -->
+  <Match>
+    <Class name="~.*\.jmh_generated\..*"/>
+  </Match>
+
+  <!-- AgenTTY probes these exact Unix machine identity paths. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.provider.auth.MachineSeed"/>
+    <Method name="readMachineId"/>
+    <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+  </Match>
+
+  <!-- Provider prompts are wire artifacts and must use LF on Windows too. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.provider.ollama.OllamaWire"/>
+    <Method name="systemPrompt"/>
+    <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+  </Match>
+  <Match>
+    <Class name="com.github.skanga.ajent.provider.openai.OpenAiWire"/>
+    <Method name="localModelSystemPrompt"/>
+    <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+  </Match>
+
+  <!-- macOS sandbox-exec profiles are LF-defined policy artifacts. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.tools.process.ProcessSandbox$SandboxedRunner"/>
+    <Method name="macProfile"/>
+    <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+  </Match>
+
+  <!-- These cleanup/error paths are explicitly best-effort by contract. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.tools.attachment.SystemClipboardReader"/>
+    <Bug pattern="DE_MIGHT_IGNORE"/>
+  </Match>
+  <Match>
+    <Class name="com.github.skanga.ajent.tools.workspace.GitCheckpointStore"/>
+    <Method name="deleteQuietly"/>
+    <Bug pattern="DE_MIGHT_IGNORE"/>
+  </Match>
+  <Match>
+    <Class name="com.github.skanga.ajent.tools.workspace.WorkspaceIndex"/>
+    <Method name="walk"/>
+    <Bug pattern="DE_MIGHT_IGNORE"/>
+  </Match>
+
+  <!-- ProcessRunner is final and owns no finalizer; constructor validation is safe. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.tools.process.ProcessRunner"/>
+    <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+  </Match>
+
+  <!-- Injected service/cache objects intentionally retain shared runtime identity.
+       WorkspaceIndex stores and returns immutable List.copyOf snapshots. -->
+  <Match>
+    <Class name="~com\.github\.skanga\.ajent\.tools\.(host\.HostTools|memory\.MemoryTools|rag\.(AgenttyDocRetriever|CorpusKnowledgeSource|McpResourceKnowledgeSource|MemoryKnowledgeSource)|runtime\.(ToolDispatcher|ToolRuntimeFactory.*)|workspace\.WorkspaceIndex)"/>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+  </Match>
+
+  <!-- MCP registry identity and stdio process streams are intentionally shared/lifecycle-owned. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.protocol.mcp.McpConnectionPool$ConnectResult"/>
+    <Bug pattern="EI_EXPOSE_REP"/>
+  </Match>
+  <Match>
+    <Class name="com.github.skanga.ajent.protocol.mcp.McpStdioTransport"/>
+    <Method name="spawn"/>
+    <Bug pattern="OS_OPEN_STREAM"/>
+  </Match>
+
+  <!-- These are intentional, executable source-parity constructs:
+       AgenTTY retains the unused burst knob for API compatibility, explicitly discards
+       the clamped redraw cursor after validation, and reads HOME for exact path display. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.terminal.render.RateCursor"/>
+    <Field name="maxBurstMultiplier"/>
+    <Bug pattern="URF_UNREAD_FIELD"/>
+  </Match>
+  <Match>
+    <Class name="com.github.skanga.ajent.terminal.render.WireViewport"/>
+    <Method name="redraw"/>
+    <Bug pattern="RV_RETURN_VALUE_IGNORED_NO_SIDE_EFFECT"/>
+  </Match>
+  <Match>
+    <Class name="com.github.skanga.ajent.terminal.ui.AgentTimeline"/>
+    <Method name="prettyPath"/>
+    <Bug pattern="ENV_USE_PROPERTY_INSTEAD_OF_ENV"/>
+  </Match>
+
+  <!-- Air-gap setup deliberately follows the shell's home variables (including
+       Windows HOMEDRIVE/HOMEPATH), rather than Java's potentially different user.home. -->
+  <Match>
+    <Class name="com.github.skanga.ajent.cli.AirgapCommand"/>
+    <Method name="systemDefault"/>
+    <Bug pattern="ENV_USE_PROPERTY_INSTEAD_OF_ENV"/>
+  </Match>
+
+</FindBugsFilter>

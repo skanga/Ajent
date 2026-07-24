@@ -22,6 +22,7 @@ public final class CredentialCrypt {
   private static final int SALT_SIZE = 16;
   private static final int NONCE_SIZE = 12;
   private static final int TAG_SIZE = 16;
+  private static final SecureRandom RANDOM = new SecureRandom();
 
   private CredentialCrypt() {}
 
@@ -33,11 +34,10 @@ public final class CredentialCrypt {
   }
 
   public static Optional<String> seal(String plaintext, String machineSeed) {
-    var random = new SecureRandom();
     byte[] salt = new byte[SALT_SIZE];
     byte[] nonce = new byte[NONCE_SIZE];
-    random.nextBytes(salt);
-    random.nextBytes(nonce);
+    RANDOM.nextBytes(salt);
+    RANDOM.nextBytes(nonce);
     return seal(plaintext, machineSeed, salt, nonce);
   }
 
@@ -71,7 +71,8 @@ public final class CredentialCrypt {
     byte[] key = null;
     try {
       var root = JSON.readTree(envelope);
-      if (!root.isObject() || !"aes-256-gcm".equals(root.path("enc").asText())) {
+      if (root == null || !root.isObject()
+          || !"aes-256-gcm".equals(root.path("enc").asText())) {
         return Optional.empty();
       }
       byte[] salt = decode(root.path("salt").asText());
@@ -88,7 +89,7 @@ public final class CredentialCrypt {
       byte[] combined = Arrays.copyOf(ciphertext, ciphertext.length + tag.length);
       System.arraycopy(tag, 0, combined, ciphertext.length, tag.length);
       return Optional.of(new String(cipher.doFinal(combined), StandardCharsets.UTF_8));
-    } catch (Exception exception) {
+    } catch (GeneralSecurityException | JsonProcessingException | IllegalArgumentException exception) {
       return Optional.empty();
     } finally {
       if (key != null) Arrays.fill(key, (byte) 0);

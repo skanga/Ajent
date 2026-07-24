@@ -64,7 +64,10 @@ The standalone stream fixture and composer diagnostics live in the same shaded J
 
 The JaCoCo skip on `package` only avoids running the verification-time coverage
 gate when producing a local executable. It does not skip tests. Use
-`mvn -q verify` for the complete quality gate.
+`mvn -q verify` for the complete quality gate: deterministic whitespace,
+dependency convergence, tests and coverage, SpotBugs, packaging, and the SBOM.
+The opt-in vulnerability scan is `mvn -q -Psecurity -DskipTests verify`; CI
+caches its NVD data and uploads the HTML and JSON reports.
 
 ## Run
 

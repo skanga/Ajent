@@ -29,6 +29,8 @@ import javax.net.ssl.X509TrustManager;
 
 /** JDK HTTP clients honoring AgenTTY's process-wide SOCKS5 air-gap contract. */
 public final class EnvironmentHttpClient {
+  private static final System.Logger LOGGER =
+      System.getLogger(EnvironmentHttpClient.class.getName());
   private static final int DEFAULT_DIAL_PORT = 443;
   private static final int MAX_PROXY_HEADER = 64 * 1024;
   private static final int CONNECT_TIMEOUT_MILLIS = 10_000;
@@ -239,7 +241,9 @@ public final class EnvironmentHttpClient {
         client.getOutputStream().write(("HTTP/1.1 502 Bad Gateway\r\n"
             + "Connection: close\r\nContent-Length: 0\r\n\r\n")
             .getBytes(StandardCharsets.US_ASCII));
-      } catch (IOException ignored) { }
+      } catch (IOException exception) {
+        LOGGER.log(System.Logger.Level.DEBUG, "Could not write proxy failure response", exception);
+      }
     }
   }
 

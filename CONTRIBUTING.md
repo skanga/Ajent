@@ -34,7 +34,19 @@ versions and dependency versions centralized in the root `pom.xml`.
 
 Do not validate a feature with only a module-specific Maven invocation. Cross-
 module composition is part of the product, and the aggregate JaCoCo gate is
-enforced at 80 percent line and branch coverage.
+enforced at 80 percent line and branch coverage. The same `verify` command also
+checks deterministic whitespace with Spotless and fails on medium-confidence
+SpotBugs findings at maximum analysis effort.
+
+Dependency changes must additionally pass the opt-in aggregate vulnerability
+scan:
+
+```text
+mvn -q -Psecurity -DskipTests verify
+```
+
+The scan fails at CVSS 7 or higher. CI supplies `NVD_API_KEY`, caches
+`~/.m2/dependency-check-data`, and publishes both report formats.
 
 ## Porting rules
 

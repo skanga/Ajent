@@ -137,7 +137,7 @@ public final class McpHttpTransport implements McpClientSession.Transport {
       throw new McpTransportException(TRANSPORT_ERROR, "MCP HTTP request interrupted", exception);
     } catch (ExecutionException exception) {
       Throwable cause = rootCause(exception);
-      String message = cause == null ? "MCP HTTP request failed" : cause.getMessage();
+      String message = cause.getMessage();
       throw new McpTransportException(TRANSPORT_ERROR,
           message == null ? "MCP HTTP request failed" : message, cause);
     } finally {
@@ -223,11 +223,12 @@ public final class McpHttpTransport implements McpClientSession.Transport {
 
   private static final class LimitedBodySubscriber implements HttpResponse.BodySubscriber<byte[]> {
     private final CompletableFuture<byte[]> body = new CompletableFuture<>();
+    private final CompletionStage<byte[]> bodyView = body.minimalCompletionStage();
     private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     private Flow.Subscription subscription;
     private int size;
 
-    @Override public CompletionStage<byte[]> getBody() { return body; }
+    @Override public CompletionStage<byte[]> getBody() { return bodyView; }
     @Override public void onSubscribe(Flow.Subscription value) {
       subscription = value; value.request(1);
     }

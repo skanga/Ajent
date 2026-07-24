@@ -13,6 +13,7 @@ import java.util.function.Consumer;
 
 /** Structured virtual-thread interpreter for {@link AgentReducer}'s effects. */
 public final class AgentLoop implements AutoCloseable {
+  private static final System.Logger LOGGER = System.getLogger(AgentLoop.class.getName());
   private static final long HEADLESS_TICK_MILLIS = 100;
   private final Object lock = new Object();
   private final AgentReducer reducer;
@@ -163,10 +164,14 @@ public final class AgentLoop implements AutoCloseable {
 
   private void execute(RuntimeEffect effect) {
     switch (effect) {
-      case RuntimeEffect.Persist persist -> tasks.submit(() -> persistence.save(persist.thread()));
-      case RuntimeEffect.CreateCheckpoint checkpoint ->
-          tasks.submit(() -> checkpoints.create(checkpoint.id()));
-      case RuntimeEffect.StartStream stream -> tasks.submit(() -> {
+      case RuntimeEffect.Persist persist -> tasks.execute(() -> persistence.save(persist.thread()));
+      case RuntimeEffect.CreateCheckpoint checkpoint -> tasks.execute(() -> {
+        if (!checkpoints.create(checkpoint.id())) {
+          LOGGER.log(System.Logger.Level.DEBUG,
+              "Could not create checkpoint {0}", checkpoint.id().value());
+        }
+      });
+      case RuntimeEffect.StartStream stream -> tasks.execute(() -> {
         try {
           provider.stream(stream.turnId(), stream.messages(), stream.cancellation(), event ->
               dispatchIfOpen(new RuntimeMessage.ProviderEvent(stream.turnId(), event)));
@@ -176,7 +181,7 @@ public final class AgentLoop implements AutoCloseable {
                   "provider: " + exception.getMessage())));
         }
       });
-      case RuntimeEffect.ExecuteTool execute -> tasks.submit(() -> {
+      case RuntimeEffect.ExecuteTool execute -> tasks.execute(() -> {
         ToolCompletion result;
         try {
           result = tools.execute(execute.call(), cancellation(execute.turnId()), progress ->

@@ -108,10 +108,6 @@ public final class AgentTimeline {
     return new Row("│" + " ".repeat(width - 2) + "│", Tone.MUTED);
   }
 
-  private static Row box(String content, int width, Tone tone) {
-    return box(List.of(span(content, tone)), width, tone);
-  }
-
   private static Row box(List<Span> content, int width, Tone tone) {
     int available = width - 4;
     List<Span> visible = clip(content, available);

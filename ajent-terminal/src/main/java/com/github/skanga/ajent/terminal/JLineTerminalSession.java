@@ -41,8 +41,8 @@ public final class JLineTerminalSession implements AutoCloseable {
   private final Terminal terminal;
   private final Attributes cooked;
   private final TerminalInputDecoder decoder = new TerminalInputDecoder();
-  private boolean mouse;
-  private boolean closed;
+  private volatile boolean mouse;
+  private volatile boolean closed;
 
   private JLineTerminalSession(Terminal terminal) {
     this.terminal = Objects.requireNonNull(terminal, "terminal");

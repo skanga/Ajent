@@ -1074,7 +1074,8 @@ public final class AgentReducer {
   private static List<Map<String, Object>> previewTodos(String partialJson) {
     try {
       var root = JSON.readTree(PartialJson.close(partialJson));
-      if (!root.isObject() || !root.path("todos").isArray() || root.path("todos").isEmpty()) {
+      if (root == null || !root.isObject()
+          || !root.path("todos").isArray() || root.path("todos").isEmpty()) {
         return List.of();
       }
       var result = new ArrayList<Map<String, Object>>();
@@ -1086,7 +1087,7 @@ public final class AgentReducer {
         result.add(Map.of("content", item.path("content").textValue(), "status", status));
       }
       return List.copyOf(result);
-    } catch (Exception exception) {
+    } catch (com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException exception) {
       return List.of();
     }
   }

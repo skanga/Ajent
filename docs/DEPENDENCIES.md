@@ -13,6 +13,9 @@ Ajent adds a library only when the JDK cannot express a parity requirement clean
 | Jetty HTTP/2 server 12.1.11 | `ajent-parity` test only | the JDK HTTP server cannot negotiate HTTP/2, while the pinned AgenTTY hosted transport refuses a TLS peer without `h2` ALPN | hosted preset/header and TLS-cancellation cases in `NativeAcpParityIT` |
 | pty4j 0.13.12 | `ajent-parity` test only | the JDK has no API for launching a child process under a deterministic pseudo-terminal; terminal executable differentials require a real console because AgenTTY rejects redirected stdin | `NativeTerminalParityIT` |
 | JaCoCo 0.8.15 | build | enforced coverage gap detection | `mvn verify`; 80% module gates, 90% domain branch gate |
+| Spotless Maven 3.8.0 | build | deterministic trailing-whitespace and final-newline formatting gate without rewriting the source-derived Java layout | `mvn verify` (`validate` phase) |
+| SpotBugs Maven 4.10.3.0 / SpotBugs 4.10.3 | build | bytecode-level defect detection at maximum effort and medium confidence | `mvn verify` (`verify` phase) |
+| OWASP Dependency-Check Maven 12.2.2 | CI security profile | scans the aggregate dependency graph and fails at CVSS 7 or higher; the NVD database is cached between Linux CI runs and `NVD_API_KEY` is read only from the CI secret environment | `mvn -Psecurity -DskipTests verify`; dedicated `dependency-check` CI job and uploaded HTML/JSON reports |
 
 No LLM orchestration framework is present. In particular, LangChain4j is intentionally absent because Ajent must preserve AgenTTY's provider wire format, reducer decisions, and tool semantics directly.
 

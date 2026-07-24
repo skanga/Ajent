@@ -138,7 +138,7 @@ public final class StreamingMarkdown {
   }
 
   public List<Block> blocks() {
-    return blocks;
+    return List.copyOf(blocks);
   }
 
   /** UTF-8 byte extent that has left the mutable live tail. */

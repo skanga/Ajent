@@ -357,10 +357,11 @@ final class NativeTerminalParityIT {
           line -> line.contains("terminal parity response"));
       assertThat(javaViewport.lines()).anyMatch(
           line -> line.contains("terminal parity response"));
-      assertThat(regionFrom(javaViewport.lines(), "say hello")).as(
+      assertThat(normalizeDynamicCells(regionFrom(javaViewport.lines(), "say hello"))).as(
               "native viewport:%n%s%nJava viewport:%n%s",
               numbered(nativeViewport.lines()), numbered(javaViewport.lines()))
-          .containsExactlyElementsOf(regionFrom(nativeViewport.lines(), "say hello"));
+          .containsExactlyElementsOf(
+              normalizeDynamicCells(regionFrom(nativeViewport.lines(), "say hello")));
     } finally {
       provider.stop(0);
     }
@@ -1521,6 +1522,10 @@ final class NativeTerminalParityIT {
         normalized = normalized.replaceFirst(
             "Streaming\\s+\\d+\\.\\ds\\s+", "Streaming #time ");
       }
+      normalized = normalized.replaceFirst(
+          "\\s+\\d{2}:\\d{2}(?:\\s+·\\s+\\d+(?:\\.\\d+)?(?:ms|s))?"
+              + "\\s+·\\s+turn\\s+(\\d+)\\s*$",
+          "  ##:## · #time · turn $1");
       if (line.contains("●") || line.contains("○")) {
         normalized = normalized.replaceFirst(
             "\\b[A-Z][a-z]{2} \\d{1,2} \\d{2}:\\d{2}\\b", "Mon # ##:##");

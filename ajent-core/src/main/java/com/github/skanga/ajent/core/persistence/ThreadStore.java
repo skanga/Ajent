@@ -109,7 +109,8 @@ public final class ThreadStore {
     var result = new ArrayList<Thread>();
     try (DirectoryStream<Path> files = Files.newDirectoryStream(threadsDirectory, "*.json")) {
       for (Path file : files) {
-        if ("acp_sessions.json".equals(file.getFileName().toString())) continue;
+        Path fileName = file.getFileName();
+        if (fileName == null || "acp_sessions.json".equals(fileName.toString())) continue;
         readMetadata(file).ifPresent(result::add);
       }
     } catch (IOException ignored) {

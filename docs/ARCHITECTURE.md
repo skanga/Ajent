@@ -223,7 +223,11 @@ Tests are organized around boundaries rather than implementation layers:
 
 `mvn -q verify` is the release-quality local gate. It runs the whole reactor,
 enforces dependency convergence, compiles for Java 25 with lint warnings, runs
-tests, produces JaCoCo reports, and enforces aggregate line and branch floors.
+tests, produces JaCoCo reports, enforces aggregate line and branch floors,
+checks deterministic whitespace, runs maximum-effort SpotBugs analysis, packages
+the distribution, and emits the aggregate CycloneDX SBOM. The separate
+`security` profile adds an aggregate OWASP Dependency-Check scan without making
+ordinary offline development depend on the NVD service.
 
 ## Related documentation
 

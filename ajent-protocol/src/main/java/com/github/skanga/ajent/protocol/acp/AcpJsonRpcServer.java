@@ -94,6 +94,7 @@ public final class AcpJsonRpcServer {
   private final SessionFactory sessionFactory;
   private final int contextMax;
   private final Map<String, Session> sessions = new LinkedHashMap<>();
+  private final Object projectionLock = new Object();
 
   public AcpJsonRpcServer(
       Path dataDirectory,
@@ -676,7 +677,7 @@ public final class AcpJsonRpcServer {
     }
 
     private void observe(RuntimeMessage message, AgentState state) {
-      synchronized (AcpJsonRpcServer.this) {
+      synchronized (projectionLock) {
         if (session.projection != this || result.isDone()) return;
         session.thread = state.thread();
         SessionPhase previousPhase = lastPhase;
@@ -697,8 +698,8 @@ public final class AcpJsonRpcServer {
     }
 
     private void projectMessage(RuntimeMessage message, AgentState state) {
-      if (message instanceof RuntimeMessage.ProviderEvent(
-          long ignored, StreamEvent.TextDelta delta)) {
+      if (message instanceof RuntimeMessage.ProviderEvent event
+          && event.event() instanceof StreamEvent.TextDelta delta) {
         latestAssistant(state).ifPresent(assistant -> {
           ObjectNode update = JSON.createObjectNode();
           update.put("sessionUpdate", "agent_message_chunk");
@@ -708,8 +709,8 @@ public final class AcpJsonRpcServer {
           update.put("messageId", assistant.id().value());
           send(update);
         });
-      } else if (message instanceof RuntimeMessage.ProviderEvent(
-          long ignored, StreamEvent.Usage usage)) {
+      } else if (message instanceof RuntimeMessage.ProviderEvent event
+          && event.event() instanceof StreamEvent.Usage usage) {
         ObjectNode update = JSON.createObjectNode();
         update.put("sessionUpdate", "usage_update");
         long used = (long) usage.inputTokens() + usage.outputTokens()
@@ -717,12 +718,12 @@ public final class AcpJsonRpcServer {
         update.put("used", Math.max(0L, used));
         update.put("size", contextMax);
         pendingUsage = update;
-      } else if (message instanceof RuntimeMessage.ProviderEvent(
-          long ignored, StreamEvent.Finished ignoredFinished) && pendingUsage != null) {
+      } else if (message instanceof RuntimeMessage.ProviderEvent event
+          && event.event() instanceof StreamEvent.Finished && pendingUsage != null) {
         send(pendingUsage);
         pendingUsage = null;
-      } else if (message instanceof RuntimeMessage.ProviderEvent(
-          long ignored, StreamEvent.Error ignoredError) && pendingUsage != null) {
+      } else if (message instanceof RuntimeMessage.ProviderEvent event
+          && event.event() instanceof StreamEvent.Error && pendingUsage != null) {
         send(pendingUsage);
         pendingUsage = null;
       }
@@ -735,8 +736,8 @@ public final class AcpJsonRpcServer {
       for (ToolUse call : calls) {
         Class<?> previous = statuses.get(call.id().value());
         if (previous == null) send(toolAnnouncement(call));
-        if (message instanceof RuntimeMessage.ProviderEvent(
-            long ignored, StreamEvent.ToolUseEnd ignoredEnd)
+        if (message instanceof RuntimeMessage.ProviderEvent event
+            && event.event() instanceof StreamEvent.ToolUseEnd
             && call == calls.getLast()) {
           ObjectNode metadata = JSON.createObjectNode();
           metadata.put("sessionUpdate", "tool_call_update");
@@ -770,11 +771,11 @@ public final class AcpJsonRpcServer {
       if (message instanceof RuntimeMessage.Cancel) {
         if (previousPhase instanceof SessionPhase.Streaming) return;
         stop = "cancelled";
-      } else if (message instanceof RuntimeMessage.ProviderEvent(
-          long ignored, StreamEvent.Finished finished)) {
+      } else if (message instanceof RuntimeMessage.ProviderEvent event
+          && event.event() instanceof StreamEvent.Finished finished) {
         stop = finished.stopReason() == StopReason.MAX_TOKENS ? "max_tokens" : "end_turn";
-      } else if (message instanceof RuntimeMessage.ProviderEvent(
-          long ignored, StreamEvent.Error error)) {
+      } else if (message instanceof RuntimeMessage.ProviderEvent event
+          && event.event() instanceof StreamEvent.Error error) {
         stop = error.errorClass() == com.github.skanga.ajent.provider.ErrorClass.CANCELLED
             ? "cancelled" : "refusal";
         failure = error.message();

@@ -80,7 +80,9 @@ public final class RagCorpus {
       Files.walkFileTree(value, new SimpleFileVisitor<>() {
         @Override public FileVisitResult preVisitDirectory(Path directory,
                                                             BasicFileAttributes attributes) {
-          if (!directory.equals(value) && directory.getFileName().toString().startsWith("."))
+          Path fileName = directory.getFileName();
+          if (!directory.equals(value) && fileName != null
+              && fileName.toString().startsWith("."))
             return FileVisitResult.SKIP_SUBTREE;
           return FileVisitResult.CONTINUE;
         }
@@ -295,7 +297,9 @@ public final class RagCorpus {
   }
 
   private static boolean isDocument(Path path) {
-    String name = path.getFileName().toString();
+    Path fileName = path.getFileName();
+    if (fileName == null) return false;
+    String name = fileName.toString();
     int dot = name.lastIndexOf('.');
     return dot >= 0 && DOCUMENT_EXTENSIONS.contains(name.substring(dot).toLowerCase(Locale.ROOT));
   }

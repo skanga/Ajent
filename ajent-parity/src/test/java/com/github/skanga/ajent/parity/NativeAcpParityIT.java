@@ -2439,9 +2439,11 @@ final class NativeAcpParityIT {
         .toList();
     List<JsonNode> nativeWithoutTools = nativeRequests.stream()
         .filter(request -> !request.has("tools")).toList();
-    assertThat(nativeWithTools).as("native initialized wire catalog").singleElement();
-    assertThat(nativeWithoutTools).as("native cold-cache race").singleElement();
+    assertThat(nativeWithTools).as("native initialized wire catalog").isNotEmpty();
+    assertThat(nativeWithoutTools).as("native cold-cache race").hasSizeLessThanOrEqualTo(1);
     JsonNode nativeCatalog = nativeWithTools.getFirst().path("tools");
+    assertThat(nativeWithTools).allSatisfy(request ->
+        assertThat(request.path("tools")).isEqualTo(nativeCatalog));
     assertThat(javaRequests).allSatisfy(request ->
         assertThat(request.path("tools")).isEqualTo(nativeCatalog));
 

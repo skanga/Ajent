@@ -33,6 +33,20 @@ newer Maven. Run commands from the repository root so every module participates.
 `target/site/jacoco/index.html` and add behavior-focused tests for missed paths;
 do not lower the threshold or skip JaCoCo for a release-quality build.
 
+### SpotBugs check fails
+
+Treat findings in handwritten code as defects first. Fix ownership, nullability,
+resource lifecycle, or concurrency at the source. Add an entry to
+`config/spotbugs-exclude.xml` only for a narrow, documented contract such as
+generated JMH padding or an intentionally exact AgenTTY wire/platform behavior.
+
+### Dependency-Check cannot update the NVD database
+
+The OWASP scan is isolated in the `security` profile because its database update
+requires network access. Set `NVD_API_KEY` to avoid public API throttling and
+reuse `~/.m2/dependency-check-data`; CI restores and saves that directory. A
+failed update must not be interpreted as a clean vulnerability report.
+
 ## Startup and configuration
 
 ### Workspace rejected

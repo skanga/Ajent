@@ -71,7 +71,7 @@ public final class SearchTools {
     var entries = new ArrayList<Path>();
     try (Stream<Path> paths = walk(root)) {
       paths.filter(path -> !path.equals(root)).filter(path -> {
-        String name = path.getFileName().toString();
+        String name = fileName(path);
         return wildcard ? GlobMatcher.matches(pattern, name) : name.contains(pattern);
       }).limit(501).forEach(entries::add);
     }
@@ -308,8 +308,8 @@ public final class SearchTools {
       throws IOException {
     var result = new ArrayList<Path>();
     try (Stream<Path> paths = walk(root)) {
-      paths.filter(Files::isRegularFile).filter(path -> !path.getFileName().toString().startsWith("."))
-          .filter(path -> glob.isEmpty() || GlobMatcher.matches(glob, path.getFileName().toString()))
+      paths.filter(Files::isRegularFile).filter(path -> !fileName(path).startsWith("."))
+          .filter(path -> glob.isEmpty() || GlobMatcher.matches(glob, fileName(path)))
           .filter(path -> extensions == null ? !BINARY_EXTENSIONS.contains(extension(path))
               : extensions.contains(extension(path)))
           .filter(path -> safeSize(path) > 0 && safeSize(path) <= maxBytes)
@@ -338,9 +338,14 @@ public final class SearchTools {
   }
 
   private static String extension(Path path) {
-    String name = path.getFileName().toString();
+    String name = fileName(path);
     int dot = name.lastIndexOf('.');
     return dot < 0 ? "" : name.substring(dot).toLowerCase(Locale.ROOT);
+  }
+
+  private static String fileName(Path path) {
+    Path value = path.getFileName();
+    return value == null ? path.toString() : value.toString();
   }
 
   private static long safeSize(Path path) {

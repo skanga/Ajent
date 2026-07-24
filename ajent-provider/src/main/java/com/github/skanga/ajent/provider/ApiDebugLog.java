@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Opt-in, process-lifetime append log matching AgenTTY's raw Anthropic API diagnostics. */
 final class ApiDebugLog {
   private static final Map<Path, ApiDebugLog> LOGS = new ConcurrentHashMap<>();
+  private static final System.Logger LOGGER = System.getLogger(ApiDebugLog.class.getName());
 
   private final BufferedWriter writer;
   private final long startedNanos = System.nanoTime();
@@ -63,6 +64,8 @@ final class ApiDebugLog {
   private synchronized void close() {
     try {
       writer.close();
-    } catch (IOException ignored) { }
+    } catch (IOException exception) {
+      LOGGER.log(System.Logger.Level.DEBUG, "Could not close API debug log", exception);
+    }
   }
 }
