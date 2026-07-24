@@ -4,6 +4,8 @@ import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.terminal.ModelLabels;
 import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
 import com.github.skanga.ajent.terminal.render.UnicodeWidth;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -325,6 +327,55 @@ public final class AppChrome {
     rows.add(pickerBody("", width, Tone.NORMAL));
     rows.add(row("  ╰" + "─".repeat(panelWidth - 2) + "╯", Tone.ACCENT));
     return List.copyOf(rows);
+  }
+
+  /** Maya's oldest-to-newest checkpoint rewind picker. */
+  public static List<Row> checkpointPicker(
+      CheckpointPicker.Open open, Instant now, int width, int viewportRows) {
+    Objects.requireNonNull(open, "open");
+    Objects.requireNonNull(now, "now");
+    if (width < 52) throw new IllegalArgumentException("checkpoint picker width must be at least 52");
+    if (viewportRows < 1) throw new IllegalArgumentException("picker viewport must be positive");
+    var values = new ArrayList<PickerRow>();
+    for (int index = 0; index < open.entries().size(); index++) {
+      CheckpointPicker.Entry entry = open.entries().get(index);
+      String when = checkpointAgo(entry.timestamp(), now);
+      String stat = switch (entry.diffState()) {
+        case LOADING -> "…";
+        case FAILED -> "";
+        case READY -> {
+          if (entry.clean()) yield "no changes";
+          StringBuilder value = new StringBuilder().append(entry.filesChanged())
+              .append(entry.filesChanged() == 1 ? " file" : " files");
+          if (entry.insertions() > 0) value.append(" +").append(entry.insertions());
+          if (entry.deletions() > 0) value.append(" −").append(entry.deletions());
+          yield value.toString();
+        }
+      };
+      String trailing = when + (stat.isEmpty() ? ""
+          : (when.isEmpty() ? "" : " · ") + stat);
+      values.add(new PickerRow("#" + entry.turn() + "  " + entry.preview(), trailing,
+          index == open.index(), false));
+    }
+    var rows = pickerStart(" Rewind to Checkpoint ", width);
+    rows.set(0, new Row(rows.getFirst().text(), Tone.WARNING));
+    appendPickerRows(rows, values, width, viewportRows);
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    rows.add(pickerBody("  Restores files and rewinds the transcript here.", width, Tone.MUTED));
+    rows.add(pickerBody("↑↓ move   Enter rewind   Esc cancel", width, Tone.MUTED));
+    rows.add(pickerBody("", width, Tone.NORMAL));
+    Row bottom = pickerBottom(width);
+    rows.add(new Row(bottom.text(), Tone.WARNING));
+    return List.copyOf(rows);
+  }
+
+  private static String checkpointAgo(Instant timestamp, Instant now) {
+    if (timestamp.toEpochMilli() <= 0) return "";
+    long seconds = Math.max(0, Duration.between(timestamp, now).toSeconds());
+    if (seconds < 45) return "just now";
+    if (seconds < 3_600) return (seconds / 60) + "m ago";
+    if (seconds < 86_400) return (seconds / 3_600) + "h ago";
+    return (seconds / 86_400) + "d ago";
   }
 
   /** Maya's searchable model picker with optional reasoning-effort footer. */
@@ -788,7 +839,7 @@ public final class AppChrome {
 
   private static String fitStatusActivity(Status config, String banner) {
     if (!config.banner().isBlank() && !config.banner().equals("ready")) {
-      return fit(banner, config.width());
+      return fit("▎ " + banner.stripTrailing(), config.width());
     }
     String phase = phase(config);
     int gaugeCells = 10;

@@ -3,7 +3,9 @@ package com.github.skanga.ajent.terminal.ui;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.Profile;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -79,6 +81,14 @@ final class AppChromeTest {
     List<AppChrome.Row> titled = AppChrome.statusPanel(new AppChrome.Status(
         "say hello", "OpenAI", AppChrome.Phase.IDLE, "", 0, 128_000, 0, "", 78));
     assertThat(titled.get(1).text()).startsWith(" ▎ say hello   ·   ▌ ● Ready");
+
+    List<AppChrome.Row> banner = AppChrome.statusPanel(new AppChrome.Status(
+        "", "OpenAI", AppChrome.Phase.IDLE, "", 0, 128_000, 0,
+        "rewound · files restored, prompt back in composer", 78));
+    assertThat(banner.get(1).text())
+        .startsWith("▎ ▶  rewound · files restored, prompt back in composer")
+        .doesNotContain("…")
+        .hasSize(78);
   }
 
   @Test
@@ -170,6 +180,46 @@ final class AppChromeTest {
     assertThat(rows.get(4).text()).contains("  1/1");
     assertThat(rows.get(5).text())
         .contains("↑↓ move   PgUp/PgDn page   Enter open   N new   Esc close");
+  }
+
+  @Test
+  void rendersNativeCheckpointPickerFactsFooterAndWarningFrame() {
+    Instant now = Instant.parse("2026-07-23T12:00:00Z");
+    var open = new CheckpointPicker.Open(List.of(
+        checkpoint("one", 1, "first prompt", now.minusSeconds(20),
+            CheckpointPicker.DiffState.READY, 1, 3, 2, false),
+        checkpoint("two", 2, "clean prompt", now.minusSeconds(120),
+            CheckpointPicker.DiffState.READY, 0, 0, 0, true),
+        checkpoint("three", 3, "loading prompt", Instant.EPOCH,
+            CheckpointPicker.DiffState.LOADING, 0, 0, 0, false),
+        checkpoint("four", 4, "failed prompt", now.minusSeconds(90_000),
+            CheckpointPicker.DiffState.FAILED, 0, 0, 0, false)), 2);
+
+    List<AppChrome.Row> rows = AppChrome.checkpointPicker(open, now, 78, 4);
+    String rendered = text(rows);
+
+    assertThat(rows).hasSize(11).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(rows.getFirst().text()).contains(" Rewind to Checkpoint ");
+    assertThat(rows.getFirst().tone()).isEqualTo(AppChrome.Tone.WARNING);
+    assertThat(rows.getLast().tone()).isEqualTo(AppChrome.Tone.WARNING);
+    assertThat(rendered)
+        .contains("#1  first prompt", "just now · 1 file +3 −2")
+        .contains("#2  clean prompt", "2m ago · no changes")
+        .contains("#3  loading prompt", "…")
+        .contains("#4  failed prompt", "1d ago")
+        .contains("  Restores files and rewinds the transcript here.")
+        .contains("↑↓ move   Enter rewind   Esc cancel");
+    assertThat(rendered).doesNotContain("1970");
+
+    var beforeEpoch = new CheckpointPicker.Open(List.of(
+        checkpoint("old", 1, "old", Instant.ofEpochMilli(-1),
+            CheckpointPicker.DiffState.FAILED, 0, 0, 0, false)), 0);
+    assertThat(text(AppChrome.checkpointPicker(beforeEpoch, now, 52, 1)))
+        .doesNotContain("ago");
+    assertThatThrownBy(() -> AppChrome.checkpointPicker(open, now, 51, 4))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> AppChrome.checkpointPicker(open, now, 78, 0))
+        .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
@@ -375,6 +425,12 @@ final class AppChromeTest {
     assertThat(status("rate limit — retrying").getLast().tone())
         .isEqualTo(AppChrome.Tone.WARNING);
     assertThat(status("context compacted").getLast().tone()).isEqualTo(AppChrome.Tone.ACCENT);
+    AppChrome.Row rewound =
+        status("rewound · files restored, prompt back in composer").getLast();
+    assertThat(rewound.text())
+        .startsWith("▶  rewound · files restored, prompt back in composer")
+        .hasSize(80);
+    assertThat(rewound.tone()).isEqualTo(AppChrome.Tone.ACCENT);
     assertThat(status("ready")).hasSize(1);
     assertThat(AppChrome.status(new AppChrome.Status("", "OpenAI", AppChrome.Phase.IDLE, "",
         200, 100, 0, "", 80)).getFirst().text()).contains("100%");
@@ -398,6 +454,13 @@ final class AppChromeTest {
   private static String activity(AppChrome.Phase phase, String detail, int queued) {
     return AppChrome.status(new AppChrome.Status(
         "", "Anthropic", phase, detail, 0, 200_000, queued, "", 80)).getFirst().text();
+  }
+
+  private static CheckpointPicker.Entry checkpoint(String id, int turn, String preview,
+      Instant timestamp, CheckpointPicker.DiffState state, int files, int added, int removed,
+      boolean clean) {
+    return new CheckpointPicker.Entry(new CheckpointId(id), turn, preview, timestamp,
+        state, files, added, removed, clean);
   }
 
   private static List<AppChrome.Row> status(String banner) {

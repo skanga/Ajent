@@ -109,11 +109,15 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Replaced the live diff-review placeholder with AgenTTY's complete bordered
   two-axis panel: file counters, every structured hunk, nested numbered diffs,
   pending/accepted/rejected tags, navigation, and exact Y/N/A/X workflow.
+- Matched the executable checkpoint picker and rewind workflow cell-for-cell:
+  oldest-to-newest `#turn` rows, relative times, resolved Git diff summaries,
+  warning chrome, restoration footer, real worktree rewind, transcript
+  truncation, composer refill, and native `▎ ▶` completion banner.
 
 ### Known limitations
 
-- Animated wordmark-frame and checkpoint picker,
-  resize, attachment, queue, and scrollback terminal
+- Animated wordmark-frame, thread switching, resize, attachment, queue, and
+  scrollback terminal
   differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live
   permissioned Bash-tool turn now compare cell-for-cell.

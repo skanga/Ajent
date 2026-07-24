@@ -1588,7 +1588,7 @@ final class InteractiveCommand {
             render();
             return;
           }
-          resetForThreadSwap();
+          resetForThreadSwap("rewound · files restored, prompt back in composer");
           insert(result.prompt());
         });
       });
@@ -2544,22 +2544,11 @@ final class InteractiveCommand {
           lines = overlayBottom(lines, overlay);
         }
         if (checkpoints instanceof CheckpointPicker.Open open) {
-          lines = new ArrayList<>(lines);
-          lines.add(new StyledLine("", Style.NORMAL));
-          lines.add(new StyledLine("Rewind to Checkpoint", Style.ACCENT));
-          for (int index = 0; index < open.entries().size(); index++) {
-            CheckpointPicker.Entry entry = open.entries().get(index);
-            String diff = switch (entry.diffState()) {
-              case LOADING -> "\u2026";
-              case FAILED -> "";
-              case READY -> entry.clean() ? "no changes" : entry.filesChanged() + " files \u00b7 +"
-                  + entry.insertions() + " \u2212" + entry.deletions();
-            };
-            lines.add(new StyledLine((index == open.index() ? "\u203a " : "  ") + "Turn "
-                + entry.turn() + "  " + entry.preview() + (diff.isEmpty() ? "" : "  " + diff),
-                index == open.index() ? Style.ACCENT : Style.NORMAL));
-          }
-          lines.add(new StyledLine("\u2191\u2193 move  Enter rewind  Esc close", Style.MUTED));
+          int viewportRows = Math.min(open.entries().size(), Math.max(1, terminalRows - 9));
+          var overlay = new ArrayList<StyledLine>();
+          appendChrome(overlay, AppChrome.checkpointPicker(open, Instant.now(),
+              Math.max(52, width - 2), viewportRows));
+          lines = overlayBottom(lines, overlay);
         }
         if (LoginModal.isOpen(login)) {
           var overlay = new ArrayList<StyledLine>();

@@ -267,7 +267,11 @@ In a Git workspace, submitted user turns can carry a checkpoint. Rewind opens
 an oldest-to-newest checkpoint picker with asynchronous file/add/delete
 summaries. Selecting a checkpoint restores the worktree snapshot, truncates
 later conversation and compaction records, persists the replacement thread,
-and stages the old prompt for editing.
+and stages the old prompt for editing. Rows use native `#<turn>` labels,
+relative time, and `N file(s) +A −D`, `no changes`, or a loading ellipsis.
+The selected row starts on the newest checkpoint; Up/Down moves, Enter rewinds,
+and Escape cancels. A completed rewind clears the inline surface and shows
+`▎ ▶ rewound · files restored, prompt back in composer`.
 
 ## Change review
 

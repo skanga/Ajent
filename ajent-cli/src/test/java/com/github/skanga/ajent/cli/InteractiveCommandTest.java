@@ -446,7 +446,7 @@ final class InteractiveCommandTest {
     queryUi.key(character(22, true), queryAgent);
     assertThat(queryTerminal.bytes.toString())
         .contains(com.github.skanga.ajent.terminal.input.TerminalClipboardQuery.OSC_5522_KITTY)
-        .contains("reading clipboard from your termin");
+        .contains("reading clipboard from your term");
     assertThat(queryAgent.messages).isEmpty();
     queryUi.paste(png); // decoded OSC 5522 reply re-enters the ordinary paste path
     queryUi.key(special(TerminalKey.SpecialKey.ENTER), queryAgent);
@@ -1157,7 +1157,7 @@ final class InteractiveCommandTest {
     agent.checkpointsAvailable = true;
     selectCommand(ui, agent, "rewind");
     assertThat(terminal.bytes.toString()).contains(
-        "Rewind to Checkpoint", "Turn 1  first change", "Turn 2  second change",
+        "Rewind to Checkpoint", "#1  first change", "#2  second change",
         "2 files", "+3", "\u22124");
     ui.key(character('k'), agent);
     ui.key(character('j'), agent);
@@ -1167,6 +1167,8 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.END), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(agent.restoredCheckpoint).isEqualTo(new CheckpointId("cp2"));
+    assertThat(terminal.bytes.toString())
+        .contains("▎ ▶  rewound · files restored, prompt back in composer");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
         .isEqualTo("second change\nmore");
@@ -1176,6 +1178,7 @@ final class InteractiveCommandTest {
   @Test void checkpointEntryExplainsRepoEmptyBusyFailureAndClosePaths() {
     var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
     var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 20);
     var ui = new InteractiveCommand.Ui(terminal, state,
         new InteractiveCommand.PermissionGate());
     var agent = new FakeAgent(state);
@@ -1206,6 +1209,7 @@ final class InteractiveCommandTest {
     var state = new AtomicReference<>(AgentState.initial(
         thread(List.of(checkpointMessage("cp", "prompt")))));
     var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 20);
     var ui = new InteractiveCommand.Ui(terminal, state,
         new InteractiveCommand.PermissionGate());
     var agent = new FakeAgent(state);
@@ -1586,6 +1590,8 @@ final class InteractiveCommandTest {
         .isEqualTo("AgentLoop");
     assertThat(permissionDescription("custom", Map.of("value", "x"))).isEqualTo("{value=x}");
     assertThat(permissionDescription("write", Map.of("path", 42))).isEmpty();
+    assertThat(permissionDescription("write", Map.of("path", "", "file_path", "Fallback.java")))
+        .isEqualTo("Fallback.java");
   }
 
   @Test void renderingCoversTranscriptToolsErrorsStatusAndNarrowWrapping() {
@@ -1603,7 +1609,7 @@ final class InteractiveCommandTest {
     terminal.size = new JLineTerminalSession.Size(8, 5);
     new InteractiveCommand.Ui(terminal, new AtomicReference<>(withStatus),
         new InteractiveCommand.PermissionGate()).render();
-    assertThat(terminal.bytes.toString()).contains("\u2026", "erro");
+    assertThat(terminal.bytes.toString()).contains("\u2026", "er");
   }
 
   @Test void renderingCoversSuccessfulToolNormalStatusEmptyTextAndResizeDiff() {
@@ -1821,8 +1827,10 @@ final class InteractiveCommandTest {
         new ToolStatus.Pending());
     ToolUse write = new ToolUse(new ToolCallId("write"), new ToolName("write"), Map.of(
         "content", "first\nsecond"), new ToolStatus.Done("wrote file"));
+    ToolUse agent = new ToolUse(new ToolCallId("agent"), new ToolName("task"), Map.of(),
+        new ToolStatus.Done("delegated"));
     var state = new AtomicReference<>(AgentState.initial(thread(List.of(
-        new Message(Role.ASSISTANT, "", List.of(), List.of(todo, write))))));
+        new Message(Role.ASSISTANT, "", List.of(), List.of(todo, write, agent))))));
     var terminal = new FakeTerminal();
 
     new InteractiveCommand.Ui(terminal, state,

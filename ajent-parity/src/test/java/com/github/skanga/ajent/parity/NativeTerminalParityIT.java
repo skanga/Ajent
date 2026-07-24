@@ -297,6 +297,13 @@ final class NativeTerminalParityIT {
           "Anthropic API key", "login API-key viewport");
       assertMatchingRegion(nativeCapture.loginMaskedFrame(), javaCapture.loginMaskedFrame(),
           "Anthropic API key", "masked login API-key viewport");
+      assertMatchingRegion(nativeCapture.checkpointFrame(), javaCapture.checkpointFrame(),
+          "Rewind to Checkpoint", "checkpoint picker viewport");
+      assertMatchingRegion(nativeCapture.checkpointRewoundFrame(),
+          javaCapture.checkpointRewoundFrame(),
+          "rewound · files restored, prompt back in composer", "checkpoint rewind viewport");
+      assertThat(nativeWorkspace.resolve("review.txt")).doesNotExist();
+      assertThat(javaWorkspace.resolve("review.txt")).doesNotExist();
       assertViewportContains(javaCapture.diffAcceptedFrame(), "[✓ accepted]");
       assertViewportContains(javaCapture.diffRejectedFrame(), "[✗ rejected]");
     } finally {
@@ -617,6 +624,25 @@ final class NativeTerminalParityIT {
     process.getOutputStream().write(closePicker);
     process.getOutputStream().flush();
     Thread.sleep(400);
+    process.getOutputStream().write(11); // Ctrl+K
+    process.getOutputStream().flush();
+    awaitAnyViewportText(output, error, List.of("Command Palette", "Commands"),
+        Duration.ofSeconds(5));
+    process.getOutputStream().write("rewind".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    Thread.sleep(150);
+    process.getOutputStream().write('\r');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "Rewind to Checkpoint", Duration.ofSeconds(8));
+    awaitViewportLine(output, error, "#3  make edit", "1 file +1", Duration.ofSeconds(8));
+    awaitViewportWithout(output, error, " · …", Duration.ofSeconds(8));
+    String checkpointFrame = combined(output, error);
+    process.getOutputStream().write('\r');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "rewound · files restored, prompt back in composer",
+        Duration.ofSeconds(10));
+    Thread.sleep(350);
+    String checkpointRewoundFrame = combined(output, error);
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -638,12 +664,27 @@ final class NativeTerminalParityIT {
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
         threadFrame, modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame,
         diffPendingFrame, diffAcceptedFrame, diffRejectedFrame, loginPickingFrame,
-        loginApiKeyFrame, loginMaskedFrame);
+        loginApiKeyFrame, loginMaskedFrame, checkpointFrame, checkpointRewoundFrame);
   }
 
-  private static void seedPickerWorkspace(Path workspace) throws java.io.IOException {
+  private static void seedPickerWorkspace(Path workspace) throws Exception {
     Path source = workspace.resolve("ParityFile.java");
     Files.writeString(source, "final class ParitySymbol {}\n", StandardCharsets.UTF_8);
+    runGit(workspace, "init", "-q");
+    runGit(workspace, "config", "user.email", "parity@example.test");
+    runGit(workspace, "config", "user.name", "Terminal Parity");
+    runGit(workspace, "add", "-A");
+    runGit(workspace, "commit", "-qm", "seed");
+  }
+
+  private static void runGit(Path workspace, String... arguments) throws Exception {
+    var command = new ArrayList<String>();
+    command.add("git");
+    command.addAll(List.of(arguments));
+    Process process = new ProcessBuilder(command).directory(workspace.toFile())
+        .redirectErrorStream(true).start();
+    String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertThat(process.waitFor()).as(output).isZero();
   }
 
   private static Map<String, String> terminalEnvironment(Path home) {
@@ -704,6 +745,45 @@ final class NativeTerminalParityIT {
       if (viewport.lines().stream()
           .map(NativeTerminalParityIT::withoutPaintedCursor)
           .anyMatch(line -> line.contains(expected))) {
+        Thread.sleep(150);
+        return;
+      }
+      Thread.sleep(20);
+    }
+  }
+
+  private static void awaitViewportLine(ByteArrayOutputStream output,
+                                        ByteArrayOutputStream error, String first,
+                                        String second, Duration timeout)
+      throws InterruptedException {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    while (System.nanoTime() < deadline) {
+      var viewport = new AnsiViewport(COLUMNS, ROWS);
+      viewport.feed(combined(output, error));
+      if (viewport.lines().stream()
+          .map(NativeTerminalParityIT::withoutPaintedCursor)
+          .anyMatch(line -> line.contains(first) && line.contains(second))) {
+        Thread.sleep(150);
+        return;
+      }
+      Thread.sleep(20);
+    }
+  }
+
+  private static void awaitViewportWithout(ByteArrayOutputStream output,
+                                           ByteArrayOutputStream error, String unexpected,
+                                           Duration timeout)
+      throws InterruptedException {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    while (System.nanoTime() < deadline) {
+      var viewport = new AnsiViewport(COLUMNS, ROWS);
+      viewport.feed(combined(output, error));
+      boolean panelOpen = viewport.lines().stream()
+          .anyMatch(line -> line.contains("Rewind to Checkpoint"));
+      boolean loading = viewport.lines().stream()
+          .map(NativeTerminalParityIT::withoutPaintedCursor)
+          .anyMatch(line -> line.contains(unexpected));
+      if (panelOpen && !loading) {
         Thread.sleep(150);
         return;
       }
@@ -944,6 +1024,7 @@ final class NativeTerminalParityIT {
         normalized = normalized.replaceFirst(
             "\\b[A-Z][a-z]{2} \\d{1,2} \\d{2}:\\d{2}\\b", "Mon # ##:##");
       }
+      normalized = normalized.replaceFirst("\\b\\d{2}:\\d{2}\\b", "##:##");
       // Windows ConPTY substitutes U+FFFD for AgenTTY's two-cell search emoji while
       // retaining its two-column layout. Compare the intended source glyph and layout.
       normalized = normalized.replace("� type to filter models…", "🔍 type to filter models…");
@@ -973,5 +1054,6 @@ final class NativeTerminalParityIT {
                                String codeBlockFrame, String codeResultFrame,
                                String diffPendingFrame, String diffAcceptedFrame,
                                String diffRejectedFrame, String loginPickingFrame,
-                               String loginApiKeyFrame, String loginMaskedFrame) {}
+                               String loginApiKeyFrame, String loginMaskedFrame,
+                               String checkpointFrame, String checkpointRewoundFrame) {}
 }
