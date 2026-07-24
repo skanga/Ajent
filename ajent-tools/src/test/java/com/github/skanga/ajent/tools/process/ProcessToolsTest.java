@@ -24,7 +24,8 @@ class ProcessToolsTest {
     assertThat(success(tools.execute("bash", JSON.createObjectNode()
         .put("command", "echo hello_from_bash")))).contains("hello_from_bash", "```");
     assertThat(success(tools.execute("bash", JSON.createObjectNode()
-        .put("command", "exit /b 7")))).contains("failed with exit code 7");
+        .put("command", shellCommand("exit /b 7", "exit 7")))))
+        .contains("failed with exit code 7");
     assertThat(failure(tools.execute("bash", JSON.createObjectNode().put("command", "")))
         .error().kind()).isEqualTo(ToolErrorKind.INVALID_ARGS);
     assertThat(failure(tools.execute("diagnostics", JSON.createObjectNode()))
@@ -38,15 +39,18 @@ class ProcessToolsTest {
       @TempDir Path outside) throws Exception {
     var tools = tools(root);
     Files.createDirectory(root.resolve("sub"));
-    assertThat(success(tools.execute("bash", JSON.createObjectNode().put("command", "cd")
+    Files.writeString(root.resolve("sub/location-marker.txt"), "inside-subdirectory");
+    assertThat(success(tools.execute("bash", JSON.createObjectNode()
+        .put("command", shellCommand("type location-marker.txt", "cat location-marker.txt"))
         .put("cwd", root.resolve("sub").toString()).put("display_description", "Where"))))
-        .startsWith("Where\n```").contains(root.resolve("sub").toString());
+        .startsWith("Where\n```").contains("inside-subdirectory");
     assertThat(failure(tools.execute("bash", JSON.createObjectNode().put("command", "echo no")
         .put("cd", outside.toString()))).error().kind()).isEqualTo(ToolErrorKind.OUT_OF_WORKSPACE);
     assertThat(failure(tools.execute("bash", JSON.createObjectNode().put("command", "python")))
         .error().detail()).contains("REPL");
     assertThat(success(tools.execute("bash", JSON.createObjectNode()
-        .put("command", "powershell -NoProfile -Command \"Start-Sleep -Seconds 2\"")
+        .put("command", shellCommand(
+            "powershell -NoProfile -Command \"Start-Sleep -Seconds 2\"", "sleep 2"))
         .put("timeout", 1)))).contains("timed out after 1s");
     assertThat(ProcessTools.stripAnsi("a\u001b[31mred\u001b[0m\u001b]0;title\u0007z"))
         .isEqualTo("aredz");
@@ -198,6 +202,9 @@ class ProcessToolsTest {
 
   private static ProcessTools tools(Path root) {
     return new ProcessTools(new WorkspaceSandbox(root, root, root));
+  }
+  private static String shellCommand(String windows, String unix) {
+    return System.getProperty("os.name", "").startsWith("Windows") ? windows : unix;
   }
   private static String success(ToolResult result) {
     return ((ToolResult.Success) result).output().text();
