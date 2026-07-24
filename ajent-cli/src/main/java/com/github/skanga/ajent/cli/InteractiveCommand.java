@@ -2947,12 +2947,10 @@ final class InteractiveCommand {
       }
       for (int index = 0; index < state.queued().size(); index++) {
         RuntimeMessage.Submit queued = state.queued().get(index);
-        if (!output.isEmpty()) output.add(new StyledLine("", Style.NORMAL));
+        if (!output.isEmpty()) output.addAll(turnGap(width));
         String meta = "queued #" + (index + 1) + " / " + state.queued().size();
         if (index == queuePeekIndex) meta = "\u270e editing \u2014 " + meta;
-        output.add(new StyledLine("you  " + meta, Style.ACCENT));
-        wrap(output, AttachmentText.display(queued.text(), queued.attachments()), width,
-            Style.NORMAL);
+        appendQueuedPreview(output, queued, meta, width);
       }
       if (permission != null) {
         appendConversationChrome(output, AppChrome.permission(new AppChrome.Permission(
@@ -2981,6 +2979,17 @@ final class InteractiveCommand {
       for (StyledLine line : output) text.append(line.text()).append('\n');
       renderedText = text.toString();
       return new RenderedLines(List.copyOf(output), animating, trim.debt());
+    }
+
+    private void appendQueuedPreview(List<StyledLine> output, RuntimeMessage.Submit queued,
+        String meta, int width) {
+      int bodyWidth = Math.max(1, width - 7);
+      var turn = new ArrayList<StyledLine>();
+      turn.add(turnHeader(TurnChrome.headerWithMeta(Role.USER, modelId, meta, bodyWidth)));
+      turn.add(new StyledLine("", Style.NORMAL));
+      wrap(turn, AttachmentText.display(queued.text(), queued.attachments()), bodyWidth,
+          Style.NORMAL);
+      output.addAll(rail(turn, TurnChrome.SpeakerTone.USER));
     }
 
     private static void appendChrome(List<StyledLine> output, List<AppChrome.Row> rows) {

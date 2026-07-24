@@ -60,6 +60,17 @@ final class TurnChromeTest {
     assertThat(TurnChrome.rail("body")).isEqualTo("┃  body");
   }
 
+  @Test
+  void rendersQueuedUserMetadataThroughTheNativeTurnHeader() {
+    TurnChrome.Header queued = TurnChrome.headerWithMeta(
+        Role.USER, "parity-model", "queued #1 / 2", 72);
+
+    assertThat(queued.glyph()).isEqualTo("❯");
+    assertThat(queued.label()).isEqualTo("You");
+    assertThat(queued.tone()).isEqualTo(TurnChrome.SpeakerTone.USER);
+    assertThat(queued.text()).startsWith("❯ You").endsWith("queued #1 / 2 ").hasSize(72);
+  }
+
   private static String label(String model) {
     return TurnChrome.header(new TurnChrome.Config(Role.ASSISTANT, model, Instant.EPOCH,
         0, Optional.empty(), false, false, 80, UTC)).orElseThrow().label();

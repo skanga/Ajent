@@ -54,6 +54,16 @@ final class AppChromeTest {
     assertThat(composer.getLast().text()).startsWith("╰").endsWith("╯")
         .hasSize(78);
 
+    List<AppChrome.Row> queued = AppChrome.composer(new AppChrome.Composer(
+        "", 0, Profile.ASK, AppChrome.Phase.STREAMING, 1, false, 78));
+    assertThat(queued.get(1).text())
+        .contains("press ↑ to edit queued — type to queue another…");
+    assertThat(queued.get(4).text()).contains("❚  1 queued", "▎ A S K");
+
+    assertThat(AppChrome.status(new AppChrome.Status(
+        "", "OpenAI", AppChrome.Phase.STREAMING, "", 300,
+        0, 128_000, 0, "", 78)).getFirst().text()).contains("⠸ Streaming");
+
     List<AppChrome.Row> multiline = AppChrome.composer(new AppChrome.Composer(
         "first\nsecond", 12, Profile.WRITE, AppChrome.Phase.IDLE, 0, true, 78));
     assertThat(multiline).hasSize(6);

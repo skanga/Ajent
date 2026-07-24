@@ -136,6 +136,9 @@ the active context.
 
 Whole-queue recall remaps attachment indices while concatenating slots. It is
 destructive: the turns live in the composer until resubmitted.
+The executable parity flow also holds a real provider stream open, queues a
+second turn, compares its native user-turn chrome and the queue-aware composer,
+then verifies that the pending turn drains automatically when the stream ends.
 
 ## Attachments and workspace navigation
 

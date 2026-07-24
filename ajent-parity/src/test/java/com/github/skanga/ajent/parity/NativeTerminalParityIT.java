@@ -263,7 +263,7 @@ final class NativeTerminalParityIT {
 
       assertCleanExit(nativeCapture.exitCode(), nativeCapture.output(), "native");
       assertCleanExit(javaCapture.exitCode(), javaCapture.output(), "Java");
-      assertThat(requests).hasSize(10);
+      assertThat(requests).hasSize(14);
 
       assertMatchingRegion(nativeCapture.permissionFrame(), javaCapture.permissionFrame(),
           "E X E C U T E 1", "permission viewport");
@@ -296,6 +296,8 @@ final class NativeTerminalParityIT {
           "Run Code Block", "code-block picker viewport");
       assertMatchingRegion(nativeCapture.codeResultFrame(), javaCapture.codeResultFrame(),
           "Run Result", "code-block result viewport");
+      assertMatchingRegion(nativeCapture.outputAttachmentFrame(),
+          javaCapture.outputAttachmentFrame(), "[Output:", "output-attachment composer viewport");
       assertViewportContains(nativeCapture.diffPendingFrame(), "no pending changes to review");
       assertViewportContains(javaCapture.diffPendingFrame(), "Review Changes");
       assertViewportContains(javaCapture.diffPendingFrame(), "[ pending ]");
@@ -310,6 +312,8 @@ final class NativeTerminalParityIT {
       assertMatchingRegion(nativeCapture.checkpointRewoundFrame(),
           javaCapture.checkpointRewoundFrame(),
           "rewound · files restored, prompt back in composer", "checkpoint rewind viewport");
+      assertMatchingRegion(nativeCapture.queuedComposerFrame(),
+          javaCapture.queuedComposerFrame(), "queued #1 / 1", "queued composer viewport");
       assertThat(nativeWorkspace.resolve("review.txt")).doesNotExist();
       assertThat(javaWorkspace.resolve("review.txt")).doesNotExist();
       assertViewportContains(javaCapture.diffAcceptedFrame(), "[✓ accepted]");
@@ -579,9 +583,16 @@ final class NativeTerminalParityIT {
     awaitViewportText(output, error, "Run Result", Duration.ofSeconds(12));
     Thread.sleep(250);
     String codeResultFrame = combined(output, error);
-    process.getOutputStream().write(closePicker);
+    process.getOutputStream().write('a');
     process.getOutputStream().flush();
-    Thread.sleep(400);
+    awaitViewportText(output, error, "[Output:", Duration.ofSeconds(5));
+    awaitViewportText(output, error, "output attached to composer", Duration.ofSeconds(5));
+    Thread.sleep(250);
+    String outputAttachmentFrame = combined(output, error);
+    process.getOutputStream().write(127); // Backspace removes the whole attachment chip.
+    process.getOutputStream().flush();
+    awaitViewportWithout(output, error, "[Output:", Duration.ofSeconds(5));
+    Thread.sleep(250);
     process.getOutputStream().write("make edit\r".getBytes(StandardCharsets.US_ASCII));
     process.getOutputStream().flush();
     awaitViewportText(output, error, "review.txt", Duration.ofSeconds(8));
@@ -660,6 +671,16 @@ final class NativeTerminalParityIT {
         Duration.ofSeconds(10));
     Thread.sleep(350);
     String checkpointRewoundFrame = combined(output, error);
+    process.getOutputStream().write(21); // Ctrl+U clears the rewound prompt.
+    process.getOutputStream().write("queue lead\r".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "queue lead streaming", Duration.ofSeconds(8));
+    process.getOutputStream().write("queued followup\r".getBytes(StandardCharsets.US_ASCII));
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "queued #1 / 1", Duration.ofSeconds(5));
+    Thread.sleep(250);
+    String queuedComposerFrame = combined(output, error);
+    awaitViewportText(output, error, "queued followup complete", Duration.ofSeconds(12));
     if (process.isAlive()) {
       byte[] quit = enhancedControlC ? "\u001b[99;5u\r".getBytes(StandardCharsets.US_ASCII)
           : new byte[] {3};
@@ -681,8 +702,10 @@ final class NativeTerminalParityIT {
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
         threadFrame, movedThreadFrame, threadSwitchedFrame, threadSwitchWire,
         modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame,
-        diffPendingFrame, diffAcceptedFrame, diffRejectedFrame, loginPickingFrame,
-        loginApiKeyFrame, loginMaskedFrame, checkpointFrame, checkpointRewoundFrame);
+        outputAttachmentFrame, diffPendingFrame, diffAcceptedFrame, diffRejectedFrame,
+        loginPickingFrame,
+        loginApiKeyFrame, loginMaskedFrame, checkpointFrame, checkpointRewoundFrame,
+        queuedComposerFrame);
   }
 
   private static void seedPickerWorkspace(Path workspace) throws Exception {
@@ -967,6 +990,17 @@ final class NativeTerminalParityIT {
               + "\\\"content\\\":\\\"review parity\\\\n\\\"}\"}}]}}]}\n\n"
               + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
               + "data: [DONE]\n\n";
+        } else if (request.contains("queued followup")) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":"
+              + "\"queued followup complete\"}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
+        } else if (request.contains("queue lead")) {
+          body = "data: {\"choices\":[{\"delta\":{\"content\":"
+              + "\"queue lead streaming\"}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{\"content\":\" complete\"}}]}\n\n"
+              + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+              + "data: [DONE]\n\n";
         } else if (request.contains("show code")) {
           body = "data: {\"choices\":[{\"delta\":{\"content\":"
               + "\"```powershell\\n[Console]::Write('code-parity')\\n```\"}}]}\n\n"
@@ -988,7 +1022,20 @@ final class NativeTerminalParityIT {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
         exchange.sendResponseHeaders(200, bytes.length);
-        exchange.getResponseBody().write(bytes);
+        if (request.contains("queue lead")) {
+          int split = body.indexOf("data: ", 6);
+          exchange.getResponseBody().write(bytes, 0, split);
+          exchange.getResponseBody().flush();
+          try {
+            Thread.sleep(2_000);
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new java.io.IOException("slow parity response interrupted", interrupted);
+          }
+          exchange.getResponseBody().write(bytes, split, bytes.length - split);
+        } else {
+          exchange.getResponseBody().write(bytes);
+        }
       }
     });
     return server;
@@ -1082,7 +1129,7 @@ final class NativeTerminalParityIT {
     String[] spinner = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     return lines.stream().map(line -> {
       String normalized = line;
-      if (line.contains("R U N N I N G")) {
+      if (line.contains("R U N N I N G") || line.contains("Streaming")) {
         for (String frame : spinner) normalized = normalized.replace(frame, "⣿");
       }
       if (line.contains("approve ")) {
@@ -1091,6 +1138,10 @@ final class NativeTerminalParityIT {
       if (line.contains("D O N E")) {
         normalized = normalized.replaceFirst(
             "\\d+(?:\\.\\d+)?(?:ms|s)\\s+(?=│$)", "#time ");
+      }
+      if (line.contains("Streaming")) {
+        normalized = normalized.replaceFirst(
+            "Streaming\\s+\\d+\\.\\ds\\s+", "Streaming #time ");
       }
       if (line.contains("●") || line.contains("○")) {
         normalized = normalized.replaceFirst(
@@ -1126,8 +1177,10 @@ final class NativeTerminalParityIT {
                                String threadSwitchWire, String modelFrame,
                                String mentionFrame, String symbolFrame,
                                String codeBlockFrame, String codeResultFrame,
+                               String outputAttachmentFrame,
                                String diffPendingFrame, String diffAcceptedFrame,
                                String diffRejectedFrame, String loginPickingFrame,
                                String loginApiKeyFrame, String loginMaskedFrame,
-                               String checkpointFrame, String checkpointRewoundFrame) {}
+                               String checkpointFrame, String checkpointRewoundFrame,
+                               String queuedComposerFrame) {}
 }

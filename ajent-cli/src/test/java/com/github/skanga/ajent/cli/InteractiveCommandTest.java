@@ -826,7 +826,7 @@ final class InteractiveCommandTest {
         "queued #1 / 2", "inspect [Pasted: queued body]", "queued #2 / 2", "then test");
 
     ui.key(special(TerminalKey.SpecialKey.UP, false, true, false), agent);
-    assertThat(terminal.bytes.toString()).contains("✎ editing — queued #2 / 2");
+    assertThat(ui.renderedText()).contains("✎ editing — queued #2 / 2");
   }
 
   @Test void modelPickerRendersLoadingBeforeDeferredCatalogArrives() {

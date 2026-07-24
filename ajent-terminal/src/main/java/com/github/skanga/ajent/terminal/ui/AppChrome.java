@@ -100,6 +100,9 @@ public final class AppChrome {
   private static final int FONT_WIDTH = 6;
   private static final int FONT_HEIGHT = 7;
   private static final String WORDMARK = ">AGENTTY";
+  private static final String[] SPINNER = {
+      "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"
+  };
 
   private AppChrome() {}
 
@@ -179,7 +182,12 @@ public final class AppChrome {
 
     rows.add(row("│   " + "─".repeat(Math.max(0, inside - 4)) + " │", Tone.ACCENT));
     String left = "↵ send  ·  ⇧↵ / ⌥↵ newline  ·  ^E expand";
-    String right = "▎ " + letterSpaced(config.profile().name());
+    String profile = "▎ " + letterSpaced(config.profile().name());
+    String queued = config.queued() > 0
+        ? "❚ " + String.format(Locale.ROOT, "%2d queued", config.queued()) + "  ·  "
+        : "";
+    String right = columns(left) + columns(queued) + columns(profile) + 6 <= inside
+        ? queued + profile : profile;
     int content = inside;
     int fixed = 3 + columns(left) + columns(right) + 2;
     String hints = "   " + left + " ".repeat(Math.max(1, content - fixed)) + right + "  ";
@@ -816,17 +824,17 @@ public final class AppChrome {
         verb = config.detail().isBlank() ? "approve?" : "approve " + config.detail();
         active = true;
       }
-      case COMPACTING -> { glyph = "◐"; verb = "compacting"; active = true; }
-      case RETRYING -> { glyph = "◐"; verb = "retrying"; active = true; }
-      case STALLED -> { glyph = "◐"; verb = "stalled"; active = true; }
+      case COMPACTING -> { glyph = spinner(config); verb = "compacting"; active = true; }
+      case RETRYING -> { glyph = spinner(config); verb = "retrying"; active = true; }
+      case STALLED -> { glyph = spinner(config); verb = "stalled"; active = true; }
       case EXECUTING_TOOL -> {
-        glyph = "◐";
+        glyph = spinner(config);
         verb = config.detail().isBlank() ? "running" : config.detail();
         active = true;
       }
-      case STREAMING -> { glyph = "◐"; verb = "Streaming"; active = true; }
-      case AUTHENTICATING -> { glyph = "◐"; verb = "auth…"; active = false; }
-      case LOADING -> { glyph = "◐"; verb = "loading…"; active = false; }
+      case STREAMING -> { glyph = spinner(config); verb = "Streaming"; active = true; }
+      case AUTHENTICATING -> { glyph = spinner(config); verb = "auth…"; active = false; }
+      case LOADING -> { glyph = spinner(config); verb = "loading…"; active = false; }
       case IDLE -> {
         glyph = config.queued() > 0 ? "▸" : "●";
         verb = config.queued() > 0 ? "+" + config.queued() + " queued" : "Ready";
@@ -837,6 +845,11 @@ public final class AppChrome {
     String value = glyph + " " + fit(verb, 10);
     return active && config.elapsedMillis() >= 0
         ? value + " " + formatElapsed5(config.elapsedMillis()) : value;
+  }
+
+  private static String spinner(Status config) {
+    long elapsedMillis = Math.max(0, config.elapsedMillis());
+    return SPINNER[(int) ((elapsedMillis / 100) % SPINNER.length)];
   }
 
   private static String fitStatusActivity(Status config, String banner) {
@@ -902,9 +915,16 @@ public final class AppChrome {
   }
 
   private static String composerPlaceholder(Composer config) {
-    if (config.queued() > 0) return config.queued() == 1
-        ? "press ↑ to edit queued"
-        : "↑ drain queue • ⌥↑/⌥↓ cycle items";
+    if (config.queued() > 0) {
+      String recall = config.queued() == 1
+          ? "press ↑ to edit queued"
+          : "↑ drain queue • ⌥↑/⌥↓ cycle items";
+      return recall + switch (config.phase()) {
+        case AWAITING_PERMISSION -> " — awaiting permission above…";
+        case EXECUTING_TOOL, STREAMING -> " — type to queue another…";
+        default -> " — or type a new message…";
+      };
+    }
     return switch (config.phase()) {
       case AWAITING_PERMISSION -> "awaiting permission — respond above…";
       case EXECUTING_TOOL -> "running tool — type to queue…";

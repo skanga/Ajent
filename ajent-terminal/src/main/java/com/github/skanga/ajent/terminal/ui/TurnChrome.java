@@ -63,6 +63,19 @@ public final class TurnChrome {
         headerLine(left, meta, config.width())));
   }
 
+  /** Native queued-turn header: normal speaker identity with host-supplied queue metadata. */
+  public static Header headerWithMeta(Role role, String modelId, String meta, int width) {
+    Objects.requireNonNull(role, "role");
+    Objects.requireNonNull(modelId, "modelId");
+    Objects.requireNonNull(meta, "meta");
+    if (width < 1) throw new IllegalArgumentException("invalid turn chrome width");
+    String glyph = role == Role.USER ? "❯" : "✦";
+    Speaker speaker = speaker(role, modelId);
+    String left = glyph + " " + speaker.label();
+    return new Header(glyph, speaker.label(), speaker.tone(), meta,
+        headerLine(left, meta, width));
+  }
+
   public static SpeakerTone speakerTone(Role role, String modelId) {
     return speaker(Objects.requireNonNull(role, "role"),
         Objects.requireNonNull(modelId, "modelId")).tone();
