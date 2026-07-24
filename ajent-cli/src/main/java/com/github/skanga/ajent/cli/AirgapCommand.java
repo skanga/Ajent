@@ -247,7 +247,7 @@ final class AirgapCommand {
         "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", remote, remoteCommand);
     String args = ssh.stream().map(AirgapCommand::jsonString)
         .collect(java.util.stream.Collectors.joining(", "));
-    Path settings = settingsPath();
+    String settings = settingsPath();
     error.print("ajent airgap --acp: add this to Zed's settings.json"
         + (settings == null ? "" : "\n  → " + settings) + "\n"
         + "  (the laptop's settings — NOT the remote's; Zed runs `ssh` locally\n"
@@ -265,12 +265,14 @@ final class AirgapCommand {
         + "(run `ajent airgap --setup " + remote + "` once to copy them over).\n");
   }
 
-  private Path settingsPath() {
+  private String settingsPath() {
     if (windows) {
       String appData = environment.getOrDefault("APPDATA", "");
-      return appData.isEmpty() ? null : Path.of(appData).resolve("Zed/settings.json");
+      if (appData.isEmpty()) return null;
+      String windowsPath = appData.replace('/', '\\');
+      return windowsPath + (windowsPath.endsWith("\\") ? "" : "\\") + "Zed\\settings.json";
     }
-    return home == null ? null : home.resolve(".config/zed/settings.json");
+    return home == null ? null : home.resolve(".config/zed/settings.json").toString();
   }
 
   private static int unrecognized(String argument, PrintStream error) {
