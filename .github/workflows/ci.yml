@@ -28,14 +28,14 @@ jobs:
       - name: Use the runner JDK 25 toolchain
         shell: pwsh
         run: Copy-Item -LiteralPath (Join-Path $HOME '.m2/toolchains.xml') -Destination '.mvn/toolchains.xml' -Force
-      - name: Verify reactor
+      - name: Verify reactor on Windows
+        if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          if ($IsWindows) {
-            .\mvnw.cmd -B -ntp verify
-          } else {
-            ./mvnw -B -ntp verify
-          }
+        run: .\mvnw.cmd -B -ntp verify
+      - name: Verify reactor on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./mvnw -B -ntp verify
       - name: Upload test and coverage reports
         if: always()
         uses: actions/upload-artifact@v4
