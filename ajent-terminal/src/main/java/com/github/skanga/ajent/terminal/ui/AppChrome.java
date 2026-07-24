@@ -317,7 +317,9 @@ public final class AppChrome {
     }
     int start = Math.max(0, Math.min(selected - visibleRows + 1, values.size() - visibleRows));
     for (PickerRow value : values.subList(start, start + visibleRows)) {
-      rows.add(pickerBody(pickerDataRow(value, width - 9) + "┃", width,
+      PickerRow displayRow = new PickerRow(
+          value.leading(), value.trailing(), value.selected(), false);
+      rows.add(pickerBody(pickerDataRow(displayRow, width - 9) + "┃", width,
           value.selected() ? Tone.ACCENT : Tone.NORMAL));
     }
     rows.add(pickerBody("", width, Tone.NORMAL));

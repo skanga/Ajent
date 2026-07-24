@@ -97,6 +97,9 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 - Matched the executable saved-thread picker cell-for-cell, including the
   active/current marker, local timestamp, position counter, navigation footer,
   responsive list viewport, and enhanced Ctrl+J/Escape lifecycle.
+- Matched real saved-thread selection and asynchronous session replacement:
+  selected-only navigation rail, persisted conversation rehydration, modal and
+  draft cleanup, and the checked-in source's destructive inline hard reset.
 - Matched the searchable model picker cell-for-cell, including catalog loading,
   empty and filtered states, active/favorite markers, reasoning-effort tiers,
   navigation hints, responsive viewport, and enhanced Ctrl+/ lifecycle.
@@ -116,8 +119,7 @@ Versioning while the pre-1.0 port may still change unsupported extension APIs.
 
 ### Known limitations
 
-- Animated wordmark-frame, thread switching, resize, attachment, queue, and
-  scrollback terminal
+- Animated wordmark-frame, resize, attachment, queue, and scrollback terminal
   differentials remain under parity work;
   startup, composer interactions, a settled streamed provider turn, and a live
   permissioned Bash-tool turn now compare cell-for-cell.

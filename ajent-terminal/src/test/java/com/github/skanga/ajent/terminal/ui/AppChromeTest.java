@@ -171,14 +171,18 @@ final class AppChromeTest {
   @Test
   void rendersTheNativeSavedThreadPicker() {
     List<AppChrome.Row> rows = AppChrome.threadPicker(List.of(
-        new AppChrome.PickerRow("● test permission", "Jul 20 10:10", true, true)),
-        "1/1", 78, 14);
+        new AppChrome.PickerRow("● test permission", "Jul 20 10:10", false, true),
+        new AppChrome.PickerRow("  saved history", "Jul 19 09:00", true, false)),
+        "2/2", 78, 14);
 
-    assertThat(rows).hasSize(8).allSatisfy(row -> assertThat(row.text()).hasSize(78));
+    assertThat(rows).hasSize(9).allSatisfy(row -> assertThat(row.text()).hasSize(78));
     assertThat(rows.getFirst().text()).contains(" Threads ");
-    assertThat(rows.get(2).text()).contains("▎ ● test permission", "Jul 20 10:10", "┃");
-    assertThat(rows.get(4).text()).contains("  1/1");
-    assertThat(rows.get(5).text())
+    assertThat(rows.get(2).text())
+        .contains("● test permission", "Jul 20 10:10", "┃")
+        .doesNotContain("▎");
+    assertThat(rows.get(3).text()).contains("▎   saved history", "Jul 19 09:00", "┃");
+    assertThat(rows.get(5).text()).contains("  2/2");
+    assertThat(rows.get(6).text())
         .contains("↑↓ move   PgUp/PgDn page   Enter open   N new   Esc close");
   }
 

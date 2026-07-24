@@ -262,6 +262,10 @@ anchored and marked. Up/Down, `j`/`k`, Home/End, and Page Up/Down navigate;
 Enter performs a cold session replacement. Before a swap, Ajent cancels the
 old session, drains/persists it, reconstructs the selected provider/tool
 composition, clears draft/modal/reveal state, and resets the inline surface.
+The executable parity run seeds an older saved conversation, navigates to it,
+performs the asynchronous swap, and compares its rehydrated viewport against
+AgenTTY. Ajent uses the checked-in native source's destructive
+viewport-and-scrollback reset for this explicit content replacement.
 
 In a Git workspace, submitted user turns can carry a checkpoint. Rewind opens
 an oldest-to-newest checkpoint picker with asynchronous file/add/delete

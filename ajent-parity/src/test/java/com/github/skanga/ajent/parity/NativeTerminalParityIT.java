@@ -247,6 +247,8 @@ final class NativeTerminalParityIT {
       Path javaWorkspace = Files.createDirectories(root.resolve("java-workspace"));
       seedPickerWorkspace(nativeWorkspace);
       seedPickerWorkspace(javaWorkspace);
+      seedSavedThread(nativeHome);
+      seedSavedThread(javaHome);
       Path nativeLauncher = launcher(root.resolve("native-permission.cmd"),
           List.of(nativeBinary.toString()));
 
@@ -278,6 +280,12 @@ final class NativeTerminalParityIT {
           "filtered command palette viewport");
       assertMatchingRegion(nativeCapture.threadFrame(), javaCapture.threadFrame(),
           "Threads", "thread picker viewport");
+      assertMatchingRegion(nativeCapture.movedThreadFrame(), javaCapture.movedThreadFrame(),
+          "Threads", "navigated thread picker viewport");
+      assertMatchingRegion(nativeCapture.threadSwitchedFrame(), javaCapture.threadSwitchedFrame(),
+          "saved thread request", "selected thread viewport");
+      assertNativeViewportResetWire(nativeCapture.threadSwitchWire());
+      assertHardResetWire("Java", javaCapture.threadSwitchWire());
       assertMatchingRegion(nativeCapture.modelFrame(), javaCapture.modelFrame(),
           "Models", "model picker viewport");
       assertMatchingRegion(nativeCapture.mentionFrame(), javaCapture.mentionFrame(),
@@ -515,11 +523,20 @@ final class NativeTerminalParityIT {
     process.getOutputStream().write("\u001b[106;5u".getBytes(StandardCharsets.US_ASCII));
     process.getOutputStream().flush();
     awaitViewportText(output, error, "Threads", Duration.ofSeconds(5));
-    Thread.sleep(250);
+    awaitViewportText(output, error, "test permission", Duration.ofSeconds(5));
+    awaitViewportText(output, error, "saved history", Duration.ofSeconds(5));
     String threadFrame = combined(output, error);
-    process.getOutputStream().write(closePicker);
+    process.getOutputStream().write("\u001b[B".getBytes(StandardCharsets.US_ASCII));
     process.getOutputStream().flush();
-    Thread.sleep(400);
+    Thread.sleep(250);
+    String movedThreadFrame = combined(output, error);
+    int threadSwitchOffset = output.size();
+    process.getOutputStream().write('\r');
+    process.getOutputStream().flush();
+    awaitViewportText(output, error, "saved thread response", Duration.ofSeconds(8));
+    Thread.sleep(250);
+    String threadSwitchedFrame = combined(output, error);
+    String threadSwitchWire = outputTail(output, threadSwitchOffset);
     process.getOutputStream().write("\u001b[47;5u".getBytes(StandardCharsets.US_ASCII));
     process.getOutputStream().flush();
     awaitViewportText(output, error, "Models", Duration.ofSeconds(5));
@@ -662,7 +679,8 @@ final class NativeTerminalParityIT {
     if (errorReader != null) errorReader.join(Duration.ofSeconds(3));
     return new StagedCapture(process.exitValue(), combined(output, error), permissionFrame,
         finalFrame, pickerFrame, movedPickerFrame, commandFrame, filteredCommandFrame,
-        threadFrame, modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame,
+        threadFrame, movedThreadFrame, threadSwitchedFrame, threadSwitchWire,
+        modelFrame, mentionFrame, symbolFrame, codeBlockFrame, codeResultFrame,
         diffPendingFrame, diffAcceptedFrame, diffRejectedFrame, loginPickingFrame,
         loginApiKeyFrame, loginMaskedFrame, checkpointFrame, checkpointRewoundFrame);
   }
@@ -675,6 +693,32 @@ final class NativeTerminalParityIT {
     runGit(workspace, "config", "user.name", "Terminal Parity");
     runGit(workspace, "add", "-A");
     runGit(workspace, "commit", "-qm", "seed");
+  }
+
+  private static void seedSavedThread(Path home) throws Exception {
+    Path threads = Files.createDirectories(home.resolve(".agentty").resolve("threads"));
+    Files.writeString(threads.resolve("0000000000000001.json"), """
+        {
+          "id": "0000000000000001",
+          "title": "saved history",
+          "created_at": 1700000000,
+          "updated_at": 1700000001,
+          "messages": [
+            {
+              "id": "saved-user",
+              "role": "user",
+              "text": "saved thread request",
+              "timestamp": 1700000000
+            },
+            {
+              "id": "saved-assistant",
+              "role": "assistant",
+              "text": "saved thread response",
+              "timestamp": 1700000001
+            }
+          ]
+        }
+        """, StandardCharsets.UTF_8);
   }
 
   private static void runGit(Path workspace, String... arguments) throws Exception {
@@ -809,6 +853,34 @@ final class NativeTerminalParityIT {
 
   private static String combined(ByteArrayOutputStream output, ByteArrayOutputStream error) {
     return text(output) + text(error);
+  }
+
+  private static String outputTail(ByteArrayOutputStream output, int offset) {
+    synchronized (output) {
+      byte[] bytes = output.toByteArray();
+      return new String(bytes, Math.clamp(offset, 0, bytes.length),
+          bytes.length - Math.clamp(offset, 0, bytes.length), StandardCharsets.UTF_8);
+    }
+  }
+
+  private static void assertHardResetWire(String implementation, String wire) {
+    assertThat(wire)
+        .withFailMessage("%s thread-switch wire did not contain the hard reset:%n%s",
+            implementation, escapedWire(wire))
+        .contains("\u001b[2J\u001b[3J\u001b[H");
+  }
+
+  private static void assertNativeViewportResetWire(String wire) {
+    assertThat(wire)
+        .withFailMessage("native thread-switch wire did not contain its viewport reset:%n%s",
+            escapedWire(wire))
+        .contains("\u001b[1;1H\u001b[2J");
+  }
+
+  private static String escapedWire(String wire) {
+    return wire.replace("\u001b", "<ESC>")
+        .replace("\r", "<CR>")
+        .replace("\n", "<LF>\n");
   }
 
   private static String text(ByteArrayOutputStream output) {
@@ -1050,7 +1122,9 @@ final class NativeTerminalParityIT {
                                String finalFrame, String pickerFrame,
                                String movedPickerFrame, String commandFrame,
                                String filteredCommandFrame, String threadFrame,
-                               String modelFrame, String mentionFrame, String symbolFrame,
+                               String movedThreadFrame, String threadSwitchedFrame,
+                               String threadSwitchWire, String modelFrame,
+                               String mentionFrame, String symbolFrame,
                                String codeBlockFrame, String codeResultFrame,
                                String diffPendingFrame, String diffAcceptedFrame,
                                String diffRejectedFrame, String loginPickingFrame,
