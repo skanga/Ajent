@@ -63,7 +63,8 @@ jobs:
         shell: pwsh
         run: Copy-Item -LiteralPath (Join-Path $HOME '.m2/toolchains.xml') -Destination '.mvn/toolchains.xml' -Force
       - name: Restore vulnerability database
-        uses: actions/cache@v5
+        id: dependency-check-cache
+        uses: actions/cache/restore@v5
         with:
           path: ~/.m2/dependency-check-data
           key: dependency-check-${{ runner.os }}-${{ hashFiles('pom.xml', '**/pom.xml') }}
@@ -72,7 +73,13 @@ jobs:
       - name: Scan dependencies
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: ./mvnw -B -ntp -Psecurity -DskipTests verify
+        run: ./mvnw -B -ntp -Psecurity -DskipTests -Ddependency.check.fail.unused=true verify
+      - name: Save vulnerability database
+        if: always() && steps.dependency-check-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.m2/dependency-check-data
+          key: ${{ steps.dependency-check-cache.outputs.cache-primary-key }}
       - name: Upload dependency-check reports
         if: always()
         uses: actions/upload-artifact@v4

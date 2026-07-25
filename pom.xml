@@ -18,7 +18,7 @@
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <project.build.outputTimestamp>2026-07-19T21:58:37Z</project.build.outputTimestamp>
     <maven.compiler.release>25</maven.compiler.release>
-    <junit.version>6.1.0</junit.version><assertj.version>3.27.6</assertj.version><jackson.version>2.22.0</jackson.version>
+    <junit.version>6.1.0</junit.version><assertj.version>3.27.6</assertj.version><jackson.version>2.22.1</jackson.version>
     <jline.version>3.30.0</jline.version>
     <flexmark.version>0.64.8</flexmark.version>
     <jetty.version>12.1.11</jetty.version>
@@ -33,6 +33,7 @@
     <spotless.maven.version>3.8.0</spotless.maven.version>
     <spotbugs.maven.version>4.10.3.0</spotbugs.maven.version>
     <dependency.check.maven.version>12.2.2</dependency.check.maven.version>
+    <dependency.check.fail.unused>false</dependency.check.fail.unused>
     <jmh.version>1.37</jmh.version>
     <jacoco.line.minimum>0.80</jacoco.line.minimum>
     <jacoco.branch.minimum>0.80</jacoco.branch.minimum>
@@ -141,6 +142,10 @@
             <configuration>
               <dataDirectory>${user.home}/.m2/dependency-check-data</dataDirectory>
               <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+              <suppressionFiles>
+                <suppressionFile>${maven.multiModuleProjectDirectory}/config/dependency-check-suppressions.xml</suppressionFile>
+              </suppressionFiles>
+              <failBuildOnUnusedSuppressionRule>${dependency.check.fail.unused}</failBuildOnUnusedSuppressionRule>
               <failBuildOnCVSS>7</failBuildOnCVSS>
               <formats>
                 <format>HTML</format>

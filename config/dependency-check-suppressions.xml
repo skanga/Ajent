@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.4.xsd">
+  <suppress>
+    <notes><![CDATA[
+      Ajent's own ajent-cli Maven artifact is not GitHub CLI. Dependency-Check
+      inferred the unrelated cpe:2.3:a:github:cli identity from the artifact
+      suffix. Keep this scoped to the exact Ajent package and known CVEs.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/com\.github\.skanga\.ajent/ajent-cli@.*$</packageUrl>
+    <cve>CVE-2024-52308</cve>
+    <cve>CVE-2026-48501</cve>
+  </suppress>
+  <suppress>
+    <notes><![CDATA[
+      CVE-2026-53914 affects unsafe deserialization in the Kotlin compiler's
+      build-cache metadata. Ajent contains only kotlin-stdlib as an OkHttp and
+      test-only pty4j runtime dependency; it ships no Kotlin compiler or build
+      cache implementation. Keep this scoped to that runtime artifact and CVE.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/kotlin-stdlib@.*$</packageUrl>
+    <cve>CVE-2026-53914</cve>
+  </suppress>
+</suppressions>

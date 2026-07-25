@@ -239,8 +239,9 @@ final class RoutedHttpClient extends HttpClient {
     private CallFuture(Call call) { this.call = call; }
 
     @Override public boolean cancel(boolean mayInterruptIfRunning) {
-      call.cancel();
-      return super.cancel(mayInterruptIfRunning);
+      boolean cancelled = super.cancel(mayInterruptIfRunning);
+      if (cancelled) call.cancel();
+      return cancelled;
     }
   }
 
