@@ -12,13 +12,17 @@ import org.junit.jupiter.api.Test;
 class AjentCliTest {
   @Test
   void processBoundaryUsesNativeWindowsTextNewlinesWithoutDoublingCrLf() {
-    var bytes = new ByteArrayOutputStream();
-    PrintStream stream = AjentCli.processStream(bytes);
-    stream.print("one\ntwo\r\n");
-    stream.flush();
+    var windowsBytes = new ByteArrayOutputStream();
+    PrintStream windows = AjentCli.processStream(windowsBytes, "\r\n");
+    windows.print("one\ntwo\r\n");
+    windows.flush();
+    assertThat(windowsBytes.toString(StandardCharsets.UTF_8)).isEqualTo("one\r\ntwo\r\n");
 
-    assertThat(bytes.toString(StandardCharsets.UTF_8)).isEqualTo(
-        System.lineSeparator().equals("\r\n") ? "one\r\ntwo\r\n" : "one\ntwo\r\n");
+    var unixBytes = new ByteArrayOutputStream();
+    PrintStream unix = AjentCli.processStream(unixBytes, "\n");
+    unix.print("one\ntwo\r\n");
+    unix.flush();
+    assertThat(unixBytes.toString(StandardCharsets.UTF_8)).isEqualTo("one\ntwo\r\n");
   }
 
   @Test

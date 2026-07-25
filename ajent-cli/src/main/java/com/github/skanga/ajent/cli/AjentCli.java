@@ -69,7 +69,11 @@ public final class AjentCli {
   }
 
   static PrintStream processStream(OutputStream output) {
-    OutputStream translated = System.lineSeparator().equals("\r\n")
+    return processStream(output, System.lineSeparator());
+  }
+
+  static PrintStream processStream(OutputStream output, String lineSeparator) {
+    OutputStream translated = lineSeparator.equals("\r\n")
         ? new WindowsNewlineOutputStream(output) : output;
     return new PrintStream(translated, true, StandardCharsets.UTF_8);
   }
