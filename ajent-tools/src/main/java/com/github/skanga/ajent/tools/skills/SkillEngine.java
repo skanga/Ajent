@@ -141,10 +141,10 @@ public final class SkillEngine {
   }
 
   private List<Root> roots() {
-    return List.of(new Root(workspace.resolve(".agentty/skills"), "project"),
+    return List.of(new Root(workspace.resolve(".ajent/skills"), "project"),
         new Root(workspace.resolve(".agents/skills"), "project"),
         new Root(workspace.resolve(".claude/skills"), "project"),
-        new Root(home.resolve(".agentty/skills"), "user"),
+        new Root(home.resolve(".ajent/skills"), "user"),
         new Root(home.resolve(".agents/skills"), "user"),
         new Root(home.resolve(".claude/skills"), "user"));
   }

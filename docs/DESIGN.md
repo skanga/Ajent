@@ -133,9 +133,11 @@ states.
 
 ## Terminal rendering invariants
 
-The UI is an inline terminal application, not an alternate-screen full-screen
-program. Settled rows may move into native scrollback; live rows must remain
-mutable. The renderer therefore tracks a committed prefix and a live suffix.
+The UI owns the terminal's alternate screen for the duration of an interactive
+session and restores the shell screen on exit or suspension. Settled rows may
+move into the alternate buffer's session scrollback; live rows must remain
+mutable. The renderer therefore still tracks a committed prefix and a live
+suffix.
 
 The visual hash must include every state axis read by the view and exclude
 axes the view does not read. A false negative freezes visible state; a false

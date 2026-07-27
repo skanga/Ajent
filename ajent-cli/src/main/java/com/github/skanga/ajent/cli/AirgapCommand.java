@@ -18,31 +18,31 @@ final class AirgapCommand {
       "ALACRITTY_WINDOW_ID", "GHOSTTY_RESOURCES_DIR", "WEZTERM_EXECUTABLE", "WT_SESSION",
       "KONSOLE_VERSION", "VTE_VERSION", "ITERM_SESSION_ID", "TERM", "COLORTERM");
   private static final String USAGE = """
-      usage: ajent airgap [--setup] [--remote-agentty PATH] <user@host>
+      usage: ajent airgap [--setup] [--remote-ajent PATH] <user@host>
              ajent airgap [--setup] <user@host> --acp [acp flags…]
 
         Opens an SSH session to <user@host> with `-R 1080`, which makes
         OpenSSH expose a SOCKS5 proxy on the remote's localhost:1080.
         Connections to it are tunnelled back through SSH and dialed by
         this laptop, so the remote ajent — pointed at the proxy via
-        AGENTTY_SOCKS_PROXY — can reach every destination it needs (chat,
+        AJENT_SOCKS_PROXY — can reach every destination it needs (chat,
         OAuth refresh, web tools) over a single tunnel.  TLS / cert
         verification stay pinned on the real upstream end-to-end, so
         the network path between laptop and remote can't MITM you.
 
         Trust boundary (read this before --setup): the remote ends up
-        with a copy of ~/.config/agentty/credentials.json, which contains
+        with a copy of ~/.config/ajent/credentials.json, which contains
         your OAuth refresh token (or API key). A compromised remote
         can therefore exfiltrate your Anthropic credentials independent
         of the tunnel. ajent airgap protects the *network* between
         laptop and remote, not the remote itself — treat the remote as
         a credential-bearing peer, not a sandboxed proxy.
 
-        --setup            Copy ~/.config/agentty/credentials.json from
+        --setup            Copy ~/.config/ajent/credentials.json from
                            this laptop to the remote (chmod 600) before
                            launching.  Run this once on first connect or
                            after re-OAuthing locally.
-        --remote-agentty PATH Absolute path to ajent on the remote.  Default:
+        --remote-ajent PATH Absolute path to ajent on the remote.  Default:
                            `ajent` (resolved via remote PATH).
         --acp [acp flags…] Don't launch the TUI — instead print a ready-to-
                            paste Zed `agent_servers` config that runs the
@@ -60,13 +60,13 @@ final class AirgapCommand {
                            localhost (BatchMode — no password prompt).
 
         ssh and scp must be on this laptop's PATH.  Pass extra ssh args
-        via the AGENTTY_AIRGAP_SSH env var (e.g. -i, -p, -J).
+        via the AJENT_AIRGAP_SSH env var (e.g. -i, -p, -J).
 
         Image paste (Ctrl+V) on the remote: easiest is --clipboard-relay
-        above.  For full control, set AGENTTY_CLIPBOARD_CMD on the remote
+        above.  For full control, set AJENT_CLIPBOARD_CMD on the remote
         (or on this laptop — it's forwarded) to any command that prints
         the laptop's clipboard image to stdout, e.g.:
-          AGENTTY_CLIPBOARD_CMD='ssh laptop wl-paste --type image/png'
+          AJENT_CLIPBOARD_CMD='ssh laptop wl-paste --type image/png'
         Without either, attach images by path instead.
       """;
 
@@ -121,7 +121,7 @@ final class AirgapCommand {
           acpExtra = String.join(" ", arguments.subList(index + 1, arguments.size()));
           index = arguments.size();
         }
-        case "--remote-agentty" -> {
+        case "--remote-ajent" -> {
           if (++index >= arguments.size()) {
             return unrecognized(argument, error);
           }
@@ -164,7 +164,7 @@ final class AirgapCommand {
       error.print("ajent airgap: HOME is unset.\n");
       return 1;
     }
-    Path local = home.resolve(".config/agentty/credentials.json");
+    Path local = home.resolve(".config/ajent/credentials.json");
     if (!Files.exists(local)) {
       error.print("ajent airgap: no local credentials at " + local + "\n"
           + "             run `ajent login` on this machine first.\n");
@@ -172,13 +172,13 @@ final class AirgapCommand {
     }
     error.print("ajent airgap: copying credentials -> " + remote + " …\n");
     int result = processes.run(List.of("ssh", remote,
-        "mkdir -p ~/.config/agentty && chmod 700 ~/.config/agentty"));
+        "mkdir -p ~/.config/ajent && chmod 700 ~/.config/ajent"));
     if (result != 0) return stepFailure("remote mkdir failed (ssh exit ", result, error);
     result = processes.run(List.of(
-        "scp", "-q", local.toString(), remote + ":.config/agentty/credentials.json"));
+        "scp", "-q", local.toString(), remote + ":.config/ajent/credentials.json"));
     if (result != 0) return stepFailure("scp failed (exit ", result, error);
     result = processes.run(List.of(
-        "ssh", remote, "chmod 600 ~/.config/agentty/credentials.json"));
+        "ssh", remote, "chmod 600 ~/.config/ajent/credentials.json"));
     if (result != 0) return stepFailure("remote chmod failed (ssh exit ", result, error);
     error.print("ajent airgap: credentials copied.\n");
     return 0;
@@ -190,12 +190,12 @@ final class AirgapCommand {
   }
 
   private List<String> sshArguments(String remote, String remoteAgent, boolean clipboardRelay) {
-    var command = new StringBuilder("AGENTTY_SOCKS_PROXY=localhost:1080 MAYA_FORCE_SYNC=1");
-    String clipboard = environment.getOrDefault("AGENTTY_CLIPBOARD_CMD", "");
+    var command = new StringBuilder("AJENT_SOCKS_PROXY=localhost:1080 AJENT_FORCE_SYNC=1");
+    String clipboard = environment.getOrDefault("AJENT_CLIPBOARD_CMD", "");
     if (!clipboard.isEmpty()) {
-      command.append(" AGENTTY_CLIPBOARD_CMD=").append(shellQuote(clipboard));
+      command.append(" AJENT_CLIPBOARD_CMD=").append(shellQuote(clipboard));
     } else if (clipboardRelay) {
-      command.append(" AGENTTY_CLIPBOARD_CMD=").append(shellQuote(clipboardCallback()));
+      command.append(" AJENT_CLIPBOARD_CMD=").append(shellQuote(clipboardCallback()));
     }
     for (String name : TERMINAL_MARKERS) {
       String value = environment.getOrDefault(name, "");
@@ -214,7 +214,7 @@ final class AirgapCommand {
     addOption(result, "TCPKeepAlive=yes");
     addOption(result, "ConnectTimeout=10");
     addOption(result, "ExitOnForwardFailure=yes");
-    String extra = environment.getOrDefault("AGENTTY_AIRGAP_SSH", "").strip();
+    String extra = environment.getOrDefault("AJENT_AIRGAP_SSH", "").strip();
     if (!extra.isEmpty()) result.addAll(List.of(extra.split("[ \\t]+")));
     result.add(remote);
     result.add(command.toString());
@@ -241,7 +241,7 @@ final class AirgapCommand {
 
   private void printAcpConfig(
       String remote, String remoteAgent, String acpExtra, PrintStream error) {
-    String remoteCommand = "AGENTTY_SOCKS_PROXY=localhost:1080 exec " + remoteAgent + " acp"
+    String remoteCommand = "AJENT_SOCKS_PROXY=localhost:1080 exec " + remoteAgent + " acp"
         + (acpExtra.isEmpty() ? "" : " " + acpExtra);
     List<String> ssh = List.of("-T", "-R", "1080", "-o", "ExitOnForwardFailure=yes",
         "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", remote, remoteCommand);

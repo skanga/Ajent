@@ -42,5 +42,25 @@ final class TerminalStyleTest {
     assertThat(TerminalColor.indexed(196).degrade(1)).isEqualTo(TerminalColor.named(9));
     assertThat(TerminalColor.rgb(1, 2, 3).degrade(3))
         .isEqualTo(TerminalColor.rgb(1, 2, 3));
+    assertThat(TerminalColor.terminalDefault().degrade(1))
+        .isEqualTo(TerminalColor.terminalDefault());
+    assertThat(TerminalColor.named(2).degrade(1)).isEqualTo(TerminalColor.named(2));
+    assertThat(TerminalColor.indexed(7).degrade(2)).isEqualTo(TerminalColor.indexed(7));
+    assertThat(TerminalColor.indexed(7).degrade(1)).isEqualTo(TerminalColor.white());
+    assertThat(TerminalColor.indexed(240).degrade(1)).isEqualTo(TerminalColor.brightBlack());
+    assertThat(TerminalColor.rgb(0, 0, 0).degrade(2)).isEqualTo(TerminalColor.indexed(16));
+    assertThat(TerminalColor.rgb(255, 255, 255).degrade(2))
+        .isEqualTo(TerminalColor.indexed(231));
+  }
+
+  @Test void validatesColorChannelsAndNamedIndices() {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> TerminalColor.rgb(-1, 0, 0))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> TerminalColor.rgb(0, 256, 0))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> TerminalColor.named(16))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+        () -> new TerminalColor(null, 0, 0, 0)).isInstanceOf(NullPointerException.class);
   }
 }

@@ -1,7 +1,7 @@
 # Providers and models
 
-Ajent supports Anthropic, Ollama, and a family of OpenAI Chat
-Completions-compatible providers. Provider selection is runtime state: switch
+Ajent supports Anthropic, ChatGPT/Codex subscriptions, Ollama, and a family of
+OpenAI Chat Completions-compatible providers. Provider selection is runtime state: switch
 inside the UI and the next turn uses the new provider/model/auth snapshot.
 
 ## Supported dialects
@@ -72,8 +72,25 @@ Concurrent Ajent sessions always receive the full immutable provider tool
 catalog; the pinned executable's cold-cache data race is documented in the
 [parity ledger](PARITY.md#deliberate-differences).
 
-Ajent does not currently implement `/v1/responses`. That is an optional future
-extension, not part of the pinned AgenTTY behavior.
+### Codex (ChatGPT subscription)
+
+Codex is an Ajent extension and a distinct provider kind. It uses the streaming
+Responses protocol at the ChatGPT Codex backend, not API-key OpenAI Chat
+Completions. Requests contain stateless user/assistant messages, images,
+function calls, and `function_call_output` continuations. The decoder handles
+fragmented text, reasoning summaries, function arguments, usage, completion,
+cancellation, and failures.
+
+Models are discovered from the authenticated Codex catalog using the account's
+`chatgpt-account-id`. Ajent refreshes imported tokens before expiry. Because
+this backend follows Codex client behavior rather than the public OpenAI API
+contract, treat it as experimental. See [AUTH.md](AUTH.md) for explicit Codex
+CLI import and keyring detection.
+
+Codex reasoning effort is provider-aware rather than inferred from Anthropic
+model names. Standard models expose backend default, low, medium, and high;
+Codex mini exposes backend default, medium, and high; known compatible models
+may additionally expose xhigh. Unsupported extended values clamp to high.
 
 ## Selecting a provider
 
@@ -81,20 +98,26 @@ At startup:
 
 ```powershell
 .\ajent.cmd --provider anthropic --model MODEL_ID --workspace .
+.\ajent.cmd --provider codex --model MODEL_ID --workspace .
 .\ajent.cmd --provider openai --model MODEL_ID --workspace .
 .\ajent.cmd --provider ollama --model MODEL_ID --workspace .
 .\ajent.cmd --provider llama.cpp --model MODEL_ID --workspace .
 ```
 
 Inside the UI, Ctrl-P opens providers and Ctrl-/ opens models. Provider switch
-may request a key or custom URL, then fetch a model catalog. Model/provider
-choices and last-used per-provider models are persisted.
+may request a key or custom URL, then fetch a model catalog without replacing
+the active provider. The provider and model are committed together after model
+confirmation. Escape or catalog failure keeps the previous pair. On the
+command line, first use of an explicit provider requires `--model`; later
+launches may use that provider's saved model. Model/provider choices and
+last-used per-provider models are persisted.
 
 ## Authentication
 
-Hosted presets use provider-specific environment variables, saved encrypted
-keys, or `--key`. Anthropic also supports OAuth. Local presets are explicitly
-keyless. See [AUTH.md](AUTH.md) for precedence and storage.
+Hosted OpenAI-compatible presets use provider-specific environment variables,
+saved encrypted keys, or `--key`. Anthropic supports its own OAuth. Codex uses
+an explicitly imported ChatGPT subscription session. Local presets are
+explicitly keyless. See [AUTH.md](AUTH.md) for precedence and storage.
 
 ## Request composition
 
@@ -120,8 +143,10 @@ prompt paths.
 
 Stored messages are not serialized generically. Anthropic builders preserve
 content-block ordering, signed thinking, cache points, tool results, and image
-blocks. OpenAI builders create role messages and tool call/result pairs.
-Ollama builders support both native history and JSON-protocol recovery.
+blocks. OpenAI builders create Chat Completions role messages and tool
+call/result pairs. Codex builders create Responses input items and stateless
+function-call continuations. Ollama builders support both native history and
+JSON-protocol recovery.
 
 Before serialization, normal turns soft-trim to approximately the reference
 context target. Compaction uses a separate bounded summary request. Provider
@@ -153,7 +178,9 @@ the JDK client downgrades HTTPS-over-CONNECT to HTTP/1.1. Cancellation aborts th
 underlying call while waiting for headers or a body read. A byte-idle watchdog
 closes stalled streams; the reducer separately watches semantic progress.
 Terminal events are emitted at most once even when cancellation, EOF, timeout,
-and parser failure race.
+and parser failure race. User cancellation is not treated as provider
+unavailability, and late events are attributed to the provider that owned the
+turn rather than whichever provider is currently selected.
 
 ## Retry policy
 

@@ -49,6 +49,15 @@ failed update must not be interpreted as a clean vulnerability report.
 
 ## Startup and configuration
 
+### UI is blank or constrained to 80×24
+
+Ajent's executable JAR enables native access in its manifest so JLine can use
+the Windows FFM terminal provider and read the live console dimensions. Rebuild
+with `mvn clean package` if the JAR predates that manifest entry. As a diagnostic
+for an older or repackaged JAR, launch it with
+`java --enable-native-access=ALL-UNNAMED -jar ajent.jar`. The 80×24 viewport is
+only an emergency fallback for a terminal that genuinely reports zero size.
+
 ### Workspace rejected
 
 `--workspace` must name an existing directory. Avoid a file, missing path, or
@@ -83,6 +92,18 @@ the browser tab and terminal attempt do not match. See [AUTH.md](AUTH.md).
 Never post the credential file, authorization header, OAuth code, access token,
 or refresh token in a bug report.
 
+### Codex import says credentials are in the keyring
+
+Ajent detects but does not extract OS-keyring secrets. Set
+`cli_auth_credentials_store = "file"` in Codex configuration, run
+`codex login` again, then run `ajent login --provider codex`. Ajent copies the
+resulting file into its own encrypted store without modifying the source.
+
+### Codex session expired
+
+Run `codex login` followed by `ajent login --provider codex`. OpenAI API keys
+are unrelated and should be configured only for `--provider openai`.
+
 ## Provider and network failures
 
 ### Immediate 401/403
@@ -93,9 +114,10 @@ login if refresh was rejected.
 
 ### 404 from a custom host
 
-Check whether the supplied base URL already contains `/v1`. Ajent's current
-OpenAI-compatible transport uses Chat Completions (`/v1/chat/completions`), not
-the Responses API. Confirm the server implements that dialect.
+Check whether the supplied base URL already contains `/v1`. Ajent's
+OpenAI-compatible transport uses Chat Completions (`/v1/chat/completions`).
+Only the separate `codex` provider uses Responses. Confirm the custom server
+implements the Chat Completions dialect.
 
 ### Stream stalls
 
@@ -214,8 +236,8 @@ tools from loading.
 ## Diagnostics
 
 Ajent supports best-effort debug, raw provider, and ACP wire logging through
-the AgenTTY-compatible environment switches implemented by `AgenttyDebugLog`
-and protocol tracing. Inspect source/help for exact names in the current build.
+the `AJENT_*` environment switches implemented by `AjentDebugLog` and protocol
+tracing. See `ENVIRONMENT.md` for the exact names.
 Logs redact authorization material but can include prompts, source fragments,
 tool arguments, paths, and model output.
 

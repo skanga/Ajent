@@ -25,6 +25,16 @@ class UnifiedDiffTest {
             + " one\n-two\n+TWO\n three\n \n");
   }
 
+  @Test void preservesExplicitFileProvenanceThroughHunkUpdates() {
+    FileChange created = UnifiedDiff.compute("new.txt", "", "body", false);
+    FileChange existing = UnifiedDiff.compute("empty.txt", "", "body", true);
+
+    assertThat(created.existedBefore()).isFalse();
+    assertThat(created.withHunks(created.hunks()).existedBefore()).isFalse();
+    assertThat(existing.existedBefore()).isTrue();
+    assertThat(existing.withHunks(existing.hunks()).existedBefore()).isTrue();
+  }
+
   @Test void separatesDistantChangesButMergesChangesWithinSixContextRows() {
     String before = numbered(14);
     String far = before.replace("line-2", "far-2").replace("line-12", "far-12");

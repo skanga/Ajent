@@ -26,7 +26,7 @@ public final class HnswIndex {
         throw new IllegalArgumentException("invalid HNSW configuration");
     }
 
-    public static Config agenttyDefaults() {
+    public static Config ajentDefaults() {
       return new Config(16, 32, 200, 64, 1.0 / 0.69314718, 0x9E3779B97F4A7C15L);
     }
   }
@@ -62,7 +62,7 @@ public final class HnswIndex {
   private int entry;
 
   public HnswIndex() {
-    this(Config.agenttyDefaults());
+    this(Config.ajentDefaults());
   }
 
   public HnswIndex(Config config) {

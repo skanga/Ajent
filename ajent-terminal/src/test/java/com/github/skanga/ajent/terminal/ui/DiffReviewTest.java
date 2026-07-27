@@ -51,7 +51,8 @@ final class DiffReviewTest {
     var rejected = DiffReview.rejectAll(accepted.state(), accepted.files());
     assertThat(rejected.status()).isEqualTo("rejected 3 hunks");
     assertThat(rejected.state()).isEqualTo(new PickerState.CellClosed());
-    assertThat(rejected.files()).isEmpty();
+    assertThat(rejected.files()).allSatisfy(file -> assertThat(file.hunks())
+        .allSatisfy(hunk -> assertThat(hunk.status()).isEqualTo(DiffReview.Status.REJECTED)));
   }
 
   @Test void singularStatusUsesHunkNotHunks() {

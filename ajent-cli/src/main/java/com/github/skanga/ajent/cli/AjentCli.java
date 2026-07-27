@@ -19,7 +19,7 @@ public final class AjentCli {
       usage: ajent [subcommand] [options]
 
       subcommands:
-        login             Authenticate (OAuth via claude.ai or API key)
+        login             Authenticate Anthropic, or import Codex CLI login
         logout            Remove saved credentials
         status            Show current auth status
         airgap            Launch ajent on an air-gapped host via SSH tunnel
@@ -48,7 +48,8 @@ public final class AjentCli {
                                    minimal (also prompt reads),
                                    write   (never prompt reads).
             --provider P    LLM backend. anthropic (default, OAuth/Pro/Max)
-                            or an OpenAI-compatible one: openai | groq |
+                            codex (ChatGPT subscription), or an
+                            OpenAI-compatible one: openai | groq |
                             openrouter | together | cerebras | ollama |
                             llama.cpp, or a raw host[:port] for any other
                             OpenAI-compatible server. Reads OPENAI_API_KEY
@@ -128,12 +129,15 @@ public final class AjentCli {
       return 0;
     }
     if (parsed.subcommand() == CliArguments.Subcommand.LOGIN) {
-      return commands.login(input, stdout, stderr);
+      return parsed.provider().equals("codex")
+          ? commands.loginCodex(stdout, stderr) : commands.login(input, stdout, stderr);
     }
     if (parsed.subcommand() == CliArguments.Subcommand.LOGOUT)
-      return commands.logout(stdout, stderr);
+      return parsed.provider().equals("codex")
+          ? commands.logoutCodex(stdout, stderr) : commands.logout(stdout, stderr);
     if (parsed.subcommand() == CliArguments.Subcommand.STATUS)
-      return commands.status(stdout);
+      return parsed.provider().equals("codex")
+          ? commands.statusCodex(stdout) : commands.status(stdout);
     if (parsed.subcommand() == CliArguments.Subcommand.SKILLS)
       return commands.skills(stdout);
     if (parsed.subcommand() == CliArguments.Subcommand.MCP_SERVE)
@@ -150,6 +154,15 @@ public final class AjentCli {
 
   interface CommandServices {
     int login(BufferedReader input, PrintStream output, PrintStream error);
+    default int loginCodex(PrintStream output, PrintStream error) {
+      return AuthCommands.systemDefault().loginCodex(output, error);
+    }
+    default int logoutCodex(PrintStream output, PrintStream error) {
+      return AuthCommands.systemDefault().logoutCodex(output, error);
+    }
+    default int statusCodex(PrintStream output) {
+      return AuthCommands.systemDefault().statusCodex(output);
+    }
     int logout(PrintStream output, PrintStream error);
     int status(PrintStream output);
     int skills(PrintStream output);

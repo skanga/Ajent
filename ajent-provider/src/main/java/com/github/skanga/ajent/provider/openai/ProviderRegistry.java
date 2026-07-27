@@ -5,8 +5,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class ProviderRegistry {
-  public enum Kind { ANTHROPIC, OPENAI }
-  public enum AuthStyle { OAUTH_OR_KEY, API_KEY, NONE }
+  public enum Kind { ANTHROPIC, CODEX, OPENAI }
+  public enum AuthStyle { OAUTH_OR_KEY, CODEX_IMPORT, API_KEY, NONE }
 
   public record Preset(
       String id,
@@ -31,6 +31,8 @@ public final class ProviderRegistry {
           Kind.ANTHROPIC, AuthStyle.OAUTH_OR_KEY, false, List.of()),
       new Preset("openai", "OpenAI", "GPT — api.openai.com",
           Kind.OPENAI, AuthStyle.API_KEY, false, List.of("OPENAI_API_KEY")),
+      new Preset("codex", "Codex", "ChatGPT subscription — import Codex CLI login",
+          Kind.CODEX, AuthStyle.CODEX_IMPORT, false, List.of()),
       new Preset("groq", "Groq", "Llama/Mixtral on Groq LPUs — very fast",
           Kind.OPENAI, AuthStyle.API_KEY, false, List.of("GROQ_API_KEY", "OPENAI_API_KEY")),
       new Preset("openrouter", "OpenRouter", "Any model via openrouter.ai",

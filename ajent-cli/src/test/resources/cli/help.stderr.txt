@@ -3,7 +3,7 @@ ajent 0.2.8
 usage: ajent [subcommand] [options]
 
 subcommands:
-  login             Authenticate (OAuth via claude.ai or API key)
+  login             Authenticate Anthropic, or import Codex CLI login
   logout            Remove saved credentials
   status            Show current auth status
   airgap            Launch ajent on an air-gapped host via SSH tunnel
@@ -32,7 +32,8 @@ options:
                              minimal (also prompt reads),
                              write   (never prompt reads).
       --provider P    LLM backend. anthropic (default, OAuth/Pro/Max)
-                      or an OpenAI-compatible one: openai | groq |
+                      codex (ChatGPT subscription), or an
+                      OpenAI-compatible one: openai | groq |
                       openrouter | together | cerebras | ollama |
                       llama.cpp, or a raw host[:port] for any other
                       OpenAI-compatible server. Reads OPENAI_API_KEY

@@ -85,7 +85,7 @@ public final class AgentSystemPrompt {
         </shell-notes>
 
         <memory-tools>
-          - If the user asks you to remember something — "remember that...", "don't forget X", "keep in mind Y", "from now on...", "always do Z" — you MUST call the `remember` tool. Do not just acknowledge in prose; the prose disappears at the end of the session, but `remember` persists to ~/.agentty/memory.jsonl (scope=user) or <workspace>/.agentty/memory.jsonl (scope=project) and is reloaded into your system prompt on every future turn.
+          - If the user asks you to remember something — "remember that...", "don't forget X", "keep in mind Y", "from now on...", "always do Z" — you MUST call the `remember` tool. Do not just acknowledge in prose; the prose disappears at the end of the session, but `remember` persists to ~/.ajent/memory.jsonl (scope=user) or <workspace>/.ajent/memory.jsonl (scope=project) and is reloaded into your system prompt on every future turn.
           - Default scope is `project` (this codebase only). Use scope=`user` when the fact is about the user themselves ("I prefer fish shell", "my name is...", "I use vim") and applies across every project.
           - Dedup is automatic: if you `remember` a fact that's near-identical to an existing one in the same scope, the store refreshes the existing record's timestamp + hit count instead of writing a duplicate. Just call `remember` with the fact; you don't need to grep <learned-memory> first.
           - Pass `pin=true` for facts the user has explicitly emphasised ("always do X", "never do Y") or that are load-bearing for every turn (the build command, a hard project convention). Pinned facts survive cap rollover and render with ★ in <learned-memory>.

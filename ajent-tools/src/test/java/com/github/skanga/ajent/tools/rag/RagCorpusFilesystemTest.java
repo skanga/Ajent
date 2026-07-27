@@ -51,7 +51,7 @@ final class RagCorpusFilesystemTest {
     var first = new RagCorpus();
     first.build(temporaryDirectory);
     assertThat(first.chunkCount()).isPositive();
-    assertThat(temporaryDirectory.resolve(".agentty_rag_cache.bin")).exists();
+    assertThat(temporaryDirectory.resolve(".ajent_rag_cache.bin")).exists();
     assertThat(first.search("kubernetes scaling", 3).getFirst().chunk().path()).isEqualTo("k8s.md");
 
     var cached = new RagCorpus();
@@ -74,7 +74,7 @@ final class RagCorpusFilesystemTest {
     write("source.java", "excluded source token");
     Files.createDirectories(temporaryDirectory.resolve(".hidden"));
     Files.writeString(temporaryDirectory.resolve(".hidden/secret.md"), "hidden secret token");
-    Files.write(temporaryDirectory.resolve(".agentty_rag_cache.bin"), new byte[] {1, 2, 3});
+    Files.write(temporaryDirectory.resolve(".ajent_rag_cache.bin"), new byte[] {1, 2, 3});
 
     var corpus = new RagCorpus();
     corpus.build(temporaryDirectory);

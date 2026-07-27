@@ -3,7 +3,7 @@ package com.github.skanga.ajent.protocol.mcp;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,9 +69,9 @@ public final class McpConfigLoader {
     Objects.requireNonNull(workspace, "workspace");
     Objects.requireNonNull(home, "home");
     environment = Map.copyOf(environment);
-    Duration callTimeout = timeout(environment.get("AGENTTY_MCP_TIMEOUT_MS"),
+    Duration callTimeout = timeout(environment.get("AJENT_MCP_TIMEOUT_MS"),
         DEFAULT_CALL_TIMEOUT, "mcp.call_timeout.env");
-    Duration connectTimeout = timeout(environment.get("AGENTTY_MCP_CONNECT_TIMEOUT_MS"),
+    Duration connectTimeout = timeout(environment.get("AJENT_MCP_CONNECT_TIMEOUT_MS"),
         DEFAULT_CONNECT_TIMEOUT, "mcp.connect_timeout.env");
     Selection selected = resolve(workspace, home, environment);
     if (selected.path().isEmpty()) {
@@ -80,10 +80,10 @@ public final class McpConfigLoader {
     }
     Path path = selected.path().orElseThrow();
     if (selected.projectLocal()
-        && !truthy(environment.get("AGENTTY_MCP_ALLOW_PROJECT"))) {
+        && !truthy(environment.get("AJENT_MCP_ALLOW_PROJECT"))) {
       return new LoadResult(Optional.of(path), true, false, List.of(), callTimeout,
           connectTimeout, List.of("ignoring workspace-local " + path
-              + "; set AGENTTY_MCP_ALLOW_PROJECT=1 to enable it"));
+              + "; set AJENT_MCP_ALLOW_PROJECT=1 to enable it"));
     }
 
     var diagnostics = new ArrayList<String>();
@@ -111,14 +111,14 @@ public final class McpConfigLoader {
 
   private static Selection resolve(
       Path workspace, Path home, Map<String, String> environment) {
-    String explicit = environment.getOrDefault("AGENTTY_MCP_CONFIG", "");
+    String explicit = environment.getOrDefault("AJENT_MCP_CONFIG", "");
     if (!explicit.isEmpty()) {
       Path path = Path.of(explicit).toAbsolutePath();
       return new Selection(Files.isRegularFile(path) ? Optional.of(path) : Optional.empty(), false);
     }
-    Path project = workspace.resolve(".agentty/mcp.json").toAbsolutePath();
+    Path project = workspace.resolve(".ajent/mcp.json").toAbsolutePath();
     if (Files.isRegularFile(project)) return new Selection(Optional.of(project), true);
-    Path user = home.resolve(".agentty/mcp.json").toAbsolutePath();
+    Path user = home.resolve(".ajent/mcp.json").toAbsolutePath();
     return new Selection(Files.isRegularFile(user) ? Optional.of(user) : Optional.empty(), false);
   }
 
@@ -181,7 +181,7 @@ public final class McpConfigLoader {
       long milliseconds = Long.parseLong(value);
       return milliseconds > 0 ? Duration.ofMillis(milliseconds) : fallback;
     } catch (NumberFormatException exception) {
-      AgenttyDebugLog.log(debugLocation, exception);
+      AjentDebugLog.log(debugLocation, exception);
       return fallback;
     }
   }

@@ -32,6 +32,15 @@ are recorded in the machine-readable manifests under
 | JDK 25 | user `JAVA_HOME`/`PATH` and project-local Maven toolchain select `C:\lang\jdk-25` | `java -version`, `mvn --version`, and `mvn test` green |
 | Native suite | source is pinned; POSIX-only probes require Linux CI | deferred to cross-platform CI |
 
+## Deliberate interactive UX differences
+
+The user-approved Ajent identity and terminal presentation intentionally
+diverge from the pinned executable: Ajent uses a static `AJENT` wordmark, a
+full-screen alternate buffer, grouped `Ctrl+…` shortcut labels, conditional
+status metrics, higher-contrast muted text, and a provider/model-aware
+composer footer. Protocol, agent decision, tool, persistence, and provider
+wire behavior remain parity-scoped.
+
 The optional executable characterization gate uses the ignored
 `agentty/agentty.exe` checkout and never packages it:
 
@@ -111,6 +120,7 @@ configured timeout.
 | Cold concurrent ACP tool catalogs | `AgentServer::wire_tools()` sets `wire_tools_built_` before filling its shared vector without synchronization. With two first prompts simultaneously composing requests, the pinned executable can send either two full catalogs or one full catalog plus one request without `tools`, depending on scheduling. | Both requests receive the complete immutable 22-tool provider catalog. | `NativeAcpParityIT.concurrentPromptsInSeparateSessionsMatchPinnedExecutable` requires the two-request barrier, exact isolated ACP frames, at least one native full catalog and at most one native omission, two identical full Java catalogs, and equality of every other request field after repairing only a demonstrated native omission. Reproducing undefined C++ data-race behavior would weaken concurrent agent functionality and Java memory safety, so this difference is preserved deliberately rather than silently normalized. |
 | Configured MCP tool ordering | AgenTTY inserts external tools into an unordered map, so adding a server rehashes and interleaves native and external catalog entries. | Ajent returns the same tool set in deterministic local-first order. | `NativeMcpParityIT.configuredStdioClientMatchesPinnedExecutable` compares the complete catalog after sorting by name. MCP does not assign semantic meaning to `tools/list` order, and retaining deterministic Java order avoids importing hash-layout accidents. |
 | Streamable HTTP startup ordering | AgenTTY can issue `notifications/initialized` and the first `tools/list` POST in either order because dispatch continues concurrently. | Ajent sends them deterministically in initialization order. | `NativeMcpParityIT.configuredStreamableHttpClientMatchesPinnedExecutable` canonicalizes only these two startup records and compares every request body and header otherwise. The race has no protocol-visible dependency and deterministic startup is safer. |
+| Runtime identity and state | AgenTTY uses `.agentty`, `.config/agentty`, `AGENTTY_*`, Maya terminal switches, `refs/agentty/checkpoints`, and an AgenTTY credential derivation context. | Ajent uses only `.ajent`, `.config/ajent`, `AJENT_*`, `refs/ajent/checkpoints`, and an Ajent credential context. It never silently reads or imports AgenTTY state or credentials. Provider selections begin as `Selected`, become `Connected` only after a real stream event, and become `Provider unavailable` after an error. | `InteractiveCommandTest.startupUsesAjentStateAndNeverImportsLegacyAgenttySettings`, provider-state UI tests, credential path/vector tests, and subsystem environment/path tests establish the standalone boundary. This deliberate identity break prevents an unrelated installation from appearing configured or authenticated. |
 
 ## Feature ledger
 
@@ -160,14 +170,13 @@ also locks AgenTTY's settled-prose wrapping rule: use the full message body,
 prefer the last hyphen boundary that fits, and hard-split only when no such
 boundary exists. Append-only executable scrollback is therefore proven.
 
-A dedicated real-PTY case starts each executable at 80x24, changes the actual
-console to 96x28, waits for WINCH-driven repaint, and compares the reflowed
-two-row shortcut inventory and six-row composer cell-for-cell. A fresh-home
-96x28 case additionally compares the native 62-column bordered starter card
-and full idle token-rate/context status row cell-for-cell. Another 100x40
-real-PTY case samples eight frames from each executable and proves that both
-five-row wordmarks continue animating. Resize signaling, wide welcome/status
-density, and time-dependent wordmark behavior are executable-proven.
+A dedicated real-PTY case starts each executable at 80x24 and changes the
+actual console to 96x28 to retain resize and reflow evidence. The pinned
+reference captures preserve the original shortcut, composer, dense idle
+status, and animated-wordmark behavior. Ajent's user-approved presentation
+now has separate Java assertions for its grouped shortcuts, refined composer,
+conditional metrics, static four-row wordmark, and alternate-screen lifecycle;
+those surfaces are no longer claimed cell-for-cell identical.
 
 The same executable run now opens the provider picker with Ctrl+P, captures the
 initial and Down-navigated frames, closes it with Escape, and proves the complete

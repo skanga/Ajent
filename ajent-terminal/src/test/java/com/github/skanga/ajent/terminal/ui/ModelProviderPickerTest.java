@@ -61,6 +61,10 @@ final class ModelProviderPickerTest {
         Effort.HIGH, 1)).isEqualTo(Effort.NONE);
     assertThat(ModelPicker.cycleEffort(new PickerState.OpenAt(2, ""), models,
         Effort.HIGH, 1)).isEqualTo(Effort.NONE);
+    assertThat(ModelPicker.cycleEffort(new PickerState.OpenAt(2, ""), models,
+        "codex", Effort.HIGH, 1)).isEqualTo(Effort.NONE);
+    assertThat(ModelPicker.cycleEffort(new PickerState.OpenAt(2, ""), models,
+        "codex", Effort.NONE, 1)).isEqualTo(Effort.LOW);
     assertThat(ModelPicker.cycleEffort(new PickerState.Closed(), models,
         Effort.HIGH, 1)).isEqualTo(Effort.HIGH);
   }

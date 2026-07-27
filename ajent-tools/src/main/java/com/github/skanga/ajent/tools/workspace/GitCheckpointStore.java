@@ -16,7 +16,7 @@ import java.util.Set;
 
 /** Parentless-commit worktree snapshots compatible with AgenTTY's checkpoint refs. */
 public final class GitCheckpointStore {
-  private static final String REF_PREFIX = "refs/agentty/checkpoints/";
+  private static final String REF_PREFIX = "refs/ajent/checkpoints/";
   private static final int KEEP = 64;
   private static final Duration TIMEOUT = Duration.ofSeconds(120);
   private final Path workingDirectory;
@@ -49,9 +49,9 @@ public final class GitCheckpointStore {
       if (!ok(scratch(List.of("add", "-A", "--ignore-errors"), scratch, 512 * 1024))) return false;
       ProcessRunner.Result tree = scratch(List.of("write-tree"), scratch, 512 * 1024);
       if (!ok(tree)) return false;
-      ProcessRunner.Result commit = git(List.of("-c", "user.name=agentty", "-c",
-          "user.email=checkpoint@agentty", "commit-tree", chomp(tree.output()), "-m",
-          "agentty checkpoint " + id.value()), 512 * 1024);
+      ProcessRunner.Result commit = git(List.of("-c", "user.name=ajent", "-c",
+          "user.email=checkpoint@ajent", "commit-tree", chomp(tree.output()), "-m",
+          "ajent checkpoint " + id.value()), 512 * 1024);
       if (!ok(commit) || !ok(git(List.of("update-ref", ref(id), chomp(commit.output())),
           512 * 1024))) return false;
       prune();
@@ -157,7 +157,7 @@ public final class GitCheckpointStore {
   }
 
   private Path prepareScratch() {
-    Path scratch = repo.gitDirectory().resolve("agentty-checkpoint-index");
+    Path scratch = repo.gitDirectory().resolve("ajent-checkpoint-index");
     deleteQuietly(scratch);
     try {
       Path source = repo.gitDirectory().resolve("index");

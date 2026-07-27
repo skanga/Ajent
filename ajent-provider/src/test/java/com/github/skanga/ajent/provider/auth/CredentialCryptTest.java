@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 class CredentialCryptTest {
   private static final ObjectMapper JSON = new ObjectMapper();
-  private static final String SEED = "machine\u001fuser\u001fagentty-credentials-v1";
+  private static final String SEED = "machine\u001fuser\u001fajent-credentials-v1";
   private static final String PLAINTEXT =
       "{\"method\":\"api_key\",\"access_token\":\"secret\"}";
 
@@ -25,8 +25,8 @@ class CredentialCryptTest {
     assertThat(json.path("salt").textValue()).isEqualTo("AAECAwQFBgcICQoLDA0ODw==");
     assertThat(json.path("nonce").textValue()).isEqualTo("EBESExQVFhcYGRob");
     assertThat(json.path("ct").textValue())
-        .isEqualTo("nU3zEKkyF3lHBqPN7FF8YVFbhPV2tf9k0glzfcURIDjuenVox1axhAtZGxw=");
-    assertThat(json.path("tag").textValue()).isEqualTo("FSGCDIyC2tP55zLwO2F7PA==");
+        .isEqualTo("iVA3W1JuGwx5t1bGOhpHMwNKE3/5DMR266ocw1ImnaQIIdwxo79vRCQTuBg=");
+    assertThat(json.path("tag").textValue()).isEqualTo("Wdrw8oJXeEDfwwn9hzVLMg==");
     assertThat(CredentialCrypt.unseal(envelope, SEED)).contains(PLAINTEXT);
   }
 

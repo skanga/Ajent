@@ -359,7 +359,7 @@ public final class InlineFrameRenderer {
             state.shadowHash, state.generation);
       }
       int currentStyle = TerminalStylePool.UNKNOWN_STYLE;
-      boolean compatRepaint = System.getenv("MAYA_COMPAT_REPAINT") != null
+      boolean compatRepaint = System.getenv("AJENT_COMPAT_REPAINT") != null
           || "zed".equals(System.getenv("TERM_PROGRAM"));
       long blank = PackedCell.BLANK.pack();
       for (int row = firstChanged; row < contentRows; row++) {

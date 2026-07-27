@@ -89,7 +89,7 @@ final class McpServeCommand {
   }
 
   private Path resolveDocs(Path workspace) {
-    String configured = environment.getOrDefault("AGENTTY_DOCS_DIR", "");
+    String configured = environment.getOrDefault("AJENT_DOCS_DIR", "");
     if (!configured.isBlank()) {
       try {
         return resolve(configured);
@@ -101,7 +101,7 @@ final class McpServeCommand {
     if (Files.isDirectory(docs)) {
       return docs;
     }
-    Path knowledge = workspace.resolve(".agentty/knowledge");
+    Path knowledge = workspace.resolve(".ajent/knowledge");
     return Files.isDirectory(knowledge) ? knowledge : null;
   }
 

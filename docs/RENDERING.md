@@ -1,9 +1,9 @@
-# Rendering and inline scrollback
+# Rendering and session scrollback
 
-Ajent's terminal renderer preserves AgenTTY's central constraint: settled
-conversation should enter the terminal emulator's native scrollback while the
-active tail, composer, status, and modal surfaces remain safely repaintable.
-It does not use an alternate screen.
+Ajent's terminal renderer runs inside the terminal emulator's alternate
+screen. Settled conversation enters that buffer's session scrollback while
+the active tail, composer, status, and modal surfaces remain safely
+repaintable. Exiting Ajent restores the shell's original screen and scrollback.
 
 ## Pipeline
 

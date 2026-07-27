@@ -45,7 +45,8 @@ final class TerminalCanvasTest {
   void fillAndNestedClipsUseRectangleIntersection() {
     var canvas = new TerminalCanvas(10, 6);
     canvas.pushClip(new TerminalCanvas.Rect(1, 1, 5, 4));
-    try (var ignored = canvas.clipScope(new TerminalCanvas.Rect(2, 2, 2, 2))) {
+    var scope = canvas.clipScope(new TerminalCanvas.Rect(2, 2, 2, 2));
+    try (scope) {
       canvas.fill(new TerminalCanvas.Rect(0, 0, 10, 6), '*', 0);
     }
     assertThat(canvas.get(2, 2).character()).isEqualTo('*');

@@ -27,10 +27,10 @@ final class SkillEngineTest {
   @Test void discoversSixRootsWithProjectAndNativePrecedence() throws IOException {
     assertThat(engine.all()).isEmpty();
     assertThat(engine.catalogBlock()).isEmpty();
-    skill(home.resolve(".agentty/skills/alpha"), "alpha", "user native alpha", "USER BODY");
+    skill(home.resolve(".ajent/skills/alpha"), "alpha", "user native alpha", "USER BODY");
     skill(home.resolve(".agents/skills/alpha"), "alpha", "interop alpha", "INTEROP BODY");
     skill(home.resolve(".claude/skills/claude-only"), "claude-only", "from claude dir", "CC BODY");
-    skill(workspace.resolve(".agentty/skills/alpha"), "alpha", "project alpha", "PROJECT BODY");
+    skill(workspace.resolve(".ajent/skills/alpha"), "alpha", "project alpha", "PROJECT BODY");
     skill(workspace.resolve(".agents/skills/beta"), "beta", "project interop beta", "BETA BODY");
 
     assertThat(engine.find("alpha")).hasValueSatisfying(skill -> {
@@ -43,19 +43,19 @@ final class SkillEngineTest {
   }
 
   @Test void parsesLenientFrontmatterMetadataAndBlockScalars() throws IOException {
-    write(workspace.resolve(".agentty/skills/colons/SKILL.md"),
+    write(workspace.resolve(".ajent/skills/colons/SKILL.md"),
         "---\nname: colons\ndescription: Use when: things have colons\n---\nB\n");
-    write(workspace.resolve(".agentty/skills/dirname-x/SKILL.md"),
+    write(workspace.resolve(".ajent/skills/dirname-x/SKILL.md"),
         "---\nname: othername\ndescription: mismatch ok\n---\nB\n");
-    write(workspace.resolve(".agentty/skills/bare/SKILL.md"),
+    write(workspace.resolve(".ajent/skills/bare/SKILL.md"),
         "Just a bare instruction doc.\nMore text.\n");
-    write(workspace.resolve(".agentty/skills/full-meta/SKILL.md"), "---\nname: full-meta\n"
+    write(workspace.resolve(".ajent/skills/full-meta/SKILL.md"), "---\nname: full-meta\n"
         + "description: has every optional field\ncompatibility: Requires python3\n"
         + "allowed-tools: bash read\nlicense: Apache-2.0\nmetadata:\n"
         + "  author: example-org\n  version: \"1.0\"\n---\nMETA BODY\n");
-    write(workspace.resolve(".agentty/skills/folded/SKILL.md"),
+    write(workspace.resolve(".ajent/skills/folded/SKILL.md"),
         "---\nname: folded\ndescription: >-\n  First folded line\n  second folded line\n---\nFOLD BODY\n");
-    write(workspace.resolve(".agentty/skills/literal/SKILL.md"),
+    write(workspace.resolve(".ajent/skills/literal/SKILL.md"),
         "---\nname: literal\ndescription: |\n  First literal line\n  second literal line\n"
             + "disable-model-invocation: yes\n---\nLITERAL BODY\n");
 
@@ -84,8 +84,8 @@ final class SkillEngineTest {
   }
 
   @Test void hidesUserOnlySkillsFromCatalogButAllowsExplicitActivation() throws IOException {
-    skill(workspace.resolve(".agentty/skills/visible"), "visible", "shown", "VISIBLE BODY");
-    write(workspace.resolve(".agentty/skills/hidden/SKILL.md"),
+    skill(workspace.resolve(".ajent/skills/visible"), "visible", "shown", "VISIBLE BODY");
+    write(workspace.resolve(".ajent/skills/hidden/SKILL.md"),
         "---\nname: hidden\ndescription: user-explicit only\n"
             + "disable-model-invocation: true\n---\nHIDDEN BODY\n");
     assertThat(engine.find("hidden").orElseThrow().userOnly()).isTrue();
@@ -95,7 +95,7 @@ final class SkillEngineTest {
   }
 
   @Test void enumeratesResourcesAndReadAllowlistingNeverGrantsWrite() throws IOException {
-    Path directory = home.resolve(".agentty/skills/with-res");
+    Path directory = home.resolve(".ajent/skills/with-res");
     skill(directory, "with-res", "bundles resources",
         "Run scripts/go.sh then read references/REF.md");
     write(directory.resolve("scripts/go.sh"), "#!/bin/sh\necho hi\n");
@@ -112,7 +112,7 @@ final class SkillEngineTest {
   }
 
   @Test void deduplicatesActivationsAndReportsSpecDiagnostics() throws IOException {
-    skill(workspace.resolve(".agentty/skills/clean"), "clean", "description", "BODY");
+    skill(workspace.resolve(".ajent/skills/clean"), "clean", "description", "BODY");
     assertThat(engine.noteActivated("alpha")).isTrue();
     assertThat(engine.noteActivated("alpha")).isFalse();
     assertThat(engine.noteActivated("beta")).isTrue();
@@ -129,7 +129,7 @@ final class SkillEngineTest {
   }
 
   @Test void resolverReturnsRecoveryHintsPayloadAndAlreadyActiveSentinel() throws IOException {
-    skill(workspace.resolve(".agentty/skills/alpha"), "alpha", "description", "BODY");
+    skill(workspace.resolve(".ajent/skills/alpha"), "alpha", "description", "BODY");
     var resolver = engine.resolver();
     assertThat(resolver.load("missing")).satisfies(resolution -> {
       assertThat(resolution.body()).isEmpty();
@@ -153,9 +153,9 @@ final class SkillEngineTest {
   }
 
   @Test void skipsEmptyAndOversizedSkillFilesAndCapsResources() throws IOException {
-    write(workspace.resolve(".agentty/skills/empty/SKILL.md"), "");
-    write(workspace.resolve(".agentty/skills/huge/SKILL.md"), "x".repeat(SkillEngine.MAX_BODY_BYTES + 1));
-    Path many = workspace.resolve(".agentty/skills/many");
+    write(workspace.resolve(".ajent/skills/empty/SKILL.md"), "");
+    write(workspace.resolve(".ajent/skills/huge/SKILL.md"), "x".repeat(SkillEngine.MAX_BODY_BYTES + 1));
+    Path many = workspace.resolve(".ajent/skills/many");
     skill(many, "many", "resources", "BODY");
     for (int index = 0; index < 40; index++) write(many.resolve("r/" + index + ".txt"), "x");
     assertThat(engine.find("empty")).isEmpty();

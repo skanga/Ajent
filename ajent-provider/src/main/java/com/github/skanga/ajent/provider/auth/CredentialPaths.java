@@ -3,7 +3,7 @@ package com.github.skanga.ajent.provider.auth;
 import java.nio.file.Path;
 import java.util.Map;
 
-/** AgenTTY credential location resolution. */
+/** Ajent credential location resolution. */
 public final class CredentialPaths {
   private CredentialPaths() {}
 
@@ -17,7 +17,7 @@ public final class CredentialPaths {
       if (home.isEmpty()) home = environment.getOrDefault("USERPROFILE", "");
       base = home.isEmpty() ? workingDirectory.resolve(".config") : Path.of(home).resolve(".config");
     }
-    return base.resolve("agentty").resolve("credentials.json");
+    return base.resolve("ajent").resolve("credentials.json");
   }
 
   public static Path systemCredentialsPath() {

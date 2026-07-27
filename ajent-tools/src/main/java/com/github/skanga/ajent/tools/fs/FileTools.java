@@ -10,16 +10,11 @@ import com.github.skanga.ajent.tools.runtime.ToolErrorKind;
 import com.github.skanga.ajent.tools.runtime.ToolOutput;
 import com.github.skanga.ajent.tools.runtime.ToolResult;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -239,7 +234,7 @@ public final class FileTools {
     if (exists && original.equals(content)) {
       return success("File already matches content — no changes written.");
     }
-    FileChange change = change(path, original, content);
+    FileChange change = change(path, original, content, exists);
     atomicWrite(path, contentBytes);
     FileTime modified = Files.getLastModifiedTime(path);
     recordSnapshot(path, modified, contentBytes);
@@ -292,7 +287,7 @@ public final class FileTools {
     if (applied == 0) return success((stale ? STALE_EDIT_WARNING : "")
         + "No edits were applied — all " + noops
         + " edit(s) had identical old_text and new_text (nothing to change). File on disk is unchanged.");
-    FileChange change = change(path, original, updated);
+    FileChange change = change(path, original, updated, true);
     byte[] updatedBytes = updated.getBytes(StandardCharsets.UTF_8);
     atomicWrite(path, updatedBytes);
     FileTime modified = Files.getLastModifiedTime(path);
@@ -396,29 +391,13 @@ public final class FileTools {
   }
 
   private static void atomicWrite(Path target, byte[] content) throws IOException {
-    Path parent = target.getParent();
-    if (parent != null) Files.createDirectories(parent);
-    Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
-    try {
-      try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.CREATE,
-          StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
-        ByteBuffer buffer = ByteBuffer.wrap(content);
-        while (buffer.hasRemaining()) channel.write(buffer);
-        channel.force(true);
-      }
-      try {
-        Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE,
-            StandardCopyOption.REPLACE_EXISTING);
-      } catch (AtomicMoveNotSupportedException exception) {
-        Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
-      }
-    } finally {
-      Files.deleteIfExists(temporary);
-    }
+    AtomicFileWriter.write(target, content);
   }
 
-  private static FileChange change(Path path, String before, String after) {
-    return UnifiedDiff.compute(path.toAbsolutePath().normalize().toString(), before, after);
+  private static FileChange change(
+      Path path, String before, String after, boolean existedBefore) {
+    return UnifiedDiff.compute(
+        path.toAbsolutePath().normalize().toString(), before, after, existedBefore);
   }
 
   private static List<String> lines(String value) {

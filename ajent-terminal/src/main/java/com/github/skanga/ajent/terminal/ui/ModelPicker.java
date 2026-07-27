@@ -2,6 +2,7 @@ package com.github.skanga.ajent.terminal.ui;
 
 import com.github.skanga.ajent.domain.Effort;
 import com.github.skanga.ajent.domain.ModelCapabilities;
+import com.github.skanga.ajent.domain.ReasoningPolicy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -116,6 +117,13 @@ public final class ModelPicker {
       PickerState.OneAxis state, List<Model> models, Effort current, int delta) {
     return selected(state, models)
         .map(model -> current.cycle(delta, ModelCapabilities.fromId(model.id())))
+        .orElse(current);
+  }
+
+  public static Effort cycleEffort(PickerState.OneAxis state, List<Model> models,
+      String provider, Effort current, int delta) {
+    return selected(state, models)
+        .map(model -> ReasoningPolicy.forModel(provider, model.id()).cycle(current, delta))
         .orElse(current);
   }
 

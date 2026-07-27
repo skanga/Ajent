@@ -53,7 +53,7 @@ final class EnvironmentHttpClientTest {
     origin.start();
     try (var socks = new FakeSocks(origin.getAddress().getPort())) {
       var client = EnvironmentHttpClient.create(Map.of(
-          "AGENTTY_SOCKS_PROXY", "127.0.0.1:" + socks.port()));
+          "AJENT_SOCKS_PROXY", "127.0.0.1:" + socks.port()));
       HttpResponse<String> response = client.send(HttpRequest.newBuilder(
           URI.create("http://unresolvable.invalid:" + origin.getAddress().getPort() + "/through"))
           .build(), HttpResponse.BodyHandlers.ofString());
@@ -86,8 +86,8 @@ final class EnvironmentHttpClientTest {
     HttpServer oauth = origin("oauth", oauthHost);
     try {
       var client = EnvironmentHttpClient.createProvider(Map.of(
-          "AGENTTY_API_HOST", "127.0.0.1:" + api.getAddress().getPort(),
-          "AGENTTY_OAUTH_HOST", "127.0.0.1:" + oauth.getAddress().getPort()));
+          "AJENT_API_HOST", "127.0.0.1:" + api.getAddress().getPort(),
+          "AJENT_OAUTH_HOST", "127.0.0.1:" + oauth.getAddress().getPort()));
 
       assertThat(client.send(HttpRequest.newBuilder(
               URI.create("http://provider.invalid/v1/messages")).build(),
@@ -105,7 +105,7 @@ final class EnvironmentHttpClientTest {
 
   @Test void dialOverridesPreserveTheJdkHttp2PreferenceForHostedTls() {
     var client = EnvironmentHttpClient.createProvider(Map.of(
-        "AGENTTY_API_HOST", "127.0.0.1:9443"));
+        "AJENT_API_HOST", "127.0.0.1:9443"));
 
     assertThat(client.version()).isEqualTo(java.net.http.HttpClient.Version.HTTP_2);
   }
@@ -128,7 +128,7 @@ final class EnvironmentHttpClientTest {
     });
     origin.start();
     HttpClient client = EnvironmentHttpClient.createProvider(Map.of(
-        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()));
+        "AJENT_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()));
     try {
       HttpResponse<String> response = client.sendAsync(HttpRequest.newBuilder(
               URI.create("http://logical-provider.invalid/upload"))
@@ -194,7 +194,7 @@ final class EnvironmentHttpClientTest {
     origin.start();
     try (var socks = new FakeSocks(origin.getAddress().getPort());
          var client = EnvironmentHttpClient.createProvider(Map.of(
-             "AGENTTY_SOCKS_PROXY", "127.0.0.1:" + socks.port()))) {
+             "AJENT_SOCKS_PROXY", "127.0.0.1:" + socks.port()))) {
       HttpResponse<String> response = client.send(HttpRequest.newBuilder(
               URI.create("http://provider-through-socks.invalid/")).build(),
           HttpResponse.BodyHandlers.ofString());
@@ -210,7 +210,7 @@ final class EnvironmentHttpClientTest {
   @Test void routedClientPropagatesBodyPublisherAndHandlerFailures() throws Exception {
     HttpServer origin = origin("unused", new CompletableFuture<>());
     try (var client = EnvironmentHttpClient.createProvider(Map.of(
-        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
+        "AJENT_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
       HttpRequest.BodyPublisher brokenBody = new HttpRequest.BodyPublisher() {
         @Override public long contentLength() { return -1; }
         @Override public void subscribe(Flow.Subscriber<? super ByteBuffer> subscriber) {
@@ -284,7 +284,7 @@ final class EnvironmentHttpClientTest {
     });
     origin.start();
     try (var client = EnvironmentHttpClient.createProvider(Map.of(
-        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
+        "AJENT_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
       HttpResponse<Integer> response = client.send(HttpRequest.newBuilder(
               URI.create("http://provider.invalid/")).build(), info ->
           new HttpResponse.BodySubscriber<>() {
@@ -315,7 +315,7 @@ final class EnvironmentHttpClientTest {
       unusedPort = socket.getLocalPort();
     }
     try (var client = EnvironmentHttpClient.createProvider(Map.of(
-        "AGENTTY_API_HOST", "127.0.0.1:" + unusedPort))) {
+        "AJENT_API_HOST", "127.0.0.1:" + unusedPort))) {
       assertThatThrownBy(() -> client.send(HttpRequest.newBuilder(
               URI.create("http://provider.invalid/")).build(),
           HttpResponse.BodyHandlers.discarding())).isInstanceOf(IOException.class);
@@ -344,7 +344,7 @@ final class EnvironmentHttpClientTest {
     });
     origin.start();
     try (var client = EnvironmentHttpClient.createProvider(Map.of(
-        "AGENTTY_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
+        "AJENT_API_HOST", "127.0.0.1:" + origin.getAddress().getPort()))) {
       var pending = client.sendAsync(HttpRequest.newBuilder(
               URI.create("http://provider.invalid/stall")).build(),
           HttpResponse.BodyHandlers.ofString());
@@ -378,15 +378,15 @@ final class EnvironmentHttpClientTest {
     HttpServer oauth = origin("oauth", seenHost);
     try {
       var oauthClient = EnvironmentHttpClient.createOAuth(Map.of(
-          "AGENTTY_API_HOST", "bad.invalid:1",
-          "AGENTTY_OAUTH_HOST", "127.0.0.1:" + oauth.getAddress().getPort()));
+          "AJENT_API_HOST", "bad.invalid:1",
+          "AJENT_OAUTH_HOST", "127.0.0.1:" + oauth.getAddress().getPort()));
       assertThat(oauthClient.send(HttpRequest.newBuilder(
               URI.create("http://custom-oauth.invalid/token")).build(),
           HttpResponse.BodyHandlers.ofString()).body()).isEqualTo("oauth");
       assertThat(seenHost.get(5, TimeUnit.SECONDS)).isEqualTo("custom-oauth.invalid");
 
       var generalSelector = EnvironmentHttpClient.create(Map.of(
-          "AGENTTY_API_HOST", "127.0.0.1:" + oauth.getAddress().getPort()))
+          "AJENT_API_HOST", "127.0.0.1:" + oauth.getAddress().getPort()))
           .proxy().orElseThrow();
       assertThat(generalSelector.select(URI.create("http://provider.invalid")))
           .containsExactly(Proxy.NO_PROXY);
@@ -397,8 +397,8 @@ final class EnvironmentHttpClientTest {
 
   @Test void insecureTlsIsEnabledOnlyByTheExactNativeFlag() {
     var normal = EnvironmentHttpClient.create(Map.of());
-    var zero = EnvironmentHttpClient.create(Map.of("AGENTTY_INSECURE", "0"));
-    var insecure = EnvironmentHttpClient.create(Map.of("AGENTTY_INSECURE", "1"));
+    var zero = EnvironmentHttpClient.create(Map.of("AJENT_INSECURE", "0"));
+    var insecure = EnvironmentHttpClient.create(Map.of("AJENT_INSECURE", "1"));
 
     assertThat(zero.sslContext()).isSameAs(normal.sslContext());
     assertThat(insecure.sslContext()).isNotSameAs(normal.sslContext());
@@ -412,7 +412,7 @@ final class EnvironmentHttpClientTest {
         URI.create("https://certificate-name.invalid/")).build();
     try {
       assertThatThrownBy(() -> EnvironmentHttpClient.createProvider(Map.of(
-              "AGENTTY_API_HOST", override)).send(request,
+              "AJENT_API_HOST", override)).send(request,
           HttpResponse.BodyHandlers.discarding())).isInstanceOf(IOException.class);
 
       Process probe = new ProcessBuilder(
@@ -438,7 +438,7 @@ final class EnvironmentHttpClientTest {
         } catch (IOException ignored) { }
       });
       var client = EnvironmentHttpClient.builder(Map.of(
-              "AGENTTY_SOCKS_PROXY", "127.0.0.1:" + socks.port()))
+              "AJENT_SOCKS_PROXY", "127.0.0.1:" + socks.port()))
           .connectTimeout(Duration.ofSeconds(2)).build();
 
       assertThatThrownBy(() -> client.send(HttpRequest.newBuilder(
@@ -502,7 +502,7 @@ final class EnvironmentHttpClientTest {
       unusedPort = unused.getLocalPort();
     }
     var client = EnvironmentHttpClient.create(Map.of(
-        "AGENTTY_SOCKS_PROXY", "127.0.0.1:" + unusedPort));
+        "AJENT_SOCKS_PROXY", "127.0.0.1:" + unusedPort));
     HttpResponse<Void> response = client.send(HttpRequest.newBuilder(
             URI.create("http://unreachable.invalid/")).timeout(Duration.ofSeconds(2)).build(),
         HttpResponse.BodyHandlers.discarding());
@@ -560,7 +560,7 @@ final class EnvironmentHttpClientTest {
 
     public static void main(String[] arguments) throws Exception {
       HttpResponse<String> response = EnvironmentHttpClient.createProvider(Map.of(
-              "AGENTTY_API_HOST", arguments[0], "AGENTTY_INSECURE", "1"))
+              "AJENT_API_HOST", arguments[0], "AJENT_INSECURE", "1"))
           .send(HttpRequest.newBuilder(URI.create("https://certificate-name.invalid/")).build(),
               HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() != 200) System.exit(2);

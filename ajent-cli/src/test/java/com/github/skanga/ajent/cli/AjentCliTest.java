@@ -101,6 +101,15 @@ class AjentCliTest {
       @Override public int login(BufferedReader input, PrintStream output, PrintStream error) {
         output.print("login:" + read(input)); return 11;
       }
+      @Override public int loginCodex(PrintStream output, PrintStream error) {
+        output.print("codex-import"); return 19;
+      }
+      @Override public int logoutCodex(PrintStream output, PrintStream error) {
+        output.print("codex-logout"); return 20;
+      }
+      @Override public int statusCodex(PrintStream output) {
+        output.print("codex-status"); return 21;
+      }
       @Override public int logout(PrintStream output, PrintStream error) {
         output.print("logout"); return 12;
       }
@@ -123,6 +132,18 @@ class AjentCliTest {
     };
     assertThat(run(services, "answer\n", "login")).satisfies(result -> {
       assertThat(result.exitCode()).isEqualTo(11); assertThat(result.stdout()).isEqualTo("login:answer");
+    });
+    assertThat(run(services, "", "login", "--provider", "codex")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(19);
+      assertThat(result.stdout()).isEqualTo("codex-import");
+    });
+    assertThat(run(services, "", "logout", "--provider", "codex")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(20);
+      assertThat(result.stdout()).isEqualTo("codex-logout");
+    });
+    assertThat(run(services, "", "status", "--provider", "codex")).satisfies(result -> {
+      assertThat(result.exitCode()).isEqualTo(21);
+      assertThat(result.stdout()).isEqualTo("codex-status");
     });
     assertThat(run(services, "", "logout")).satisfies(result -> {
       assertThat(result.exitCode()).isEqualTo(12); assertThat(result.stdout()).isEqualTo("logout");

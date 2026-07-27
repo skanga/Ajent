@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.core.persistence;
 
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import com.github.skanga.ajent.domain.Thread;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -81,7 +81,7 @@ public final class AsyncThreadWriter implements AutoCloseable {
       try {
         save.accept(next);
       } catch (RuntimeException | LinkageError failure) {
-        AgenttyDebugLog.log("persistence.async_save", failure);
+        AjentDebugLog.log("persistence.async_save", failure);
         // AgenTTY treats background persistence as best effort and keeps draining.
       }
     }

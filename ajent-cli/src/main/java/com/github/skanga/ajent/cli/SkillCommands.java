@@ -23,8 +23,8 @@ public final class SkillCommands {
     var skills = engine.all();
     if (skills.isEmpty()) {
       output.print("no skills installed.\n"
-          + "add one: <project>/.agentty/skills/<name>/SKILL.md "
-          + "(or ~/.agentty/skills/, .agents/, .claude/)\n");
+          + "add one: <project>/.ajent/skills/<name>/SKILL.md "
+          + "(or ~/.ajent/skills/, .agents/, .claude/)\n");
       return 0;
     }
     int warnings = 0;

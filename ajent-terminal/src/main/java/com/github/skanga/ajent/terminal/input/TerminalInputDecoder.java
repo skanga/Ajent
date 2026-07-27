@@ -68,6 +68,11 @@ public final class TerminalInputDecoder {
     return state != State.GROUND;
   }
 
+  /** Whether a lone ESC is still waiting to be distinguished from an escape sequence. */
+  public boolean hasPendingEscape() {
+    return state == State.ESCAPE;
+  }
+
   public void reset() {
     state = State.GROUND;
     buffer.reset();

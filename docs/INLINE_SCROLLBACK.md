@@ -1,16 +1,19 @@
-# Inline scrollback contract
+# Session scrollback contract
 
 This document narrows [RENDERING.md](RENDERING.md) to the invariants around
-native terminal scrollback. These rules are load-bearing: a renderer can look
+the alternate screen's session scrollback. These rules are load-bearing: a renderer can look
 correct in a fixed screenshot and still duplicate, strand, or erase rows after
 streaming, resize, or modal transitions.
 
-## Why inline mode
+## Why the renderer still tracks scrollback
 
-Coding sessions produce history users expect to search and retain after Ajent
-exits. An alternate screen would isolate that history. Ajent therefore paints
-below the shell prompt and allows settled turns to become ordinary emulator
-scrollback.
+Ajent now isolates its full-screen session in the alternate buffer so startup
+does not inherit a cursor offset and exit restores the shell exactly. Long
+coding sessions still exceed one viewport, so settled turns become scrollback
+inside that alternate buffer while Ajent is running. Because host terminals do
+not consistently expose alternate-buffer history, Ajent also reconstructs the
+complete logical transcript for Page Up/Page Down and mouse-wheel navigation.
+Escape or End returns to the live edge.
 
 The cost is ownership: bytes already scrolled above the terminal viewport are
 owned by the emulator and cannot be edited in place. Ajent must never treat

@@ -10,8 +10,8 @@ public final class TerminalCapabilities {
 
   public static boolean synchronizedOutput(Map<String, String> environment) {
     Objects.requireNonNull(environment, "environment");
-    if (override(environment.get("MAYA_FORCE_SYNC"))) return true;
-    if (override(environment.get("MAYA_NO_SYNC"))) return false;
+    if (override(environment.get("AJENT_FORCE_SYNC"))) return true;
+    if (override(environment.get("AJENT_NO_SYNC"))) return false;
     String program = environment.getOrDefault("TERM_PROGRAM", "");
     if (program.equals("Apple_Terminal")) return false;
     for (String marker : new String[] {"KITTY_WINDOW_ID", "ALACRITTY_LOG",
@@ -39,7 +39,7 @@ public final class TerminalCapabilities {
   }
 
   static boolean runningOverSsh(Map<String, String> environment) {
-    String disabled = environment.getOrDefault("AGENTTY_NO_SSH_THROTTLE", "");
+    String disabled = environment.getOrDefault("AJENT_NO_SSH_THROTTLE", "");
     if (!disabled.isEmpty() && disabled.charAt(0) != '0') return false;
     return environment.containsKey("SSH_CONNECTION") || environment.containsKey("SSH_TTY")
         || environment.containsKey("SSH_CLIENT");

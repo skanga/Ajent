@@ -100,13 +100,13 @@ final class EmbeddingClientTest {
     assertThatIllegalArgumentException().isThrownBy(() -> new EmbeddingClient.Config("h", 0, "m"));
     assertThatIllegalArgumentException().isThrownBy(
         () -> new EmbeddingClient.Config("h", 65_536, "m"));
-    assertThat(EmbeddingClient.Config.agenttyDefaults())
+    assertThat(EmbeddingClient.Config.ajentDefaults())
         .isEqualTo(new EmbeddingClient.Config("127.0.0.1", 11_434, "nomic-embed-text"));
     assertThat(EmbeddingClient.Config.fromEnvironment(java.util.Map.of(
-        "AGENTTY_EMBED_MODEL", "custom", "AGENTTY_OLLAMA_HOST", "ollama.local:1234")))
+        "AJENT_EMBED_MODEL", "custom", "AJENT_OLLAMA_HOST", "ollama.local:1234")))
         .isEqualTo(new EmbeddingClient.Config("ollama.local", 1234, "custom"));
     assertThat(EmbeddingClient.Config.fromEnvironment(java.util.Map.of(
-        "AGENTTY_OLLAMA_HOST", "ollama.local:not-a-port")))
+        "AJENT_OLLAMA_HOST", "ollama.local:not-a-port")))
         .isEqualTo(new EmbeddingClient.Config("ollama.local", 11_434, "nomic-embed-text"));
   }
 

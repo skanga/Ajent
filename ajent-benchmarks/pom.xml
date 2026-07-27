@@ -18,6 +18,7 @@
             <groupId>com.github.skanga.ajent</groupId>
             <artifactId>ajent-cli</artifactId>
             <version>${project.version}</version>
+            <classifier>thin</classifier>
         </dependency>
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
@@ -81,20 +82,6 @@
                             <finalName>benchmarks</finalName>
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <!--
-                              ajent-cli's artifact is the fat ajent.jar (finalName ajent), which
-                              already bundles the whole ajent runtime closure (jackson, flexmark,
-                              jline, okhttp, ...). Merge only that jar plus the JMH runtime so those
-                              libraries are not shaded in twice (which produced overlap warnings).
-                            -->
-                            <artifactSet>
-                                <includes>
-                                    <include>com.github.skanga.ajent:ajent-cli</include>
-                                    <include>org.openjdk.jmh:jmh-core</include>
-                                    <include>net.sf.jopt-simple:jopt-simple</include>
-                                    <include>org.apache.commons:commons-math3</include>
-                                </includes>
-                            </artifactSet>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>

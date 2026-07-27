@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.provider;
 
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.skanga.ajent.provider.ollama.OllamaStreamDecoder;
@@ -10,6 +10,10 @@ import com.github.skanga.ajent.provider.anthropic.AnthropicStreamDecoder;
 import com.github.skanga.ajent.provider.anthropic.AnthropicWire;
 import com.github.skanga.ajent.provider.openai.OpenAiStreamDecoder;
 import com.github.skanga.ajent.provider.openai.OpenAiWire;
+import com.github.skanga.ajent.provider.codex.CodexAuthManager;
+import com.github.skanga.ajent.provider.codex.CodexRequest;
+import com.github.skanga.ajent.provider.codex.CodexStreamDecoder;
+import com.github.skanga.ajent.provider.codex.CodexWire;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
 import java.io.IOException;
 import java.io.InputStream;
@@ -104,6 +108,24 @@ public final class ProviderHttpTransport {
     stream(OllamaWire.buildHttpRequest(request), decoder::feed, decoder::end,
         sink, cancelled, (status, body) -> ollamaHttpError(status, body, request.model()), null,
         ProviderHttpTransport::ollamaCancelledMessage);
+  }
+
+  public void streamCodex(
+      CodexRequest request, CodexAuthManager auth,
+      Consumer<StreamEvent> sink, BooleanSupplier cancelled) {
+    Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(auth, "auth");
+    try {
+      var decoder = new CodexStreamDecoder();
+      stream(CodexWire.buildHttpRequest(request, auth.headers()), decoder::feed, decoder::end,
+          sink, cancelled, ProviderHttpTransport::codexHttpError, debug,
+          ProviderHttpTransport::baseCancelledMessage);
+    } catch (InterruptedException exception) {
+      java.lang.Thread.currentThread().interrupt();
+      sink.accept(new StreamEvent.Error("Codex: authentication interrupted"));
+    } catch (IOException exception) {
+      sink.accept(new StreamEvent.Error("Codex: " + exception.getMessage()));
+    }
   }
 
   private void stream(
@@ -263,7 +285,7 @@ public final class ProviderHttpTransport {
         long seconds = Long.parseLong(value);
         return seconds > 0 ? Optional.of(Duration.ofSeconds(seconds)) : Optional.empty();
       } catch (NumberFormatException failure) {
-        AgenttyDebugLog.log("openai.retry_after.parse", failure);
+        AjentDebugLog.log("openai.retry_after.parse", failure);
         return Optional.empty();
       }
     });
@@ -302,6 +324,13 @@ public final class ProviderHttpTransport {
     String message = httpError(status, body);
     return status == 401 || status == 403
         ? message + "  (run 'ajent login' to re-authenticate)"
+        : message;
+  }
+
+  private static String codexHttpError(int status, byte[] body) {
+    String message = httpError(status, body);
+    return status == 401 || status == 403
+        ? message + "  (run 'ajent login --provider codex' to import a fresh session)"
         : message;
   }
 

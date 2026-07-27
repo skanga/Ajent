@@ -10,9 +10,9 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
-/** Reproduces AgenTTY's machine-and-user-bound credential key seed. */
+/** Ajent's machine-and-user-bound credential key seed. */
 public final class MachineSeed {
-  private static final String INFO = "agentty-credentials-v1";
+  private static final String INFO = "ajent-credentials-v1";
   private static final char SEPARATOR = '\u001f';
   private static final Pattern MACHINE_GUID = Pattern.compile(
       "(?im)^\\s*MachineGuid\\s+REG_SZ\\s+(.+?)\\s*$");
@@ -35,7 +35,7 @@ public final class MachineSeed {
     if (environment.containsKey("USERNAME")) {
       seed.append(SEPARATOR).append(environment.get("USERNAME"));
     }
-    if (seed.isEmpty()) seed.append("agentty-fallback-seed");
+    if (seed.isEmpty()) seed.append("ajent-fallback-seed");
     return seed.append(SEPARATOR).append(INFO).toString();
   }
 
@@ -80,7 +80,7 @@ public final class MachineSeed {
             .findFirst().orElse("").strip();
         if (!value.isEmpty()) return Optional.of(value);
       } catch (IOException ignored) {
-        // Try AgenTTY's next location.
+        // Try the next platform identity location.
       }
     }
     return Optional.empty();

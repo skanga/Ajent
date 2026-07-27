@@ -1,9 +1,11 @@
 # Interactive terminal interface
 
-Ajent runs as an inline terminal application. It keeps the shell's native
-scrollback, renders settled conversation rows above a mutable live surface,
-and uses keyboard-owned modal views for commands, providers, models, threads,
-permissions, diffs, plans, checkpoints, code blocks, tool output, and login.
+Ajent runs as a full-screen alternate-screen terminal application. The shell
+viewport and its scrollback are restored unchanged when Ajent exits. Within
+the session, Ajent owns a browsable transcript view while keeping the mutable
+live surface pinned to the current turn. Keyboard-owned modal views handle
+commands, providers, models, threads, permissions, diffs, plans, checkpoints,
+code blocks, tool output, and login.
 
 ## Starting the interface
 
@@ -25,8 +27,12 @@ The live surface is ordered as:
 2. queued user-turn previews and an inline permission decision when present;
 3. the pending-changes strip;
 4. the composer;
-5. the phase, provider, context, and status bar;
+5. the phase, connection, context, and status bar;
 6. an active modal/overlay when one owns input.
+
+On an empty roomy terminal, flexible blank rows keep the composer and status
+near the bottom edge. Conversation content consumes those rows naturally as
+the transcript grows.
 
 User and assistant turns have stable message identities. Assistant markdown is
 rendered incrementally. Tool calls appear as typed compact panels with
@@ -58,34 +64,37 @@ rather than exposing an orphaned body.
 
 ### Welcome screen
 
-An empty thread uses AgenTTY's 6×7 half-block `» AGENTTY` wordmark, the
-“a calm middleware between you and the model” tagline, model and profile
-chips, and the native shortcut inventory. The wordmark enters with the native
-100 ms-per-letter cascade and then continues the 2.2-second staggered
-per-letter bob while the welcome screen remains mounted. It collapses to a
-one-row form on short or narrow terminals. Shortcut labels collapse before
-their keys, and the row wraps by measured Unicode cell width.
+An empty thread uses Ajent's compact three-row half-block `AJENT` wordmark, the
+“a calm middleware between you and the model” tagline, and shortcut rows
+labeled `Navigate`, `Actions`, and `Session`. Provider, model, and profile
+details are deliberately omitted from the banner. It collapses to a compact
+one-row `AJENT` identity on
+short or narrow terminals. The welcome screen does not request animation
+frames. Shortcut labels collapse before their keys, and each group wraps by
+measured Unicode cell width.
 
 The three starter prompts appear only after saved-thread discovery completes
-and proves this is a genuine first run. On a roomy terminal they occupy the
-same centered 62-column rounded card as AgenTTY, including its letter-spaced
-heading and two-row separation before the shortcuts. Returning users keep the
-quieter welcome even when the currently selected thread is empty.
+and proves this is a genuine first run. On a roomy terminal they occupy a
+centered 62-column rounded card with a letter-spaced heading. Returning users
+keep the quieter welcome even when the currently selected thread is empty.
 
 ### Changes and status chrome
 
 Successful file-changing tools feed a bordered `Changes (N files)` strip
 above the composer. Each entry keeps its created/modified marker and added and
 removed line totals. Review, accept, and reject hints shed in that order when
-the terminal is too narrow; file facts remain visible.
+the terminal is too narrow; file facts remain visible. The global actions are
+shown as `Shift-A accept` and `Shift-X reject`, leaving lowercase letters
+available for composer input.
 
 The bottom activity row prioritizes permission, compaction, streaming, tool
 execution, authentication, queued work, and idle state. It includes the
-thread title when space permits, the active provider, and a ten-cell context
-gauge derived from input tokens and the selected model's context limit. At
-wide sizes the idle row also retains AgenTTY's fixed-width token-rate
-sparkline and raw context-token slots; the measured degradation path removes
-those verbose fields when the terminal cannot hold them.
+thread title when space permits and reports `Connection not checked` until
+the first real provider stream event changes it to `Connected`; a provider
+error changes it to `Provider unavailable`. A single phase glyph represents
+the current state. Context details
+appear only after real token usage exists; unavailable rates, token slots,
+gauges, and percentages are omitted instead of rendered as zeroes or dashes.
 Runtime and UI notifications replace the activity detail with a full-width
 severity banner and truncate by terminal-cell width instead of wrapping the
 fixed chrome.
@@ -96,6 +105,14 @@ The composer stores text, a UTF-16 cursor index, and an attachment list.
 Attachments appear in the text as private placeholders and render as compact
 chips. Moving, deleting, undoing, recalling history, or editing queued turns
 moves text and attachments together.
+
+The composer uses a deliberately dim border, separates the block cursor from placeholder
+text, and labels its actions as `Enter send`, `Shift+Enter newline`, and
+`Ctrl+E expand`. Its right footer uses available width for provider, model,
+and queue identity; the profile already appears with the model in the welcome
+header. An unavailable provider is marked `(unavailable)`. On very narrow
+terminals the footer preserves the provider before secondary controls. Detail
+sheds responsively rather than capping the main surface width.
 
 ### Submission and editing
 
@@ -166,6 +183,12 @@ path within the native size bound.
 uses the JDK desktop clipboard when available, configured platform commands,
 and finally a terminal clipboard query where supported.
 
+Ajent leaves terminal mouse reporting disabled so ordinary host-terminal text
+selection remains available. In Windows Terminal, drag to select,
+`Ctrl-Shift-C` to copy, and `Ctrl-Shift-V` to paste. Transcript history uses
+`Page Up` and `Page Down`; this avoids taking ownership of drag gestures merely
+to receive mouse-wheel events.
+
 ## Global keys
 
 | Key | Action |
@@ -183,6 +206,8 @@ and finally a terminal clipboard query where supported.
 | `Ctrl-T` | Open the plan |
 | `Ctrl-G` | Open runnable code blocks |
 | `Ctrl-O` | Open tool outputs |
+| `Page Up`, `Page Down` | Browse the in-session transcript |
+| `Esc` or `End` in transcript history | Return to the live view |
 | `Ctrl-L` | Redraw and clear Ajent's terminal scrollback surface |
 | `Shift-Tab` | Cycle permission profile |
 
@@ -206,14 +231,18 @@ hijacked.
 
 The provider picker lists configured presets plus a custom-host entry. A
 hosted provider may transition to secret input; a local provider can proceed
-without a key. Successful switching fetches the provider's model catalog and
-opens the model picker.
+without a key. Provider switching is two-phase: Ajent authenticates and fetches
+the new catalog while the current provider remains active, then commits the
+provider and model together only after model confirmation. Escape, an empty
+catalog, or discovery failure leaves the old selection untouched.
 
 The model picker supports text filtering, favorites, and capability-aware
 reasoning effort. Left/Right cycle only through the selected model's valid
 ladder (`off`, `low`, `medium`, `high`, `xhigh`, or `max` as applicable).
 Selection and favorites are persisted. The next request snapshots the current
-provider/model/auth/effort configuration.
+provider/model/auth/effort configuration. Codex supports `off`, `low`,
+`medium`, and `high`; Codex mini clamps low to medium, and only cataloged
+xhigh-capable models expose `xhigh`.
 
 ## Permission prompt and profiles
 
@@ -292,8 +321,16 @@ and Escape cancels. A completed rewind clears the inline surface and shows
 Filesystem edit/write tools produce structured changes. The diff review modal
 uses native three-context unified hunks. Navigation moves across files and
 hunks. `y`/`n` mark the active hunk accepted/rejected; `a`/`x` apply the choice
-to all. Review status records the user's inspection decision—it does not undo
-an operation that already ran.
+to all. Outside the modal, the equivalent global shortcuts are `Shift-A` and
+`Shift-X`.
+
+Applying a review is transactional. Ajent verifies every target still contains
+the reviewed result, stages metadata-preserving replacements, and then commits
+the complete set. A failure or concurrent edit restores already committed
+targets and retains the pending review for retry. Rejection deletes only files
+created by the reviewed tool operation; a pre-existing empty file is restored
+to an empty file. Atomic replacements preserve executable permissions and
+other copyable platform attributes.
 
 ## Terminal compatibility
 

@@ -12,6 +12,7 @@ import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.domain.ModelCapabilities;
+import com.github.skanga.ajent.domain.ReasoningPolicy;
 import com.github.skanga.ajent.domain.Profile;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.SessionPhase;
@@ -27,6 +28,11 @@ import com.github.skanga.ajent.provider.auth.OAuthTokenClient;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
 import com.github.skanga.ajent.provider.openai.ProviderAuthResolver;
 import com.github.skanga.ajent.provider.openai.ProviderRegistry;
+import com.github.skanga.ajent.provider.codex.CodexAuthImporter;
+import com.github.skanga.ajent.provider.codex.CodexAuthManager;
+import com.github.skanga.ajent.provider.codex.CodexCredentialStore;
+import com.github.skanga.ajent.provider.stream.StreamEvent;
+import com.github.skanga.ajent.provider.ErrorClass;
 import com.github.skanga.ajent.runtime.AgentLoop;
 import com.github.skanga.ajent.runtime.AgentSessionFactory;
 import com.github.skanga.ajent.runtime.AgentState;
@@ -72,8 +78,10 @@ import com.github.skanga.ajent.terminal.ui.ThreadPicker;
 import com.github.skanga.ajent.terminal.ui.TurnChrome;
 import com.github.skanga.ajent.tools.process.ProcessSandbox;
 import com.github.skanga.ajent.tools.process.ProcessRunner;
+import com.github.skanga.ajent.tools.fs.ChangeReviewApplier;
 import com.github.skanga.ajent.tools.runtime.ToolRuntimeFactory;
 import com.github.skanga.ajent.tools.runtime.FileChange;
+import com.github.skanga.ajent.tools.runtime.UnifiedDiff;
 import com.github.skanga.ajent.tools.attachment.ClipboardReader;
 import com.github.skanga.ajent.tools.attachment.ImagePaste;
 import com.github.skanga.ajent.tools.attachment.SystemClipboardReader;
@@ -100,6 +108,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -145,7 +154,8 @@ final class InteractiveCommand {
   int run(CliArguments arguments, PrintStream error) {
     Configuration configured = configure(arguments, error);
     if (configured == null) return USAGE_ERROR;
-    try (var mcp = configured.mcp(); var terminal = JLineTerminalSession.open()) {
+    var mcp = configured.mcp();
+    try (mcp; var terminal = JLineTerminalSession.open()) {
       return runSession(configured, terminal);
     } catch (IOException | RuntimeException exception) {
       error.print("ajent: interactive mode failed: " + detail(exception) + "\n");
@@ -154,6 +164,33 @@ final class InteractiveCommand {
   }
 
   private int runSession(Configuration configured, JLineTerminalSession terminal) throws IOException {
+    return runSession(configured, new SessionTerminal() {
+      @Override public JLineTerminalSession.Size size() { return terminal.size(); }
+      @Override public void write(String value) { terminal.write(value); }
+      @Override public void write(byte[] value, int offset, int length) {
+        terminal.write(value, offset, length);
+      }
+      @Override public <T> T suspend(Supplier<T> action) { return terminal.suspend(action); }
+      @Override public JLineTerminalSession.SignalGuard ignoreInterrupts() {
+        return terminal.ignoreInterrupts();
+      }
+      @Override public boolean interactive() { return terminal.interactive(); }
+      @Override public void readSingleKey() { terminal.readSingleKey(); }
+      @Override public void onResize(Consumer<JLineTerminalSession.Size> listener) {
+        terminal.onResize(listener);
+      }
+      @Override public void enableMouse() { terminal.enableMouse(); }
+      @Override public List<TerminalEvent> read() throws IOException { return terminal.read(); }
+      @Override public List<TerminalEvent> flushEscape() { return terminal.flushEscape(); }
+    });
+  }
+
+  int runSession(Configuration configured, SessionTerminal terminal) throws IOException {
+    return runSession(configured, terminal, ignored -> {});
+  }
+
+  int runSession(Configuration configured, SessionTerminal terminal,
+      Consumer<AgentControl> controlObserver) throws IOException {
     var state = new AtomicReference<AgentState>();
     var activeLoop = new AtomicReference<AgentLoop>();
     var activeProfile = new AtomicReference<>(configured.profile());
@@ -161,6 +198,7 @@ final class InteractiveCommand {
     configured.subagents().install(activeProvider::get);
     var activeUi = new AtomicReference<Ui>();
     var pendingChanges = new AtomicReference<List<FileChange>>(List.of());
+    var turnProviders = new ConcurrentHashMap<Long, String>();
     var permission = new PermissionGate();
     try (var animations = new FrameScheduler(environment)) {
       var ui = new Ui(new TerminalPort() {
@@ -181,7 +219,17 @@ final class InteractiveCommand {
         state.set(next);
         liveTodoItems(next).ifPresent(configured.todos()::set);
         Ui current = activeUi.get();
-        if (current != null) current.render();
+        if (current != null) {
+          String eventProvider = message instanceof RuntimeMessage.ProviderEvent event
+              ? turnProviders.getOrDefault(event.turnId(), activeProvider.get().provider())
+              : activeProvider.get().provider();
+          current.observe(message, eventProvider);
+          current.render();
+        }
+        if (message instanceof RuntimeMessage.ProviderEvent event
+            && event.event() instanceof StreamEvent.Finished) {
+          turnProviders.remove(event.turnId());
+        }
       };
       AgentLoop initialLoop = configured.sessions().create(conversation, activeProfile::get,
           (AgentSessionFactory.ConfigurationSource) activeProvider::get,
@@ -190,8 +238,15 @@ final class InteractiveCommand {
       state.set(initialLoop.state());
       AgentControl control = new AgentControl() {
         private final AnthropicOAuthLogin oauth = new AnthropicOAuthLogin(client);
+        private final AtomicReference<PreparedProvider> preparedProvider = new AtomicReference<>();
         @Override public AgentState state() { return activeLoop.get().state(); }
         @Override public void dispatch(RuntimeMessage message) {
+          if (message instanceof RuntimeMessage.Submit) {
+            AgentState current = activeLoop.get().state();
+            long turnId = current.turnCounter() + current.queued().size() + 1;
+            turnProviders.keySet().removeIf(existing -> existing < turnId);
+            turnProviders.put(turnId, activeProvider.get().provider());
+          }
           activeLoop.get().dispatch(message);
         }
         @Override public void newThread() {
@@ -360,12 +415,17 @@ final class InteractiveCommand {
         }
         @Override public void loadModels(Consumer<List<ModelPicker.Model>> receiver) {
           Thread.startVirtualThread(() -> {
-            List<com.github.skanga.ajent.provider.ProviderModel> discovered =
-                activeProvider.get().provider().equals("anthropic")
-                    ? configured.models().listAnthropicModels(activeProvider.get().auth())
-                    : configured.models().listModels(activeProvider.get().auth(),
-                        com.github.skanga.ajent.provider.openai.Endpoint.fromSpec(
-                            activeProvider.get().provider()));
+            String provider = activeProvider.get().provider();
+            List<com.github.skanga.ajent.provider.ProviderModel> discovered;
+            if (provider.equals("anthropic")) {
+              discovered = configured.models().listAnthropicModels(activeProvider.get().auth());
+            } else if (provider.equals("codex")) {
+              discovered = configured.models().listCodexModels(CodexAuthManager.forEnvironment(
+                  EnvironmentHttpClient.createProvider(environment), environment, home));
+            } else {
+              discovered = configured.models().listModels(activeProvider.get().auth(),
+                  com.github.skanga.ajent.provider.openai.Endpoint.fromSpec(provider));
+            }
             Settings saved = configured.settings().load();
             List<ModelPicker.Model> result = discovered.stream().map(model ->
                 new ModelPicker.Model(model.id(), model.displayName(),
@@ -378,8 +438,8 @@ final class InteractiveCommand {
         }
         @Override public void selectModel(String model) {
           activeProvider.updateAndGet(current -> {
-            Effort effort = Effort.fromWire(current.effort()).clamp(
-                ModelCapabilities.fromId(model));
+            Effort effort = ReasoningPolicy.forModel(current.provider(), model)
+                .clamp(Effort.fromWire(current.effort()));
             return new LiveProviderFactory.Configuration(
                 current.provider(), model, current.auth(), effort.wire(), current.systemPrompt(),
                 current.contextWindow(), current.environment(), current.additionalTools());
@@ -401,6 +461,91 @@ final class InteractiveCommand {
           return ProviderRegistry.presets().stream()
               .map(preset -> new ProviderPicker.Provider(preset.id(), preset.label())).toList();
         }
+        @Override public void prepareProvider(String provider, String label,
+            Consumer<ProviderPreparation> completed) {
+          Thread.startVirtualThread(() -> {
+            Settings saved = configured.settings().load();
+            CredentialResolver.Resolution anthropic = CredentialResolver.resolve(
+                "", environment, credentials.load(), System.currentTimeMillis());
+            ProviderAuth auth = ProviderAuthResolver.resolve(provider,
+                providerAuth(anthropic.credential()), "",
+                saved.providerKeys().getOrDefault(provider, ""), environment);
+            var preset = ProviderRegistry.presetFor(provider);
+            if (preset.isPresent()
+                && preset.orElseThrow().kind() == ProviderRegistry.Kind.CODEX
+                && codexStore().load().isEmpty()) {
+              completed.accept(new ProviderPreparation(provider, label, List.of(), "",
+                  ProviderFailure.CODEX_AUTH_REQUIRED, "Codex credentials required"));
+              return;
+            }
+            boolean needsKey = preset.isPresent()
+                && preset.orElseThrow().kind() == ProviderRegistry.Kind.OPENAI
+                && !preset.orElseThrow().local()
+                && preset.orElseThrow().authStyle() != ProviderRegistry.AuthStyle.NONE;
+            if (needsKey && auth.isEmpty()) {
+              completed.accept(new ProviderPreparation(provider, label, List.of(), "",
+                  ProviderFailure.AUTH_REQUIRED, "API key required"));
+              return;
+            }
+            List<com.github.skanga.ajent.provider.ProviderModel> discovered;
+            if (provider.equals("anthropic")) {
+              discovered = configured.models().listAnthropicModels(auth);
+            } else if (provider.equals("codex")) {
+              ProviderModelCatalog.Discovery discovery = configured.models().discoverCodexModels(
+                  CodexAuthManager.forEnvironment(
+                      EnvironmentHttpClient.createProvider(environment), environment, home),
+                  URI.create("https://chatgpt.com/backend-api/codex/models"),
+                  com.github.skanga.ajent.provider.codex.CodexClientVersion.detect());
+              if (discovery instanceof ProviderModelCatalog.Discovery.Failure failure) {
+                completed.accept(new ProviderPreparation(provider, label, List.of(), "",
+                    failure.kind() == ProviderModelCatalog.FailureKind.AUTHENTICATION
+                        ? ProviderFailure.CODEX_AUTH_REQUIRED : ProviderFailure.DISCOVERY,
+                    failure.detail()));
+                return;
+              }
+              discovered = ((ProviderModelCatalog.Discovery.Success) discovery).models();
+            } else {
+              discovered = configured.models().listModels(auth,
+                  com.github.skanga.ajent.provider.openai.Endpoint.fromSpec(provider));
+            }
+            if (discovered.isEmpty()) {
+              completed.accept(new ProviderPreparation(provider, label, List.of(), "",
+                  ProviderFailure.DISCOVERY,
+                  "No models were returned; the provider, credentials, or endpoint may be unavailable"));
+              return;
+            }
+            List<String> modelIds = discovered.stream()
+                .map(com.github.skanga.ajent.provider.ProviderModel::id).toList();
+            String recalled = saved.providerModels().getOrDefault(provider, "");
+            if (!modelIds.contains(recalled)) recalled = "";
+            List<ModelPicker.Model> rows = discovered.stream().map(model ->
+                new ModelPicker.Model(model.id(), model.displayName(),
+                    saved.favoriteModels().contains(new ModelId(model.id())))).toList();
+            preparedProvider.set(new PreparedProvider(provider, auth, modelIds));
+            completed.accept(new ProviderPreparation(
+                provider, label, rows, recalled, ProviderFailure.NONE, ""));
+          });
+        }
+        @Override public boolean commitPreparedProvider(String provider, String model) {
+          PreparedProvider pending = preparedProvider.get();
+          if (pending == null || !pending.provider().equals(provider)
+              || !pending.models().contains(model)) return false;
+          LiveProviderFactory.Configuration previous = activeProvider.get();
+          Effort selectedEffort = ReasoningPolicy.forModel(provider, model)
+              .clamp(Effort.fromWire(previous.effort()));
+          var selected = new LiveProviderFactory.Configuration(
+              provider, model, pending.auth(), selectedEffort.wire(), previous.systemPrompt(),
+              previous.contextWindow(), previous.environment(), previous.additionalTools());
+          if (!configured.settings().save(configured.settings().load()
+              .withProviderModel(provider, new ModelId(model))
+              .withEffort(selectedEffort.wire()))) return false;
+          activeProvider.set(selected);
+          preparedProvider.compareAndSet(pending, null);
+          return true;
+        }
+        @Override public void cancelPreparedProvider() {
+          preparedProvider.set(null);
+        }
         @Override public boolean selectProvider(String provider) {
           Settings saved = configured.settings().load();
           CredentialResolver.Resolution anthropic = CredentialResolver.resolve(
@@ -409,6 +554,9 @@ final class InteractiveCommand {
               providerAuth(anthropic.credential()), "",
               saved.providerKeys().getOrDefault(provider, ""), environment);
           var preset = ProviderRegistry.presetFor(provider);
+          if (preset.isPresent()
+              && preset.orElseThrow().kind() == ProviderRegistry.Kind.CODEX
+              && codexStore().load().isEmpty()) return false;
           boolean needsKey = preset.isPresent()
               && preset.orElseThrow().kind() == ProviderRegistry.Kind.OPENAI
               && !preset.orElseThrow().local()
@@ -418,13 +566,18 @@ final class InteractiveCommand {
           if (recalled.isBlank()) recalled = activeProvider.get().model();
           String selectedModel = recalled;
           activeProvider.updateAndGet(current -> new LiveProviderFactory.Configuration(
-              provider, selectedModel, auth, Effort.fromWire(current.effort()).clamp(
-                  ModelCapabilities.fromId(selectedModel)).wire(),
+              provider, selectedModel, auth, ReasoningPolicy.forModel(provider, selectedModel)
+                  .clamp(Effort.fromWire(current.effort())).wire(),
               current.systemPrompt(),
               current.contextWindow(), current.environment(), current.additionalTools()));
           configured.settings().save(saved.withProviderModel(provider, new ModelId(selectedModel))
               .withEffort(activeProvider.get().effort()));
           return true;
+        }
+        @Override public boolean importCodex() {
+          var result = CodexAuthImporter.inspect(environment, home);
+          return result instanceof CodexAuthImporter.Result.Available available
+              && codexStore().save(available.credentials());
         }
         @Override public LoginModal.OAuthAttempt newOAuthAttempt() {
           AnthropicOAuthLogin.Attempt attempt = oauth.newAttempt();
@@ -449,8 +602,7 @@ final class InteractiveCommand {
         }
         @Override public boolean installProviderKey(String provider, String key) {
           Settings saved = configured.settings().load().withProviderKey(provider, key);
-          if (!configured.settings().save(saved)) return false;
-          return selectProvider(provider);
+          return configured.settings().save(saved);
         }
         @Override public boolean switchCustomHost(String specification) {
           String currentModel = activeProvider.get().model();
@@ -492,11 +644,20 @@ final class InteractiveCommand {
         @Override public void updatePendingChanges(List<DiffReview.File> reviewed) {
           pendingChanges.updateAndGet(existing -> mergeReview(existing, reviewed));
         }
-        @Override public void clearPendingChanges() { pendingChanges.set(List.of()); }
+        @Override public String resolvePendingChanges(List<DiffReview.File> reviewed) {
+          List<FileChange> existing = pendingChanges.get();
+          List<FileChange> resolved = mergeReview(existing, reviewed);
+          String failure = applyReviewedChanges(configured.workspace(), resolved);
+          if (failure.isEmpty()) pendingChanges.compareAndSet(existing, List.of());
+          return failure;
+        }
       };
+      controlObserver.accept(control);
       try {
         terminal.onResize(ignored -> ui.render());
         ui.refreshThreadHistory(control);
+        // Keep mouse reporting disabled so the host terminal owns drag selection and copy.
+        // Transcript navigation remains available through Page Up and Page Down.
         ui.render();
         boolean running = true;
         while (running) {
@@ -507,6 +668,8 @@ final class InteractiveCommand {
               running = ui.key(key.value(), control);
             } else if (event instanceof TerminalEvent.Paste paste) {
               ui.paste(paste.content());
+            } else if (event instanceof TerminalEvent.Mouse mouse) {
+              ui.mouse(mouse);
             }
             if (!running) break;
           }
@@ -522,7 +685,7 @@ final class InteractiveCommand {
   }
 
   Configuration configure(CliArguments arguments, PrintStream error) {
-    Path dataDirectory = home.resolve(".agentty");
+    Path dataDirectory = home.resolve(".ajent");
     var settingsStore = new SettingsStore(dataDirectory);
     Settings settings = settingsStore.load();
     boolean modelOverride = !arguments.model().isBlank();
@@ -570,9 +733,12 @@ final class InteractiveCommand {
       if (selectedModel.isBlank()) {
         selectedModel = settings.providerModels().getOrDefault(selectedProvider, "");
       }
-      settings = selectedModel.isBlank()
-          ? settings.withProvider(selectedProvider)
-          : settings.withProviderModel(selectedProvider, new ModelId(selectedModel));
+      if (selectedModel.isBlank()) {
+        error.print("ajent: --provider " + selectedProvider
+            + " requires --model on first use (or select a model interactively first)\n");
+        return null;
+      }
+      settings = settings.withProviderModel(selectedProvider, new ModelId(selectedModel));
     }
     if (providerOverride) settingsStore.save(settings);
     String provider = settings.provider();
@@ -594,8 +760,8 @@ final class InteractiveCommand {
           workspace, workspace, home, docs, new JdkWebTransport(), todos, subagents,
           sandbox.runner(), mcp.tools(), environment));
       subagents.bind(new DispatcherToolPort(tools.dispatcher()));
-      String effort = Effort.fromWire(settings.effort())
-          .clamp(ModelCapabilities.fromId(model)).wire();
+      String effort = ReasoningPolicy.forModel(provider, model)
+          .clamp(Effort.fromWire(settings.effort())).wire();
       var providers = new LiveProviderFactory.Configuration(provider, model, auth, effort,
           tools.systemPrompt(), 0, environment, tools::additionalTools);
       CheckpointPort checkpointPort = new CheckpointPort() {
@@ -621,7 +787,17 @@ final class InteractiveCommand {
         && success.change().isPresent()) {
       changes.updateAndGet(existing -> {
         var revised = new ArrayList<>(existing);
-        revised.add(success.change().orElseThrow());
+        FileChange incoming = success.change().orElseThrow();
+        for (int index = revised.size() - 1; index >= 0; index--) {
+          FileChange previous = revised.get(index);
+          if (previous.path().equals(incoming.path())
+              && previous.after().equals(incoming.before())) {
+            revised.set(index, UnifiedDiff.compute(
+                incoming.path(), previous.before(), incoming.after(), previous.existedBefore()));
+            return List.copyOf(revised);
+          }
+        }
+        revised.add(incoming);
         return List.copyOf(revised);
       });
     }
@@ -709,15 +885,29 @@ final class InteractiveCommand {
     return List.copyOf(result);
   }
 
+  /** Compatibility adapter for the transactional tools-layer review service. */
+  static String applyReviewedChanges(Path workspace, List<FileChange> changes) {
+    ChangeReviewApplier.Result result = new ChangeReviewApplier().apply(workspace, changes);
+    if (result instanceof ChangeReviewApplier.Result.Applied) return "";
+    ChangeReviewApplier.Result.Failed failed = (ChangeReviewApplier.Result.Failed) result;
+    return failed.rollbackFailures().isEmpty()
+        ? failed.message()
+        : failed.message() + " (rollback failed for " + failed.rollbackFailures() + ")";
+  }
+
   private Path resolveDocs(Path workspace) {
-    String configured = environment.getOrDefault("AGENTTY_DOCS_DIR", "");
+    String configured = environment.getOrDefault("AJENT_DOCS_DIR", "");
     if (!configured.isBlank()) {
       try { return resolve(configured); } catch (InvalidPathException ignored) { return null; }
     }
     Path docs = workspace.resolve("docs");
     if (Files.isDirectory(docs)) return docs;
-    Path knowledge = workspace.resolve(".agentty/knowledge");
+    Path knowledge = workspace.resolve(".ajent/knowledge");
     return Files.isDirectory(knowledge) ? knowledge : null;
+  }
+
+  private CodexCredentialStore codexStore() {
+    return CodexCredentialStore.forEnvironment(environment, home);
   }
 
   private Path resolve(String value) {
@@ -824,6 +1014,12 @@ final class InteractiveCommand {
       GitCheckpointStore checkpoints, WorkspaceIndex workspaceIndex,
       ProviderBackedSubagentRunner subagents, McpRuntime mcp) {}
 
+  private record PreparedProvider(String provider, ProviderAuth auth, List<String> models) {
+    private PreparedProvider {
+      models = List.copyOf(models);
+    }
+  }
+
   static final class TodoLedger implements HostServices.TodoSink {
     private final AtomicReference<List<PlanModal.Item>> items =
         new AtomicReference<>(List.of());
@@ -848,7 +1044,29 @@ final class InteractiveCommand {
     void write(String value);
   }
 
+  interface SessionTerminal extends TerminalPort {
+    void write(byte[] value, int offset, int length);
+    <T> T suspend(Supplier<T> action);
+    JLineTerminalSession.SignalGuard ignoreInterrupts();
+    boolean interactive();
+    void readSingleKey();
+    void onResize(Consumer<JLineTerminalSession.Size> listener);
+    void enableMouse();
+    List<TerminalEvent> read() throws IOException;
+    List<TerminalEvent> flushEscape();
+  }
+
   interface AgentControl {
+    enum ProviderFailure { NONE, AUTH_REQUIRED, CODEX_AUTH_REQUIRED, DISCOVERY }
+    record ProviderPreparation(String provider, String label, List<ModelPicker.Model> models,
+        String recalledModel, ProviderFailure failure, String detail) {
+      public ProviderPreparation {
+        models = List.copyOf(models);
+        Objects.requireNonNull(failure, "failure");
+      }
+      boolean ready() { return failure == ProviderFailure.NONE; }
+    }
+
     AgentState state();
     void dispatch(RuntimeMessage message);
     void newThread();
@@ -872,6 +1090,32 @@ final class InteractiveCommand {
     String provider();
     List<ProviderPicker.Provider> providers();
     boolean selectProvider(String provider);
+    default void prepareProvider(
+        String provider, String label, Consumer<ProviderPreparation> completed) {
+      if (!selectProvider(provider)) {
+        completed.accept(new ProviderPreparation(provider, label, List.of(), "",
+            provider.equals("codex") ? ProviderFailure.CODEX_AUTH_REQUIRED
+                : ProviderFailure.AUTH_REQUIRED, "credentials required"));
+        return;
+      }
+      loadModels(models -> completed.accept(new ProviderPreparation(
+          provider, label, models, model(), ProviderFailure.NONE, "")));
+    }
+    default boolean commitPreparedProvider(String provider, String model) {
+      return (provider().equals(provider) || selectProvider(provider))
+          && commitPreparedModel(model);
+    }
+    default boolean commitPreparedProvider(String provider, String model, Effort selectedEffort) {
+      if (!commitPreparedProvider(provider, model)) return false;
+      setEffort(selectedEffort);
+      return true;
+    }
+    private boolean commitPreparedModel(String model) {
+      selectModel(model);
+      return true;
+    }
+    default void cancelPreparedProvider() {}
+    default boolean importCodex() { return false; }
     LoginModal.OAuthAttempt newOAuthAttempt();
     void openBrowser(URI uri);
     boolean installAnthropicKey(String key);
@@ -880,7 +1124,7 @@ final class InteractiveCommand {
     void exchangeOAuth(LoginModal.ExchangeOAuth exchange, Consumer<String> completed);
     List<DiffReview.File> pendingChanges();
     void updatePendingChanges(List<DiffReview.File> reviewed);
-    void clearPendingChanges();
+    String resolvePendingChanges(List<DiffReview.File> reviewed);
   }
 
   interface AnimationPort {
@@ -980,6 +1224,7 @@ final class InteractiveCommand {
     private final List<ComposerSnapshot> composerRedo = new ArrayList<>();
     private boolean composerExpanded;
     private int historyIndex = -1;
+    private int historyScrollRows;
     private ComposerSnapshot navigationDraft;
     private int queuePeekIndex = -1;
     private List<RuntimeMessage.Submit> queuePeekItems = List.of();
@@ -987,12 +1232,15 @@ final class InteractiveCommand {
     private Profile profile;
     private String modelId;
     private String providerId;
+    private String pendingProviderId = "";
+    private AppChrome.ProviderAvailability providerAvailability =
+        AppChrome.ProviderAvailability.UNVERIFIED;
+    private long providerSelectionGeneration;
     private int contextMax;
     private final Supplier<List<FileChange>> pendingChanges;
     private boolean visualHashInitialized;
     private long lastVisualHash;
     private long renderPasses;
-    private long welcomeMountedNanos = Long.MIN_VALUE;
     private com.github.skanga.ajent.domain.MessageId revealMessage;
     private StreamingMarkdown reveal;
     private final ToolPanelDeferral toolPanelDeferral = new ToolPanelDeferral();
@@ -1053,7 +1301,7 @@ final class InteractiveCommand {
       this.animations = animations;
       this.environment = Map.copyOf(environment);
       this.synchronizedOutput = TerminalCapabilities.synchronizedOutput(environment);
-      String collapse = environment.getOrDefault("AGENTTY_FROZEN_COLLAPSE", "");
+      String collapse = environment.getOrDefault("AJENT_FROZEN_COLLAPSE", "");
       this.frozenCollapse = !collapse.isEmpty() && switch (collapse.charAt(0)) {
         case '1', 't', 'T', 'y', 'Y' -> true;
         default -> false;
@@ -1065,6 +1313,23 @@ final class InteractiveCommand {
       if (contextMax < 0) throw new IllegalArgumentException("negative context maximum");
       this.contextMax = contextMax;
       this.pendingChanges = Objects.requireNonNull(pendingChanges, "pendingChanges");
+    }
+
+    void observe(RuntimeMessage message) {
+      observe(message, providerId);
+    }
+
+    void observe(RuntimeMessage message, String eventProvider) {
+      if (!(message instanceof RuntimeMessage.ProviderEvent providerEvent)) return;
+      if (!providerId.equals(eventProvider)) return;
+      if (providerEvent.event() instanceof StreamEvent.Error error) {
+        if (error.errorClass() == ErrorClass.CANCELLED) return;
+        providerAvailability = AppChrome.ProviderAvailability.UNAVAILABLE;
+        uiStatus = "Provider unavailable · " + error.message();
+      } else {
+        providerAvailability = AppChrome.ProviderAvailability.CONNECTED;
+        if (uiStatus.startsWith("Provider unavailable · ")) uiStatus = "";
+      }
     }
 
     boolean key(TerminalKey key, AgentControl loop) {
@@ -1099,6 +1364,8 @@ final class InteractiveCommand {
         if (providerPicker instanceof PickerState.OpenAt) return providerPickerKey(key, loop);
         if (threadPicker instanceof PickerState.OpenAt) return threadPickerKey(key, loop);
         if (toolViewer instanceof ToolOutputViewer.Open) return toolViewerKey(key);
+        if (historyKey(key)) return true;
+        if (historyScrollRows > 0) historyScrollRows = 0;
         if (key.key() instanceof TerminalKey.CharacterKey character
             && isSmartPasteKey(character.codePoint(), key.modifiers())) {
           smartPaste();
@@ -1161,6 +1428,17 @@ final class InteractiveCommand {
             return true;
           }
           if (codePoint == 'y') { redoComposer(); return true; }
+        }
+        if (key.key() instanceof TerminalKey.CharacterKey character
+            && !key.modifiers().ctrl() && !key.modifiers().alt()
+            && (Character.isUpperCase(character.codePoint()) || key.modifiers().shift())
+            && !loop.pendingChanges().isEmpty()) {
+          int codePoint = Character.toLowerCase(character.codePoint());
+          if (codePoint == 'a' || codePoint == 'x') {
+            resolveAllChanges(loop, codePoint == 'a');
+            render();
+            return true;
+          }
         }
         if (key.key() instanceof TerminalKey.SpecialKey special) {
           if (key.modifiers().shift()
@@ -1294,6 +1572,56 @@ final class InteractiveCommand {
         }
         return true;
       }
+    }
+
+    private boolean historyKey(TerminalKey key) {
+      if (!(key.key() instanceof TerminalKey.SpecialKey special)) return false;
+      int page = Math.max(1, terminal.size().rows() - 2);
+      switch (special) {
+        case PAGE_UP -> {
+          scrollHistory(page);
+          return true;
+        }
+        case PAGE_DOWN -> {
+          if (historyScrollRows == 0) return false;
+          scrollHistory(-page);
+          return true;
+        }
+        case HOME -> {
+          if (historyScrollRows == 0) return false;
+          historyScrollRows = Integer.MAX_VALUE;
+          visualHashInitialized = false;
+          render();
+          return true;
+        }
+        case END, ESCAPE -> {
+          if (historyScrollRows == 0) return false;
+          historyScrollRows = 0;
+          visualHashInitialized = false;
+          render();
+          return true;
+        }
+        default -> {
+          return false;
+        }
+      }
+    }
+
+    void mouse(TerminalEvent.Mouse mouse) {
+      synchronized (lock) {
+        if (mouse.kind() != TerminalEvent.Kind.PRESS) return;
+        int rows = Math.max(3, terminal.size().rows() / 4);
+        if (mouse.button() == TerminalEvent.Button.SCROLL_UP) scrollHistory(rows);
+        else if (mouse.button() == TerminalEvent.Button.SCROLL_DOWN
+            && historyScrollRows > 0) scrollHistory(-rows);
+      }
+    }
+
+    private void scrollHistory(int rows) {
+      long next = (long) historyScrollRows + rows;
+      historyScrollRows = (int) Math.clamp(next, 0L, Integer.MAX_VALUE);
+      visualHashInitialized = false;
+      render();
     }
 
     private boolean atWordBoundary() {
@@ -1473,19 +1801,9 @@ final class InteractiveCommand {
                 diffFiles = opened.files();
                 uiStatus = opened.status();
               } else if (command == CommandPalette.Command.ACCEPT_ALL) {
-                if (diffFiles.isEmpty()) diffFiles = loop.pendingChanges();
-                DiffReview.Result accepted = DiffReview.acceptAll(diffReview, diffFiles);
-                diffReview = accepted.state();
-                diffFiles = accepted.files();
-                uiStatus = accepted.status();
-                loop.updatePendingChanges(diffFiles);
+                resolveAllChanges(loop, true);
               } else if (command == CommandPalette.Command.REJECT_ALL) {
-                if (diffFiles.isEmpty()) diffFiles = loop.pendingChanges();
-                DiffReview.Result rejected = DiffReview.rejectAll(diffReview, diffFiles);
-                diffReview = rejected.state();
-                diffFiles = rejected.files();
-                uiStatus = rejected.status();
-                loop.clearPendingChanges();
+                resolveAllChanges(loop, false);
               }
             }
           }
@@ -1499,13 +1817,38 @@ final class InteractiveCommand {
       return true;
     }
 
+    private void resolveAllChanges(AgentControl loop, boolean accept) {
+      List<DiffReview.File> files = loop.pendingChanges();
+      DiffReview.Result result = accept
+          ? DiffReview.acceptAll(diffReview, files)
+          : DiffReview.rejectAll(diffReview, files);
+      if (files.isEmpty()) {
+        uiStatus = result.status();
+        return;
+      }
+      String failure = loop.resolvePendingChanges(result.files());
+      if (!failure.isEmpty()) {
+        diffReview = result.state();
+        diffFiles = result.files();
+        uiStatus = "error: " + failure;
+        return;
+      }
+      diffReview = new PickerState.CellClosed();
+      diffFiles = List.of();
+      uiStatus = result.status();
+    }
+
     void openModelPicker(AgentControl loop) {
+      loop.cancelPreparedProvider();
+      long generation = ++providerSelectionGeneration;
+      pendingProviderId = "";
       modelsLoading = true;
       effort = loop.effort();
       modelId = loop.model();
       modelPicker = ModelPicker.open(models, loop.model());
       loop.loadModels(loaded -> {
         synchronized (lock) {
+          if (generation != providerSelectionGeneration) return;
           models = List.copyOf(loaded);
           modelsLoading = false;
           modelPicker = ModelPicker.open(models, loop.model());
@@ -1800,21 +2143,37 @@ final class InteractiveCommand {
     private boolean modelPickerKey(TerminalKey key, AgentControl loop) {
       if (key.key() instanceof TerminalKey.SpecialKey special) {
         switch (special) {
-          case ESCAPE -> modelPicker = ModelPicker.close(modelPicker);
+          case ESCAPE -> {
+            modelPicker = ModelPicker.close(modelPicker);
+            if (!pendingProviderId.isEmpty()) loop.cancelPreparedProvider();
+            providerSelectionGeneration++;
+            pendingProviderId = "";
+          }
           case ENTER -> {
             ModelPicker.Selection selected = ModelPicker.select(modelPicker, models);
             modelPicker = selected.state();
             selected.model().ifPresent(model -> {
-              loop.selectModel(model.id());
+              if (!pendingProviderId.isEmpty()) {
+                if (!loop.commitPreparedProvider(pendingProviderId, model.id(), effort)) {
+                  uiStatus = "error: provider/model selection could not be committed";
+                  return;
+                }
+                providerId = pendingProviderId;
+                pendingProviderId = "";
+              } else {
+                loop.selectModel(model.id());
+              }
               modelId = model.id();
-              effort = effort.clamp(ModelCapabilities.fromId(model.id()));
+              providerAvailability = AppChrome.ProviderAvailability.UNVERIFIED;
+              effort = loop.effort();
               uiStatus = "model: " + model.displayName();
             });
           }
           case LEFT, RIGHT -> {
-            effort = ModelPicker.cycleEffort(modelPicker, models, effort,
+            String effortProvider = pendingProviderId.isEmpty() ? providerId : pendingProviderId;
+            effort = ModelPicker.cycleEffort(modelPicker, models, effortProvider, effort,
                 special == TerminalKey.SpecialKey.LEFT ? -1 : 1);
-            loop.setEffort(effort);
+            if (pendingProviderId.isEmpty()) loop.setEffort(effort);
             uiStatus = "reasoning effort: " + effort.label();
           }
           case UP -> modelPicker = ModelPicker.move(modelPicker, models, -1);
@@ -1864,16 +2223,8 @@ final class InteractiveCommand {
             providerPicker = selected.state();
             selected.action().ifPresent(action -> {
               if (action instanceof ProviderPicker.SelectProvider choice) {
-                if (loop.selectProvider(choice.provider().id())) {
-                  providerId = loop.provider();
-                  uiStatus = "provider: " + choice.provider().label();
-                  models = List.of();
-                  openModelPicker(loop);
-                } else {
-                  login = new LoginModal.ApiKeyInput(
-                      new com.github.skanga.ajent.terminal.ui.Utf8Editor(),
-                      choice.provider().id(), choice.provider().label());
-                }
+                beginProviderSelection(
+                    loop, choice.provider().id(), choice.provider().label(), true);
               } else {
                 login = new LoginModal.CustomHostInput();
               }
@@ -1884,6 +2235,41 @@ final class InteractiveCommand {
       }
       render();
       return true;
+    }
+
+    private void beginProviderSelection(
+        AgentControl loop, String provider, String label, boolean allowCodexImport) {
+      modelsLoading = true;
+      models = List.of();
+      uiStatus = "Discovering models for " + label + "…";
+      long generation = ++providerSelectionGeneration;
+      loop.prepareProvider(provider, label, prepared -> {
+        synchronized (lock) {
+          if (generation != providerSelectionGeneration) return;
+          modelsLoading = false;
+          if (prepared.ready()) {
+            pendingProviderId = prepared.provider();
+            models = prepared.models();
+            String active = prepared.recalledModel().isBlank()
+                ? models.getFirst().id() : prepared.recalledModel();
+            modelPicker = ModelPicker.open(models, active);
+            effort = ReasoningPolicy.forModel(provider, active).clamp(loop.effort());
+            uiStatus = "Select a model for " + label;
+          } else if (prepared.failure() == AgentControl.ProviderFailure.CODEX_AUTH_REQUIRED
+              && allowCodexImport && loop.importCodex()) {
+            beginProviderSelection(loop, provider, label, false);
+            return;
+          } else if (prepared.failure() == AgentControl.ProviderFailure.AUTH_REQUIRED) {
+            login = new LoginModal.ApiKeyInput(
+                new com.github.skanga.ajent.terminal.ui.Utf8Editor(), provider, label);
+            uiStatus = "";
+          } else {
+            login = new LoginModal.Failed(prepared.detail());
+            uiStatus = "error: " + prepared.detail();
+          }
+        }
+        render();
+      });
     }
 
     private boolean loginKey(TerminalKey key, AgentControl loop) {
@@ -1937,7 +2323,8 @@ final class InteractiveCommand {
           default -> diffReview;
         };
       } else if (key.key() instanceof TerminalKey.CharacterKey character) {
-        DiffReview.Result changed = switch (Character.toLowerCase(character.codePoint())) {
+        int codePoint = Character.toLowerCase(character.codePoint());
+        DiffReview.Result changed = switch (codePoint) {
           case 'y' -> DiffReview.acceptHunk(diffReview, diffFiles);
           case 'n' -> DiffReview.rejectHunk(diffReview, diffFiles);
           case 'a' -> DiffReview.acceptAll(diffReview, diffFiles);
@@ -1947,8 +2334,17 @@ final class InteractiveCommand {
         diffReview = changed.state();
         diffFiles = changed.files();
         uiStatus = changed.status();
-        loop.updatePendingChanges(diffFiles);
-        if (Character.toLowerCase(character.codePoint()) == 'x') loop.clearPendingChanges();
+        if (codePoint == 'a' || codePoint == 'x') {
+          String failure = loop.resolvePendingChanges(diffFiles);
+          if (failure.isEmpty()) {
+            diffReview = new PickerState.CellClosed();
+            diffFiles = List.of();
+          } else {
+            uiStatus = "error: " + failure;
+          }
+        } else {
+          loop.updatePendingChanges(diffFiles);
+        }
       }
       render();
       return true;
@@ -1970,10 +2366,8 @@ final class InteractiveCommand {
             if (!loop.installProviderKey(key.provider(), key.key())) {
               login = new LoginModal.Failed("save failed");
             } else {
-              providerId = loop.provider();
-              uiStatus = "provider: " + key.providerLabel();
-              models = List.of();
-              openModelPicker(loop);
+              login = new LoginModal.Closed();
+              beginProviderSelection(loop, key.provider(), key.providerLabel(), false);
             }
           }
           case LoginModal.SwitchCustomHost host -> {
@@ -1981,6 +2375,7 @@ final class InteractiveCommand {
               login = new LoginModal.Failed("save failed");
             } else {
               providerId = loop.provider();
+              providerAvailability = AppChrome.ProviderAvailability.UNVERIFIED;
               uiStatus = "provider: " + host.specification();
               models = List.of();
               openModelPicker(loop);
@@ -2010,6 +2405,7 @@ final class InteractiveCommand {
         composerRedo.clear();
         composerExpanded = false;
         resetComposerNavigation();
+        historyScrollRows = 0;
         resetQueuePeek();
         cursor = 0;
         revealMessage = null;
@@ -2349,8 +2745,9 @@ final class InteractiveCommand {
             state, pendingPermission, width, terminalRows, nowNanos);
         if (visualHashInitialized && candidateHash == lastVisualHash) return;
         renderPasses++;
-        RenderedLines rendered = lines(
-            state, pendingPermission, width, terminalRows, composer, nowNanos);
+        RenderedLines rendered = historyScrollRows > 0
+            ? historyLines(state, pendingPermission, width, terminalRows, composer, nowNanos)
+            : lines(state, pendingPermission, width, terminalRows, composer, nowNanos);
         List<StyledLine> lines = rendered.lines();
         if (palette instanceof CommandPalette.Open open) {
           List<CommandPalette.Command> matches = CommandPalette.filtered(open.query());
@@ -2428,6 +2825,7 @@ final class InteractiveCommand {
           lines = overlayBottom(lines, overlay);
         }
         if (modelPicker instanceof PickerState.OpenAt open) {
+          String pickerProvider = pendingProviderId.isEmpty() ? providerId : pendingProviderId;
           List<Integer> visible = ModelPicker.filteredIndices(models, open.query());
           var pickerRows = new ArrayList<AppChrome.PickerRow>();
           if (models.isEmpty()) {
@@ -2440,7 +2838,8 @@ final class InteractiveCommand {
             for (int index = 0; index < visible.size(); index++) {
               ModelPicker.Model model = models.get(visible.get(index));
               boolean selected = index == open.index();
-              boolean supportsEffort = ModelCapabilities.fromId(model.id()).supportsEffort();
+              boolean supportsEffort = !ReasoningPolicy.forModel(pickerProvider, model.id())
+                  .available().isEmpty();
               String trailing = model.favorite() ? "★" : "";
               if (selected && supportsEffort && effort != Effort.NONE) {
                 if (!trailing.isEmpty()) trailing += "  ";
@@ -2451,8 +2850,8 @@ final class InteractiveCommand {
             }
           }
           Optional<ModelPicker.Model> selected = ModelPicker.select(modelPicker, models).model();
-          String effortHint = selected.filter(model -> ModelCapabilities
-                  .fromId(model.id()).supportsEffort())
+          String effortHint = selected.filter(model -> !ReasoningPolicy
+                  .forModel(pickerProvider, model.id()).available().isEmpty())
               .map(ignored -> "←→ reasoning effort: " + effort.label()).orElse("");
           var overlay = new ArrayList<StyledLine>();
           appendChrome(overlay, AppChrome.modelPicker(open.query(), pickerRows, effortHint,
@@ -2574,13 +2973,16 @@ final class InteractiveCommand {
         var canvas = new TerminalCanvas(width, Math.max(1, lines.size()));
         int normal = 0;
         int accent = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.cyan()).withBold());
-        int muted = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.brightBlack()));
+        int dim = styles.intern(
+            TerminalStyle.EMPTY.withForeground(TerminalColor.rgb(100, 120, 140)));
+        int muted = styles.intern(
+            TerminalStyle.EMPTY.withForeground(TerminalColor.rgb(185, 198, 212)));
         int danger = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.red()).withBold());
         int success = styles.intern(TerminalStyle.EMPTY.withForeground(TerminalColor.green()).withBold());
         for (int row = 0; row < lines.size(); row++) {
           StyledLine line = lines.get(row);
           int style = switch (line.style()) {
-            case NORMAL -> normal; case ACCENT -> accent; case MUTED -> muted;
+            case NORMAL -> normal; case DIM -> dim; case ACCENT -> accent; case MUTED -> muted;
             case DANGER -> danger; case SUCCESS -> success;
           };
           if (line.spans().isEmpty()) {
@@ -2644,6 +3046,10 @@ final class InteractiveCommand {
       synchronized (lock) { return frozenThrough; }
     }
 
+    int historyScrollRows() {
+      synchronized (lock) { return historyScrollRows; }
+    }
+
     long frozenRows() {
       synchronized (lock) { return frozen.rowTotal(); }
     }
@@ -2704,8 +3110,7 @@ final class InteractiveCommand {
           .map(InteractiveVisualHash::messageKey).toList();
       boolean active = !(state.phase() instanceof SessionPhase.Idle);
       boolean revealAnimating = reveal != null && reveal.requiresAnimation();
-      boolean welcomeAnimating = messages.isEmpty();
-      long animationBucket = revealAnimating || welcomeAnimating ? 1 + nowNanos / 16_000_000L
+      long animationBucket = revealAnimating ? 1 + nowNanos / 16_000_000L
           : active ? 1 + nowNanos / 100_000_000L : 0;
 
       var surfaces = new EnumMap<InteractiveVisualHash.Surface,
@@ -2729,9 +3134,10 @@ final class InteractiveCommand {
       surfaces.put(InteractiveVisualHash.Surface.LOGIN, loginSurface());
       surfaces.put(InteractiveVisualHash.Surface.CHECKPOINTS, checkpointSurface());
       surfaces.put(InteractiveVisualHash.Surface.VIEWPORT,
-          new InteractiveVisualHash.SurfaceState(1, width, terminalRows, "", false, 0,
+          new InteractiveVisualHash.SurfaceState(1, width, terminalRows, "", false,
+              historyScrollRows,
               contentKey(state.thread().id(), threadsLoading, threadRows.isEmpty(), providerId,
-                  contextMax, pendingChanges.get())));
+                  providerAvailability, contextMax, pendingChanges.get())));
 
       String visibleStatus = state.status() + '\0' + uiStatus;
       return InteractiveVisualHash.hash(new InteractiveVisualHash.State(
@@ -2901,14 +3307,9 @@ final class InteractiveCommand {
       reconcileFrozenSurface(state, messages, width, terminalRows, nowNanos);
       int chromeWidth = Math.max(8, width - 2);
       if (messages.isEmpty()) {
-        if (welcomeMountedNanos == Long.MIN_VALUE) welcomeMountedNanos = nowNanos;
-        long welcomeAgeMillis = Math.max(0, nowNanos - welcomeMountedNanos) / 1_000_000L;
         appendInsetChrome(output, AppChrome.welcome(new AppChrome.Welcome(
             modelId, profile, !threadsLoading && threadRows.isEmpty(), chromeWidth,
-            Math.max(4, terminalRows - 11), welcomeAgeMillis)));
-        animating = true;
-      } else {
-        welcomeMountedNanos = Long.MIN_VALUE;
+            Math.max(4, terminalRows - 11))));
       }
 
       int freezeLimit = freezeLimit(state, messages);
@@ -2980,20 +3381,73 @@ final class InteractiveCommand {
         output.add(new StyledLine("", Style.NORMAL));
         appendInsetChrome(output, AppChrome.changes(changes, chromeWidth));
       }
-      output.add(new StyledLine("", Style.NORMAL));
+      boolean historyAvailable = state.phase() instanceof SessionPhase.Idle
+          && !messages.isEmpty() && output.size() + 10 > terminalRows;
+      if (historyAvailable) {
+        output.add(new StyledLine("  PageUp: transcript history", Style.MUTED));
+      }
+
       String displayedComposer = AttachmentText.display(composer, composerAttachments);
-      appendInsetChrome(output, AppChrome.composer(new AppChrome.Composer(
+      List<AppChrome.Row> composerRows = AppChrome.composer(new AppChrome.Composer(
           displayedComposer, displayedComposerCursor(composer, cursor, composerAttachments), profile,
-          chromePhase(state), state.queued().size(), composerExpanded, chromeWidth)));
+          chromePhase(state), state.queued().size(), composerExpanded, providerLabel(providerId),
+          modelId, providerAvailability, chromeWidth));
       String banner = !uiStatus.isEmpty() ? uiStatus : state.status();
-      appendInsetChrome(output, AppChrome.statusPanel(new AppChrome.Status(
-          state.thread().title(), providerLabel(providerId), chromePhase(state),
+      List<AppChrome.Row> statusRows = AppChrome.statusPanel(new AppChrome.Status(
+          state.thread().title(), providerLabel(providerId), providerAvailability, chromePhase(state),
           chromePhaseDetail(state, permission), phaseElapsedMillis(state, nowNanos),
-          state.tokensIn(), effectiveContextMax(), state.queued().size(), banner, chromeWidth)));
+          state.tokensIn(), effectiveContextMax(), state.queued().size(), banner, chromeWidth));
+      if (messages.isEmpty() && permission == null && changes.isEmpty()) {
+        int fixedRows = 1 + composerRows.size() + statusRows.size();
+        int padding = Math.max(0, terminalRows - 1 - output.size() - fixedRows);
+        for (int index = 0; index < padding; index++) {
+          output.add(new StyledLine("", Style.NORMAL));
+        }
+      }
+      output.add(new StyledLine("", Style.NORMAL));
+      appendInsetChrome(output, composerRows);
+      appendInsetChrome(output, statusRows);
       var text = new StringBuilder();
       for (StyledLine line : output) text.append(line.text()).append('\n');
       renderedText = text.toString();
       return new RenderedLines(List.copyOf(output), animating, trim.debt());
+    }
+
+    private RenderedLines historyLines(AgentState state, ToolUse permission, int width,
+        int terminalRows, String composer, long nowNanos) {
+      var transcript = new ArrayList<StyledLine>();
+      List<Message> messages = state.thread().messages();
+      for (int index = 0; index < messages.size(); index++) {
+        boolean startsTurn = index == 0 || messages.get(index - 1).role() != Role.ASSISTANT
+            || hasCompactionBoundary(state, index, messages.size());
+        if (!transcript.isEmpty() && startsTurn
+            && hasCompactionBoundary(state, index, messages.size())) {
+          transcript.add(new StyledLine("\u2261 Conversation compacted", Style.MUTED));
+        }
+        if (!transcript.isEmpty() && startsTurn) transcript.addAll(turnGap(width));
+        transcript.addAll(renderMessage(state, messages.get(index), index, messages.size(),
+            width, terminalRows, nowNanos, false, startsTurn).lines());
+      }
+      if (transcript.isEmpty()) {
+        transcript.add(new StyledLine("No transcript history", Style.MUTED));
+      }
+
+      int bodyRows = Math.max(1, terminalRows - 1);
+      int maxOffset = Math.max(0, transcript.size() - bodyRows);
+      if (maxOffset == 0) {
+        historyScrollRows = 0;
+        return lines(state, permission, width, terminalRows, composer, nowNanos);
+      }
+      historyScrollRows = Math.min(historyScrollRows, maxOffset);
+      int end = transcript.size() - historyScrollRows;
+      int start = Math.max(0, end - bodyRows);
+      var visible = new ArrayList<StyledLine>(transcript.subList(start, end));
+      visible.add(new StyledLine("History  " + (start + 1) + "-" + end + " / "
+          + transcript.size() + "  PageUp/PageDown or wheel  Esc/End: live", Style.MUTED));
+      var text = new StringBuilder();
+      for (StyledLine line : visible) text.append(line.text()).append('\n');
+      renderedText = text.toString();
+      return new RenderedLines(List.copyOf(visible), false, Optional.empty());
     }
 
     private void appendQueuedPreview(List<StyledLine> output, RuntimeMessage.Submit queued,
@@ -3010,6 +3464,7 @@ final class InteractiveCommand {
     private static void appendChrome(List<StyledLine> output, List<AppChrome.Row> rows) {
       for (AppChrome.Row row : rows) output.add(new StyledLine(row.text(), switch (row.tone()) {
         case NORMAL -> Style.NORMAL;
+        case DIM -> Style.DIM;
         case MUTED -> Style.MUTED;
         case BRAND, ACCENT, WARNING -> Style.ACCENT;
         case SUCCESS -> Style.SUCCESS;
@@ -3126,6 +3581,9 @@ final class InteractiveCommand {
           note = "● local";
         } else if (preset.kind() == ProviderRegistry.Kind.ANTHROPIC) {
           note = "✓ login";
+        } else if (preset.kind() == ProviderRegistry.Kind.CODEX) {
+          note = CodexCredentialStore.systemDefault().load().isPresent()
+              ? "✓ imported" : "↥ import";
         } else {
           String configured = preset.authEnvironment().stream()
               .filter(name -> !System.getenv().getOrDefault(name, "").isBlank())
@@ -3452,7 +3910,8 @@ final class InteractiveCommand {
       return switch (style) {
         case NORMAL -> TerminalStyle.EMPTY;
         case ACCENT -> TerminalStyle.EMPTY.withForeground(TerminalColor.cyan()).withBold();
-        case MUTED -> TerminalStyle.EMPTY.withForeground(TerminalColor.brightBlack());
+        case DIM -> TerminalStyle.EMPTY.withForeground(TerminalColor.rgb(100, 120, 140));
+        case MUTED -> TerminalStyle.EMPTY.withForeground(TerminalColor.rgb(185, 198, 212));
         case DANGER -> TerminalStyle.EMPTY.withForeground(TerminalColor.red()).withBold();
         case SUCCESS -> TerminalStyle.EMPTY.withForeground(TerminalColor.green()).withBold();
       };
@@ -3491,7 +3950,7 @@ final class InteractiveCommand {
       }
     }
 
-    private enum Style { NORMAL, ACCENT, MUTED, DANGER, SUCCESS }
+    private enum Style { NORMAL, DIM, ACCENT, MUTED, DANGER, SUCCESS }
     private record StyledSpan(String text, TerminalStyle style) {}
     private record StyledLine(String text, Style style, List<StyledSpan> spans) {
       private StyledLine(String text, Style style) { this(text, style, List.of()); }

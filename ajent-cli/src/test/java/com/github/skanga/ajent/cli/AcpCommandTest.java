@@ -40,7 +40,7 @@ final class AcpCommandTest {
     Path workspace = Files.createDirectories(root.resolve("workspace"));
     Execution result = run(root, workspace, "", """
         {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-        """, Map.of("AGENTTY_ACP_TRACE", "1"), workspace.toString(), "off");
+        """, Map.of("AJENT_ACP_TRACE", "1"), workspace.toString(), "off");
 
     assertThat(result.exitCode()).isZero();
     assertThat(result.stderr()).contains("acp ← {\"jsonrpc\":\"2.0\"",
@@ -99,10 +99,10 @@ final class AcpCommandTest {
     Path home = Files.createDirectories(root.resolve("home"));
     var saved = new Settings(new ModelId("saved-model"), Profile.WRITE, java.util.List.of(),
         "ollama", Map.of(), Map.of(), "high", java.util.List.of());
-    assertThat(new SettingsStore(home.resolve(".agentty")).save(saved)).isTrue();
+    assertThat(new SettingsStore(home.resolve(".ajent")).save(saved)).isTrue();
     Path docs = Files.createDirectories(root.resolve("external-docs"));
     var store = new CredentialStore(root.resolve("credentials.json"), "test-machine");
-    var command = new AcpCommand(workspace, home, Map.of("AGENTTY_DOCS_DIR", docs.toString()),
+    var command = new AcpCommand(workspace, home, Map.of("AJENT_DOCS_DIR", docs.toString()),
         store, HttpClient.newHttpClient());
     var arguments = new CliArguments(CliArguments.Subcommand.ACP, "", "",
         "", "off", "ask", "", java.util.List.of(), java.util.Optional.empty());

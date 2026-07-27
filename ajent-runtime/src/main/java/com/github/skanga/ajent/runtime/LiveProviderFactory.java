@@ -3,11 +3,14 @@ package com.github.skanga.ajent.runtime;
 import com.github.skanga.ajent.domain.Effort;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.ModelCapabilities;
+import com.github.skanga.ajent.domain.ReasoningPolicy;
 import com.github.skanga.ajent.provider.ChatRequest;
 import com.github.skanga.ajent.provider.ProviderHttpTransport;
 import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.provider.anthropic.AnthropicRequest;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
+import com.github.skanga.ajent.provider.codex.CodexAuthManager;
+import com.github.skanga.ajent.provider.codex.CodexRequest;
 import com.github.skanga.ajent.provider.openai.Endpoint;
 import com.github.skanga.ajent.tools.catalog.NativeToolWireCatalog;
 import com.github.skanga.ajent.tools.prompt.AgentSystemPrompt;
@@ -63,7 +66,7 @@ public final class LiveProviderFactory {
   public static ProviderPort create(Configuration configuration, HttpClient client) {
     Objects.requireNonNull(configuration, "configuration");
     return new HttpProviderPort(new ProviderHttpTransport(client, configuration.environment()),
-        messages -> request(configuration, messages));
+        messages -> request(configuration, messages), CodexAuthManager.systemDefault(client));
   }
 
   public static HttpProviderPort.Request request(
@@ -73,13 +76,20 @@ public final class LiveProviderFactory {
     List<ToolSpecification> tools = toolsFor(
         configuration.model(), configuration.additionalTools().get());
     int maximum = ModelCapabilities.maxOutputTokensFor(
-        configuration.model(), configuration.environment().get("AGENTTY_MAX_OUTPUT_TOKENS"));
+        configuration.model(), configuration.environment().get("AJENT_MAX_OUTPUT_TOKENS"));
     if (configuration.provider().equals("anthropic")) {
       String effort = Effort.fromWire(configuration.effort())
           .clamp(ModelCapabilities.fromId(configuration.model())).wire();
       return new HttpProviderPort.Request.Anthropic(new AnthropicRequest(
           configuration.model(), configuration.systemPrompt().anthropic(), history, tools,
           maximum, configuration.auth(), 0, effort));
+    }
+    if (configuration.provider().equals("codex")) {
+      String effort = ReasoningPolicy.forModel("codex", configuration.model())
+          .clamp(Effort.fromWire(configuration.effort())).wire();
+      return new HttpProviderPort.Request.Codex(new CodexRequest(
+          configuration.model(), configuration.systemPrompt().anthropic(), history, tools, maximum,
+          effort));
     }
     Endpoint endpoint = Endpoint.fromSpec(configuration.provider());
     boolean weak = ModelCapabilities.isWeakModel(configuration.model());
@@ -106,6 +116,13 @@ public final class LiveProviderFactory {
       return new HttpProviderPort.Request.Anthropic(new AnthropicRequest(
           configuration.model(), systemPrompt, history, selectedTools,
           maximum, configuration.auth(), 0, effort));
+    }
+    if (configuration.provider().equals("codex")) {
+      String effort = ReasoningPolicy.forModel("codex", configuration.model())
+          .clamp(Effort.fromWire(configuration.effort())).wire();
+      return new HttpProviderPort.Request.Codex(new CodexRequest(
+          configuration.model(), systemPrompt, history, selectedTools, maximum,
+          effort));
     }
     Endpoint endpoint = Endpoint.fromSpec(configuration.provider());
     boolean weak = ModelCapabilities.isWeakModel(configuration.model());

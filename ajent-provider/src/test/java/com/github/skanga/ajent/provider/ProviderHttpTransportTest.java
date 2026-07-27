@@ -128,7 +128,7 @@ class ProviderHttpTransportTest {
     var events = new ArrayList<StreamEvent>();
 
     new ProviderHttpTransport(HttpClient.newHttpClient(), Map.of(
-        "AGENTTY_DEBUG_API", "1", "AGENTTY_DEBUG_FILE", log.toString()))
+        "AJENT_DEBUG_API", "1", "AJENT_DEBUG_FILE", log.toString()))
         .streamAnthropic(anthropicRequest(new ProviderAuth.ApiKey("secret-api-key")),
             events::add, () -> false);
 

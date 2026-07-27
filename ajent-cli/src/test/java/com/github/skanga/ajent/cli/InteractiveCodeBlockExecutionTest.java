@@ -116,7 +116,8 @@ final class InteractiveCodeBlockExecutionTest {
       } catch (IOException exception) {
         throw new AssertionError(exception);
       }
-      try (SignalGuard ignored = signalGuard.get()) {
+      SignalGuard guard = signalGuard.get();
+      try (guard) {
         heartbeat.pulse(2);
         return new Result(true, 0, "posix capture", false, false, "");
       }

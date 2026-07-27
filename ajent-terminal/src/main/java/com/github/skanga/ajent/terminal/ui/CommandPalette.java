@@ -24,7 +24,7 @@ public final class CommandPalette {
     COMPACT_CONTEXT("Compact context", "Replace history with a structured summary"),
     REWIND_CHECKPOINT("Rewind to checkpoint", "Restore files + conversation to any earlier turn"),
     OPEN_LOGIN("Login", "Sign in via OAuth or API key"),
-    QUIT("Quit", "Exit agentty");
+    QUIT("Quit", "Exit Ajent");
 
     private final String label;
     private final String description;

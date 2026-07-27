@@ -21,12 +21,12 @@ class CliParityTest {
   }
 
   @Test
-  void helpMatchesReferenceAfterOnlyTheDeclaredProgramNameNormalization() {
+  void helpRetainsReferenceSurfacePlusDocumentedAjentProviders() {
     var execution = run("--help");
     assertThat(execution.exitCode()).isZero();
     assertThat(execution.stdout()).isEmpty();
-    assertThat(execution.stderr()).isEqualTo(reference("/reference/cli/help.stderr.txt")
-        .replace("agentty", "ajent") + "\n");
+    assertThat(execution.stderr()).isEqualTo(ajentHelp(
+        reference("/reference/cli/help.stderr.txt")) + "\n");
   }
 
   @Test
@@ -39,12 +39,12 @@ class CliParityTest {
   }
 
   @Test
-  void invalidArgumentMatchesReferenceExitAndStderrAfterNameNormalization() {
+  void invalidArgumentIncludesTheCurrentAjentHelp() {
     var execution = run("--definitely-invalid");
     assertThat(execution.exitCode()).isEqualTo(2);
     assertThat(execution.stdout()).isEmpty();
-    assertThat(execution.stderr()).isEqualTo(reference("/reference/cli/invalid.stderr.txt")
-        .replace("agentty", "ajent") + "\n");
+    assertThat(execution.stderr()).isEqualTo(ajentHelp(
+        reference("/reference/cli/invalid.stderr.txt")) + "\n");
   }
 
   private static Execution run(String... arguments) {
@@ -59,6 +59,15 @@ class CliParityTest {
 
   private static String reference(String path) {
     return new String(bytes(path), StandardCharsets.UTF_8);
+  }
+
+  private static String ajentHelp(String reference) {
+    return reference.replace("agentty", "ajent")
+        .replace("Authenticate (OAuth via claude.ai or API key)",
+            "Authenticate Anthropic, or import Codex CLI login")
+        .replace("                      or an OpenAI-compatible one: openai | groq |\n",
+            "                      codex (ChatGPT subscription), or an\n"
+                + "                      OpenAI-compatible one: openai | groq |\n");
   }
 
   private static byte[] bytes(String path) {

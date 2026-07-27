@@ -18,9 +18,14 @@ public final class UnifiedDiff {
   private record Computed(List<DiffHunk> hunks, int added, int removed) {}
 
   public static FileChange compute(String path, String before, String after) {
+    return compute(path, before, after, !before.isEmpty());
+  }
+
+  public static FileChange compute(
+      String path, String before, String after, boolean existedBefore) {
     Computed computed = compute(before, after);
     return new FileChange(path, computed.added(), computed.removed(), before, after,
-        computed.hunks());
+        computed.hunks(), existedBefore);
   }
 
   static List<DiffHunk> hunks(String before, String after) {

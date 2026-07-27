@@ -20,18 +20,18 @@ final class SkillCommandsTest {
     Execution result = run(new SkillCommands(home, workspace));
     assertThat(result.code()).isZero();
     assertThat(result.output()).isEqualTo("no skills installed.\n"
-        + "add one: <project>/.agentty/skills/<name>/SKILL.md "
-        + "(or ~/.agentty/skills/, .agents/, .claude/)\n");
+        + "add one: <project>/.ajent/skills/<name>/SKILL.md "
+        + "(or ~/.ajent/skills/, .agents/, .claude/)\n");
   }
 
   @Test void listsMetadataResourcesVisibilityAndReturnsOneOnWarnings() throws IOException {
     Path home = Files.createDirectories(base.resolve("home"));
     Path workspace = Files.createDirectories(base.resolve("work"));
-    Path clean = workspace.resolve(".agentty/skills/clean");
+    Path clean = workspace.resolve(".ajent/skills/clean");
     write(clean.resolve("SKILL.md"), "---\nname: clean\ndescription: clean skill\n"
         + "disable-model-invocation: true\n---\nBODY\n");
     write(clean.resolve("references/info.md"), "info");
-    Path bad = home.resolve(".agentty/skills/different");
+    Path bad = home.resolve(".ajent/skills/different");
     write(bad.resolve("SKILL.md"), "---\nname: Bad--Name-\n---\nBODY\n");
 
     Execution result = run(new SkillCommands(home, workspace));

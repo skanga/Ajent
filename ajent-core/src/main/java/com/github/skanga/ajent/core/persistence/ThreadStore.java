@@ -21,6 +21,7 @@ import com.github.skanga.ajent.domain.ToolName;
 import com.github.skanga.ajent.domain.ToolStatus;
 import com.github.skanga.ajent.domain.ToolUse;
 import java.io.IOException;
+import java.io.Serial;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -419,7 +420,10 @@ public final class ThreadStore {
 
   @SuppressWarnings("serial")
   private static final class InvalidData extends RuntimeException {
-    private final DeserializeError error;
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    private final transient DeserializeError error;
     private InvalidData(DeserializeError error) { this.error = error; }
   }
 }

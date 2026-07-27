@@ -12,6 +12,7 @@ import com.github.skanga.ajent.tools.runtime.ToolResult;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.Serial;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -223,6 +224,9 @@ public final class McpJsonRpcServer {
 
   @SuppressWarnings("serial")
   private static final class RpcFailure extends RuntimeException {
+    @Serial
+    private static final long serialVersionUID = 1L;
+
     private final int code;
 
     private RpcFailure(int code, String message) {

@@ -99,7 +99,7 @@ public final class DiffReview {
   public static Result rejectAll(PickerState.TwoAxis state, List<File> files) {
     if (files.isEmpty()) return new Result(state, files, "no pending changes to reject");
     Changed changed = setAll(files, Status.REJECTED);
-    return new Result(new PickerState.CellClosed(), List.of(),
+    return new Result(new PickerState.CellClosed(), changed.files(),
         countStatus("rejected", changed.count()));
   }
 

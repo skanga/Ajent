@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.tools.rag;
 
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -19,17 +19,17 @@ public interface EmbeddingClient {
       return new Config("127.0.0.1", 11_434, "");
     }
 
-    public static Config agenttyDefaults() {
+    public static Config ajentDefaults() {
       return new Config("127.0.0.1", 11_434, "nomic-embed-text");
     }
 
-    /** Resolves AgenTTY's AGENTTY_EMBED_MODEL and AGENTTY_OLLAMA_HOST contract. */
+    /** Resolves Ajent's embedding model and Ollama endpoint settings. */
     public static Config fromEnvironment(Map<String, String> environment) {
-      String model = environment.getOrDefault("AGENTTY_EMBED_MODEL", "");
+      String model = environment.getOrDefault("AJENT_EMBED_MODEL", "");
       if (model.isEmpty()) model = "nomic-embed-text";
       String host = "127.0.0.1";
       int port = 11_434;
-      String endpoint = environment.getOrDefault("AGENTTY_OLLAMA_HOST", "");
+      String endpoint = environment.getOrDefault("AJENT_OLLAMA_HOST", "");
       if (!endpoint.isEmpty()) {
         int colon = endpoint.lastIndexOf(':');
         if (colon >= 0) {
@@ -38,7 +38,7 @@ public interface EmbeddingClient {
             int candidate = Integer.parseInt(endpoint.substring(colon + 1));
             if (candidate > 0 && candidate <= 65_535) port = candidate;
           } catch (NumberFormatException failure) {
-            AgenttyDebugLog.log("rag.embed_endpoint.port", failure);
+            AjentDebugLog.log("rag.embed_endpoint.port", failure);
             // Keep the native default port.
           }
         } else host = endpoint;

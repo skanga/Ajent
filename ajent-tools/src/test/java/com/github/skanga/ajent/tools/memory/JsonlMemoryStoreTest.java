@@ -20,7 +20,7 @@ class JsonlMemoryStoreTest {
     MemoryStore.AppendResult result = store.append(new MemoryStore.AppendRequest("prefer fish",
         "user", false, List.of(), ""));
     assertThat(result.id()).isEqualTo("a1b2c3d4");
-    Path path = root.resolve("home/.agentty/memory.jsonl");
+    Path path = root.resolve("home/.ajent/memory.jsonl");
     assertThat(Files.readString(path)).isEqualTo(
         "{\"id\":\"a1b2c3d4\",\"ts\":1731860000,\"scope\":\"user\",\"text\":\"prefer fish\"}\n");
     Files.writeString(path, "not-json\n{\"id\":\"bad\",\"scope\":\"wat\",\"text\":\"x\"}\n",

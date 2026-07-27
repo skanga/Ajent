@@ -48,7 +48,7 @@ public record ModelCapabilities(
   }
 
   public static int maxOutputTokensFor(String modelId) {
-    return maxOutputTokensFor(modelId, System.getenv("AGENTTY_MAX_OUTPUT_TOKENS"));
+    return maxOutputTokensFor(modelId, System.getenv("AJENT_MAX_OUTPUT_TOKENS"));
   }
 
   public static int maxOutputTokensFor(String modelId, String override) {

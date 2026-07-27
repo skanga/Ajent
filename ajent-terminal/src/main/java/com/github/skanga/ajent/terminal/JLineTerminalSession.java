@@ -7,19 +7,23 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
+import org.jline.utils.NonBlockingInputStream;
 
 /** Owns Ajent's JLine raw inline-terminal lifecycle and exact mode escapes. */
 public final class JLineTerminalSession implements AutoCloseable {
   static final String FIXED_SIZE_PROPERTY = "ajent.terminal.fixedSize";
+  private static final int DEFAULT_COLUMNS = 80;
+  private static final int DEFAULT_ROWS = 24;
   public static final String ENTER_INLINE =
-      "\u001b[?2004h\u001b[>1u\u001b[>4;2m\u001b[?25l";
+      "\u001b[?1049h\u001b[H\u001b[2J\u001b[?2004h\u001b[>1u\u001b[>4;2m\u001b[?25l";
   public static final String LEAVE_INLINE =
-      "\u001b[>4m\u001b[<u\u001b[?2004l\u001b[?7h\u001b[?25h\u001b[0m\r\n";
+      "\u001b[>4m\u001b[<u\u001b[?2004l\u001b[?7h\u001b[?25h\u001b[0m\u001b[?1049l";
   public static final String ENABLE_MOUSE =
       "\u001b[?1000h\u001b[?1002h\u001b[?1006h\u001b[?1007h\u001b[?1004h";
   public static final String DISABLE_MOUSE =
@@ -97,7 +101,9 @@ public final class JLineTerminalSession implements AutoCloseable {
 
   public Size size() {
     org.jline.terminal.Size size = terminal.getSize();
-    return new Size(Math.max(0, size.getColumns()), Math.max(0, size.getRows()));
+    int columns = size.getColumns();
+    int rows = size.getRows();
+    return new Size(columns > 0 ? columns : DEFAULT_COLUMNS, rows > 0 ? rows : DEFAULT_ROWS);
   }
 
   /** Whether JLine owns a real terminal rather than its redirected dumb fallback. */
@@ -130,7 +136,30 @@ public final class JLineTerminalSession implements AutoCloseable {
     requireOpen();
     byte[] bytes = new byte[4096];
     int count = terminal.input().read(bytes);
-    return count < 0 ? List.of() : decoder.feed(java.util.Arrays.copyOf(bytes, count));
+    if (count < 0) return List.of();
+    List<TerminalEvent> events =
+        decoder.feed(java.util.Arrays.copyOf(bytes, count));
+    while (events.isEmpty() && decoder.hasPendingEscape()) {
+      var input = terminal.input();
+      int available = input.available();
+      if (available > 0) {
+        count = input.read(bytes, 0, Math.min(bytes.length, available));
+        if (count < 0) return decoder.flushEscape();
+        events = decoder.feed(java.util.Arrays.copyOf(bytes, count));
+        continue;
+      }
+      if (input instanceof NonBlockingInputStream nonBlocking) {
+        int next = nonBlocking.read(1L);
+        if (next >= 0) {
+          events = decoder.feed(new byte[] {(byte) next});
+          continue;
+        }
+      }
+      events = decoder.flushEscape();
+      if (events.isEmpty()) LockSupport.parkNanos(1_000_000L);
+      if (Thread.currentThread().isInterrupted()) return List.of();
+    }
+    return events;
   }
 
   public List<TerminalEvent> flushEscape() {

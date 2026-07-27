@@ -11,20 +11,21 @@ import org.junit.jupiter.api.Test;
 
 final class AppChromeTest {
   @Test
-  void rendersNativeWelcomeIdentityStartersAndResponsiveHints() {
+  void rendersAjentWelcomeIdentityStartersAndResponsiveHints() {
     List<AppChrome.Row> roomy = AppChrome.welcome(new AppChrome.Welcome(
         "claude-opus-4-6", Profile.WRITE, true, 100, 29));
 
     assertThat(text(roomy))
         .contains("a calm middleware between you and the model")
-        .contains("● Opus")
-        .contains("▌ Write ▐")
         .contains("N E W   H E R E ?   T R Y   O N E   O F   T H E S E")
         .contains("Explain what this project does and how it's structured")
         .contains("Find and fix the bug in <file> — it <symptom>")
         .contains("Add a <feature> and run the tests")
-        .contains("^K palette")
-        .contains("^C quit");
+        .contains("Navigate:", "Actions:", "Session:")
+        .contains("Ctrl+←/→ Threads")
+        .contains("Ctrl+K Commands")
+        .contains("Ctrl+C Quit")
+        .doesNotContain("● Claude", "Write ▐", "▌ Write", "·  Write");
     int starter = text(roomy).indexOf("╭" + "─".repeat(60) + "╮");
     assertThat(starter).isGreaterThanOrEqualTo(0);
     assertThat(roomy.stream().map(AppChrome.Row::text).toList()).containsSubsequence(
@@ -37,24 +38,20 @@ final class AppChromeTest {
 
     List<AppChrome.Row> narrow = AppChrome.welcome(new AppChrome.Welcome(
         "openai/gpt-5.4", Profile.ASK, false, 36, 4));
-    assertThat(narrow).extracting(row -> row.text().strip()).contains("» A G E N T T Y");
-    assertThat(text(narrow)).contains("● GPT", "▌ Ask ▐", "^K", "^J", "^C")
-        .doesNotContain("palette", "NEW HERE");
-    assertThat(narrow).hasSize(6);
+    assertThat(narrow).extracting(row -> row.text().strip()).contains("AJENT");
+    assertThat(text(narrow)).doesNotContain("AGENTTY", "type to begin");
+    assertThat(text(narrow)).contains("Ctrl+K", "Ctrl+J", "Ctrl+C")
+        .doesNotContain("● GPT", "·  Ask", "Commands", "NEW HERE");
   }
 
   @Test
-  void animatesTheNativeCascadingWordmarkFromTheProvidedMountAge() {
-    List<String> initial = brandRows(0);
-    List<String> cascade = brandRows(650);
-    List<String> settled = brandRows(1_200);
-    List<String> bob = brandRows(1_750);
+  void rendersAStaticAjentPixelWordmark() {
+    List<String> first = brandRows();
+    List<String> second = brandRows();
 
-    assertThat(initial).allMatch(String::isBlank);
-    assertThat(cascade).isNotEqualTo(initial);
-    assertThat(settled).isNotEqualTo(cascade);
-    assertThat(bob).isNotEqualTo(settled);
-    assertThat(brandRows(-1)).anyMatch(line -> line.contains("█"));
+    assertThat(first).anyMatch(line -> line.contains("█"));
+    assertThat(second).isEqualTo(first);
+    assertThat(first).hasSize(3).allMatch(line -> line.strip().length() <= 29);
   }
 
   @Test
@@ -65,14 +62,17 @@ final class AppChromeTest {
     assertThat(composer).hasSize(6);
     assertThat(composer.getFirst().text()).startsWith("╭").endsWith("╮")
         .hasSize(78);
-    assertThat(composer.get(1).text()).startsWith("│ ❯ █type a message…")
-        .endsWith(" │").hasSize(78);
+    assertThat(composer.get(1).text())
+        .as("cursor and placeholder should be visually separated")
+        .startsWith("│ ❯ █  type a message…").endsWith(" │").hasSize(78);
     assertThat(composer.get(2).text()).isEqualTo("│" + " ".repeat(76) + "│");
     assertThat(composer.get(3).text()).startsWith("│   ─").endsWith(" │")
         .hasSize(78);
     assertThat(composer.get(4).text())
-        .contains("↵ send", "⇧↵ / ⌥↵ newline", "^E expand", "▎ W R I T E")
+        .contains("Enter send", "Shift+Enter newline", "Ctrl+E expand", "Write")
+        .doesNotContain("W R I T E")
         .hasSize(78);
+    assertThat(composer.getFirst().tone()).isEqualTo(AppChrome.Tone.DIM);
     assertThat(composer.getLast().text()).startsWith("╰").endsWith("╯")
         .hasSize(78);
 
@@ -80,15 +80,34 @@ final class AppChromeTest {
         "", 0, Profile.ASK, AppChrome.Phase.STREAMING, 1, false, 78));
     assertThat(queued.get(1).text())
         .contains("press ↑ to edit queued — type to queue another…");
-    assertThat(queued.get(4).text()).contains("❚  1 queued", "▎ A S K");
+    assertThat(queued.get(4).text()).contains("❚  1 queued", "Ask")
+        .doesNotContain("A S K");
 
     assertThat(AppChrome.status(new AppChrome.Status(
         "", "OpenAI", AppChrome.Phase.STREAMING, "", 300,
         0, 128_000, 0, "", 78)).getFirst().text()).contains("⠸ Streaming");
     assertThat(AppChrome.statusPanel(new AppChrome.Status(
-        "", "Ollama", AppChrome.Phase.IDLE, "", 0, 200_000, 0, "", 94)).get(1).text())
-        .isEqualTo(" ▌ ● Ready      ⚡   0.0 t/s " + "▁".repeat(16)
-            + "   ·   ● Ollama · CTX   ——/  ——  " + "░".repeat(10) + " ———% ");
+        "", "Ollama", AppChrome.ProviderAvailability.UNVERIFIED,
+        AppChrome.Phase.IDLE, "", 0, 200_000, 0, "", 94)).get(1).text())
+        .startsWith(" ● Ready")
+        .contains("Connection not checked")
+        .doesNotContain("▌", "Selected · Ollama")
+        .doesNotContain("● Ollama")
+        .doesNotContain("t/s", "CTX", "——", "—%");
+
+    List<AppChrome.Row> identified = AppChrome.composer(new AppChrome.Composer(
+        "", 0, Profile.WRITE, AppChrome.Phase.IDLE, 0, false,
+        "Ollama", "qwen2.5-coder:7b", AppChrome.ProviderAvailability.UNVERIFIED, 120));
+    assertThat(identified.get(4).text())
+        .contains("Ollama · qwen2.5-coder:7b")
+        .doesNotContain("(selected)", "Write");
+
+    List<AppChrome.Row> unavailable = AppChrome.statusPanel(new AppChrome.Status(
+        "", "Ollama", AppChrome.ProviderAvailability.UNAVAILABLE,
+        AppChrome.Phase.IDLE, "", 0, 0, 0, "", 94));
+    assertThat(unavailable.get(1).text())
+        .contains("Provider unavailable · Ollama")
+        .doesNotContain("● Ollama");
 
     List<AppChrome.Row> multiline = AppChrome.composer(new AppChrome.Composer(
         "first\nsecond", 12, Profile.WRITE, AppChrome.Phase.IDLE, 0, true, 78));
@@ -109,14 +128,16 @@ final class AppChromeTest {
     assertThat(status).hasSize(3);
     assertThat(status.getFirst().text()).isEqualTo("─".repeat(78));
     assertThat(status.get(1).text())
-        .startsWith(" ▌ ● Ready")
-        .contains("● Ollama · CTX", "░".repeat(10), "———%")
+        .startsWith(" ● Ready")
+        .contains("Connection not checked")
+        .doesNotContain("▌", "Selected · Ollama")
+        .doesNotContain("CTX", "░".repeat(10), "———%")
         .hasSize(78);
     assertThat(status.getLast().text()).isEqualTo("─".repeat(78));
 
     List<AppChrome.Row> titled = AppChrome.statusPanel(new AppChrome.Status(
         "say hello", "OpenAI", AppChrome.Phase.IDLE, "", 0, 128_000, 0, "", 78));
-    assertThat(titled.get(1).text()).startsWith(" ▎ say hello   ·   ▌ ● Ready");
+    assertThat(titled.get(1).text()).startsWith(" ▎ say hello  ·  ● Ready");
 
     List<AppChrome.Row> banner = AppChrome.statusPanel(new AppChrome.Status(
         "", "OpenAI", AppChrome.Phase.IDLE, "", 0, 128_000, 0,
@@ -367,7 +388,7 @@ final class AppChromeTest {
   void rendersNativeLoginAndOAuthPanelsWithoutExposingSecrets() {
     List<AppChrome.Row> picking = AppChrome.login(new LoginModal.Picking(), 78);
     assertThat(picking).allSatisfy(row -> assertThat(row.text()).hasSize(78));
-    assertThat(picking.getFirst().text()).contains(" Sign in to agentty ");
+    assertThat(picking.getFirst().text()).contains(" Sign in to Ajent ");
     assertThat(picking).extracting(AppChrome.Row::text)
         .anyMatch(line -> line.contains("Authenticate with Claude"))
         .anyMatch(line -> line.contains("1) OAuth via claude.ai"))
@@ -411,9 +432,10 @@ final class AppChromeTest {
         AppChrome.Phase.AWAITING_PERMISSION, "write", 200, 0, 200_000, 0, "", 78);
 
     String row = AppChrome.statusPanel(status).get(1).text();
-    assertThat(row).startsWith(" ▌ ⚠ approve w…  0.2s")
+    assertThat(row).startsWith(" ⚠ approve w…  0.2s")
         .doesNotContain("test permission")
-        .contains("● 127.0.0.1:10501 · CTX");
+        .contains("Connection not checked")
+        .doesNotContain("CTX");
   }
 
   @Test
@@ -427,7 +449,7 @@ final class AppChromeTest {
     assertThat(wide.getFirst().text())
         .isEqualTo("╭──────────────────────────────────────────────────────────────────────────────╮");
     assertThat(wide.get(1).text().strip())
-        .isEqualTo("│ Changes (2 files)                          Ctrl+R review  A accept  X reject │");
+        .isEqualTo("│ Changes (2 files)              Ctrl+R review  Shift+A accept  Shift+X reject │");
     assertThat(wide.get(2).text()).startsWith("│ M src/Main.java  +12 -3").endsWith(" │");
     assertThat(wide.get(3).text()).startsWith("│ A README.md  +8").endsWith(" │");
     assertThat(wide.getLast().text())
@@ -437,15 +459,15 @@ final class AppChromeTest {
     List<AppChrome.Row> narrow = AppChrome.changes(changes, 30);
     assertThat(narrow).hasSize(5).allSatisfy(row -> assertThat(row.text()).hasSize(30));
     assertThat(narrow.get(1).text()).startsWith("│ Changes (2 files)")
-        .doesNotContain("review", "A accept", "X reject");
+        .doesNotContain("review", "Shift+A accept", "Shift+X reject");
     assertThat(narrow.get(2).text()).startsWith("│ M src/Main.java  +12 -3");
     assertThat(narrow.get(3).text()).startsWith("│ A README.md  +8");
-    assertThat(AppChrome.changes(changes, 46).get(1).text())
-        .contains("A accept", "X reject").doesNotContain("Ctrl+R");
-    assertThat(AppChrome.changes(changes, 34).get(1).text())
-        .contains("A accept").doesNotContain("Ctrl+R", "X reject");
+    assertThat(AppChrome.changes(changes, 52).get(1).text())
+        .contains("Shift+A accept", "Shift+X reject").doesNotContain("Ctrl+R");
+    assertThat(AppChrome.changes(changes, 36).get(1).text())
+        .contains("Shift+A accept").doesNotContain("Ctrl+R", "Shift+X reject");
     assertThat(AppChrome.changes(changes, 26).get(1).text())
-        .doesNotContain("Ctrl+R", "A accept", "X reject");
+        .doesNotContain("Ctrl+R", "Shift+A accept", "Shift+X reject");
     assertThat(AppChrome.changes(List.of(), 80)).isEmpty();
   }
 
@@ -512,9 +534,9 @@ final class AppChromeTest {
     return String.join("\n", rows.stream().map(AppChrome.Row::text).toList());
   }
 
-  private static List<String> brandRows(long ageMillis) {
+  private static List<String> brandRows() {
     return AppChrome.welcome(new AppChrome.Welcome(
-            "model", Profile.WRITE, false, 100, 20, ageMillis)).stream()
+            "model", Profile.WRITE, false, 100, 20)).stream()
         .filter(row -> row.tone() == AppChrome.Tone.BRAND)
         .map(AppChrome.Row::text)
         .toList();

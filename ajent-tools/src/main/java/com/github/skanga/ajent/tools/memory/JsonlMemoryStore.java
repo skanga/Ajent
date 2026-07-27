@@ -162,8 +162,8 @@ public final class JsonlMemoryStore implements MemoryStore {
 
   public Path pathFor(String scope) {
     return switch (scope) {
-      case "user" -> home == null ? null : home.resolve(".agentty/memory.jsonl");
-      case "project" -> workspace == null ? null : workspace.resolve(".agentty/memory.jsonl");
+      case "user" -> home == null ? null : home.resolve(".ajent/memory.jsonl");
+      case "project" -> workspace == null ? null : workspace.resolve(".ajent/memory.jsonl");
       default -> null;
     };
   }

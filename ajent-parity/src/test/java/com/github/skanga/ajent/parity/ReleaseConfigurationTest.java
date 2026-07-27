@@ -34,6 +34,14 @@ final class ReleaseConfigurationTest {
         .contains("test \"$version\" = \"${version%-SNAPSHOT}\"");
   }
 
+  @Test
+  void executableJarEnablesJlineNativeTerminalAccess() throws Exception {
+    String cliPom = Files.readString(repositoryRoot().resolve("ajent-cli/pom.xml"));
+
+    assertThat(cliPom)
+        .contains("<Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>");
+  }
+
   private static Path repositoryRoot() {
     Path current = Path.of("").toAbsolutePath();
     while (current != null) {

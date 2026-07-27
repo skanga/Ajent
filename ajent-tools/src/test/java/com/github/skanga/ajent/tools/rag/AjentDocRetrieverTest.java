@@ -15,7 +15,7 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-final class AgenttyDocRetrieverTest {
+final class AjentDocRetrieverTest {
   @Test void runsCanonicalFusedRerankMmrCompressFunnel(@TempDir Path root) throws Exception {
     Path home = Files.createDirectories(root.resolve("home"));
     Path work = Files.createDirectories(root.resolve("work"));
@@ -23,7 +23,7 @@ final class AgenttyDocRetrieverTest {
     Files.writeString(docs.resolve("deploy.md"), "# Deploy\n\n"
         + "kubernetes deployments use replicas pods and rolling updates. "
         + "This second sentence contains deployment verification details.\n");
-    Path skill = work.resolve(".agentty/skills/release/SKILL.md");
+    Path skill = work.resolve(".ajent/skills/release/SKILL.md");
     Files.createDirectories(skill.getParent());
     Files.writeString(skill, "---\nname: release\ndescription: Release engineering\n---\n"
         + "Use blue green release procedures.\n");
@@ -31,7 +31,7 @@ final class AgenttyDocRetrieverTest {
     store.append(new MemoryStore.AppendRequest("production uses canary deployment waves", "project",
         false, List.of("release"), ""));
     var engine = new SkillEngine(home, work, new WorkspaceSandbox(work, work, home));
-    var retriever = new AgenttyDocRetriever(docs, new SkillsKnowledgeSource(engine),
+    var retriever = new AjentDocRetriever(docs, new SkillsKnowledgeSource(engine),
         new MemoryKnowledgeSource(store), null, true, true);
 
     HostServices.DocResponse response = retriever.retrieve(new HostServices.DocQuery("deployment release", 4));
@@ -48,10 +48,10 @@ final class AgenttyDocRetrieverTest {
   }
 
   @Test void reportsNoKnowledgeWhenEverySourceIsDisabled(@TempDir Path root) {
-    var retriever = new AgenttyDocRetriever(root.resolve("missing"), null, null, null, false, false);
+    var retriever = new AjentDocRetriever(root.resolve("missing"), null, null, null, false, false);
     HostServices.DocResponse response = retriever.retrieve(new HostServices.DocQuery("anything", 6));
     assertThat(response.hits()).isEmpty();
-    assertThat(response.error()).contains("no knowledge configured", "AGENTTY_DOCS_DIR");
+    assertThat(response.error()).contains("no knowledge configured", "AJENT_DOCS_DIR");
   }
 
   @Test void degradesBackendFailureToSearchDocsError(@TempDir Path root) {
@@ -61,7 +61,7 @@ final class AgenttyDocRetrieverTest {
         throw new IllegalStateException("backend exploded");
       }
     };
-    var retriever = new AgenttyDocRetriever(root.resolve("missing"), null, null, broken, false, false);
+    var retriever = new AjentDocRetriever(root.resolve("missing"), null, null, broken, false, false);
     assertThat(retriever.retrieve(new HostServices.DocQuery("anything", 2)).error())
         .isEqualTo("search_docs failed: backend exploded");
   }
@@ -71,7 +71,7 @@ final class AgenttyDocRetrieverTest {
     Files.writeString(docs.resolve("deploy.md"), "kubernetes manifests replicas orchestration");
     var expander = new RagQueryExpander((config, prompt) ->
         java.util.Optional.of("k8s replicas\ncontainer orchestration"));
-    var retriever = new AgenttyDocRetriever(docs, null, null, null, false, false, expander,
+    var retriever = new AjentDocRetriever(docs, null, null, null, false, false, expander,
         new RagQueryExpander.Config("localhost", 11434, "model", 4));
     HostServices.DocResponse response = retriever.retrieve(new HostServices.DocQuery("kubernetes", 3));
     assertThat(response.error()).isEmpty();
@@ -85,7 +85,7 @@ final class AgenttyDocRetrieverTest {
     Files.writeString(docs.resolve("strong.md"), "deployment exact production procedure");
     var neural = new NeuralReranker((config, prompt) -> Optional.of(
         prompt.contains("Passage: deployment exact") ? "10" : "1"));
-    var retriever = new AgenttyDocRetriever(docs, null, null, null, false, false, null, null,
+    var retriever = new AjentDocRetriever(docs, null, null, null, false, false, null, null,
         neural, new NeuralReranker.Config("h", 1, "model", 2, Duration.ofSeconds(1)));
     HostServices.DocResponse response = retriever.retrieve(new HostServices.DocQuery("deployment", 2));
     assertThat(response.error()).isEmpty();
@@ -101,7 +101,7 @@ final class AgenttyDocRetrieverTest {
             : new float[] {0, 1}).toList());
     var corpus = new RagCorpus(embeddings);
     var config = new EmbeddingClient.Config("localhost", 11434, "nomic");
-    var retriever = new AgenttyDocRetriever(docs, null, null, null, false, false,
+    var retriever = new AjentDocRetriever(docs, null, null, null, false, false,
         null, null, null, null, corpus, config);
 
     HostServices.DocResponse response = retriever.retrieve(

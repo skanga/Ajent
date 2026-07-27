@@ -8,6 +8,16 @@ import org.junit.jupiter.api.Test;
 
 class ProviderRegistryTest {
   @Test
+  void keepsCodexSubscriptionSeparateFromOpenAiApiKeyProvider() {
+    var codex = ProviderRegistry.presetFor("codex").orElseThrow();
+    var openAi = ProviderRegistry.presetFor("openai").orElseThrow();
+
+    assertThat(codex.kind()).isEqualTo(ProviderRegistry.Kind.CODEX);
+    assertThat(codex.authStyle()).isEqualTo(ProviderRegistry.AuthStyle.CODEX_IMPORT);
+    assertThat(openAi.kind()).isEqualTo(ProviderRegistry.Kind.OPENAI);
+    assertThat(openAi.authStyle()).isEqualTo(ProviderRegistry.AuthStyle.API_KEY);
+  }
+  @Test
   void endpointPresetsMatchEveryReferencePathAndTlsChoice() {
     assertEndpoint("groq", "api.groq.com", 443, true, "/openai/v1/chat/completions");
     var openrouter = Endpoint.fromSpec("openrouter");
@@ -34,7 +44,7 @@ class ProviderRegistryTest {
 
   @Test
   void everyOpenAiRegistryPresetResolvesConsistently() {
-    assertThat(ProviderRegistry.presets()).hasSize(8);
+    assertThat(ProviderRegistry.presets()).hasSize(9);
     assertThat(ProviderRegistry.defaultProviderId()).isEqualTo("anthropic");
     for (var preset : ProviderRegistry.presets()) {
       assertThat(ProviderRegistry.presetFor(preset.id())).contains(preset);

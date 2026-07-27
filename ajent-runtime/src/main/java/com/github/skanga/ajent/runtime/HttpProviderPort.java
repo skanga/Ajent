@@ -5,6 +5,8 @@ import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.provider.ChatRequest;
 import com.github.skanga.ajent.provider.ProviderHttpTransport;
 import com.github.skanga.ajent.provider.anthropic.AnthropicRequest;
+import com.github.skanga.ajent.provider.codex.CodexAuthManager;
+import com.github.skanga.ajent.provider.codex.CodexRequest;
 import com.github.skanga.ajent.provider.stream.StreamEvent;
 import java.util.List;
 import java.util.Objects;
@@ -15,11 +17,19 @@ import java.util.function.Function;
 public final class HttpProviderPort implements ProviderPort {
   private final ProviderHttpTransport transport;
   private final Function<List<Message>, Request> requestFactory;
+  private final CodexAuthManager codexAuth;
 
   public HttpProviderPort(
       ProviderHttpTransport transport, Function<List<Message>, Request> requestFactory) {
+    this(transport, requestFactory, null);
+  }
+
+  public HttpProviderPort(
+      ProviderHttpTransport transport, Function<List<Message>, Request> requestFactory,
+      CodexAuthManager codexAuth) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.requestFactory = Objects.requireNonNull(requestFactory, "requestFactory");
+    this.codexAuth = codexAuth;
   }
 
   @Override
@@ -39,6 +49,14 @@ public final class HttpProviderPort implements ProviderPort {
           openAi.value(), events, cancellation::isCancelled);
       case Request.Ollama ollama -> transport.streamOllama(
           ollama.value(), events, cancellation::isCancelled);
+      case Request.Codex codex -> {
+        if (codexAuth == null) {
+          events.accept(new StreamEvent.Error(
+              "Codex authentication is unavailable; run 'ajent login --provider codex'"));
+        } else {
+          transport.streamCodex(codex.value(), codexAuth, events, cancellation::isCancelled);
+        }
+      }
     }
   }
 
@@ -53,6 +71,10 @@ public final class HttpProviderPort implements ProviderPort {
 
     record Ollama(ChatRequest value) implements Request {
       public Ollama { value = Objects.requireNonNull(value, "value"); }
+    }
+
+    record Codex(CodexRequest value) implements Request {
+      public Codex { value = Objects.requireNonNull(value, "value"); }
     }
   }
 }

@@ -1,7 +1,6 @@
 package com.github.skanga.ajent.terminal.ui;
 
 import com.github.skanga.ajent.domain.Profile;
-import com.github.skanga.ajent.terminal.ModelLabels;
 import com.github.skanga.ajent.terminal.render.ColumnTextWrapper;
 import com.github.skanga.ajent.terminal.render.UnicodeWidth;
 import java.time.Duration;
@@ -13,11 +12,12 @@ import java.util.Objects;
 
 /** Responsive top-level chrome derived from AgenTTY's Maya welcome/status/change widgets. */
 public final class AppChrome {
-  public enum Tone { NORMAL, MUTED, BRAND, ACCENT, SUCCESS, WARNING, DANGER }
+  public enum Tone { NORMAL, DIM, MUTED, BRAND, ACCENT, SUCCESS, WARNING, DANGER }
   public enum Phase {
     IDLE, STREAMING, EXECUTING_TOOL, AWAITING_PERMISSION, COMPACTING, RETRYING,
     STALLED, AUTHENTICATING, LOADING
   }
+  public enum ProviderAvailability { UNVERIFIED, CONNECTED, UNAVAILABLE }
 
   public record Row(String text, Tone tone) {
     public Row {
@@ -26,32 +26,45 @@ public final class AppChrome {
     }
   }
 
-  public record Welcome(String modelId, Profile profile, boolean firstRun, int width, int maxRows,
-                        long animationAgeMillis) {
-    public Welcome(String modelId, Profile profile, boolean firstRun, int width, int maxRows) {
-      this(modelId, profile, firstRun, width, maxRows, -1);
-    }
-
+  public record Welcome(String modelId, Profile profile, boolean firstRun, int width, int maxRows) {
     public Welcome {
       modelId = Objects.requireNonNull(modelId, "modelId");
       profile = Objects.requireNonNull(profile, "profile");
-      if (width < 1 || maxRows < 1 || animationAgeMillis < -1) {
-        throw new IllegalArgumentException("invalid welcome bounds or animation age");
+      if (width < 1 || maxRows < 1) {
+        throw new IllegalArgumentException("invalid welcome bounds");
       }
     }
   }
 
-  public record Status(String title, String provider, Phase phase, String detail,
+  public record Status(String title, String provider, ProviderAvailability providerAvailability,
+                       Phase phase, String detail,
                        long elapsedMillis, int tokensIn, int contextMax, int queued,
                        String banner, int width) {
     public Status(String title, String provider, Phase phase, String detail,
+                  long elapsedMillis, int tokensIn, int contextMax, int queued,
+                  String banner, int width) {
+      this(title, provider, ProviderAvailability.UNVERIFIED, phase, detail,
+          elapsedMillis, tokensIn, contextMax, queued, banner, width);
+    }
+
+    public Status(String title, String provider, Phase phase, String detail,
                   int tokensIn, int contextMax, int queued, String banner, int width) {
-      this(title, provider, phase, detail, -1, tokensIn, contextMax, queued, banner, width);
+      this(title, provider, ProviderAvailability.UNVERIFIED, phase, detail,
+          -1, tokensIn, contextMax, queued, banner, width);
+    }
+
+    public Status(String title, String provider, ProviderAvailability providerAvailability,
+                  Phase phase, String detail, int tokensIn, int contextMax, int queued,
+                  String banner, int width) {
+      this(title, provider, providerAvailability, phase, detail,
+          -1, tokensIn, contextMax, queued, banner, width);
     }
 
     public Status {
       title = Objects.requireNonNull(title, "title");
       provider = Objects.requireNonNull(provider, "provider");
+      providerAvailability =
+          Objects.requireNonNull(providerAvailability, "providerAvailability");
       phase = Objects.requireNonNull(phase, "phase");
       detail = Objects.requireNonNull(detail, "detail");
       banner = Objects.requireNonNull(banner, "banner");
@@ -62,11 +75,28 @@ public final class AppChrome {
   }
 
   public record Composer(String text, int cursor, Profile profile, Phase phase,
-                         int queued, boolean expanded, int width) {
+                         int queued, boolean expanded, String provider, String modelId,
+                         ProviderAvailability providerAvailability, int width) {
+    public Composer(String text, int cursor, Profile profile, Phase phase,
+                    int queued, boolean expanded, String provider, String modelId, int width) {
+      this(text, cursor, profile, phase, queued, expanded, provider, modelId,
+          ProviderAvailability.UNVERIFIED, width);
+    }
+
+    public Composer(String text, int cursor, Profile profile, Phase phase,
+                    int queued, boolean expanded, int width) {
+      this(text, cursor, profile, phase, queued, expanded, "", "",
+          ProviderAvailability.UNVERIFIED, width);
+    }
+
     public Composer {
       text = Objects.requireNonNull(text, "text");
       profile = Objects.requireNonNull(profile, "profile");
       phase = Objects.requireNonNull(phase, "phase");
+      provider = Objects.requireNonNull(provider, "provider");
+      modelId = Objects.requireNonNull(modelId, "modelId");
+      providerAvailability =
+          Objects.requireNonNull(providerAvailability, "providerAvailability");
       if (cursor < 0 || cursor > text.length() || queued < 0 || width < 8) {
         throw new IllegalArgumentException("invalid composer state or width");
       }
@@ -97,16 +127,21 @@ public final class AppChrome {
   }
 
   private record Hint(String key, String label) {}
+  private record HintGroup(String label, List<Hint> hints) {}
 
-  private static final List<Hint> HINTS = List.of(
-      new Hint("^K", "palette"), new Hint("^J", "threads"),
-      new Hint("^←→", "cycle"), new Hint("^T", "todo"),
-      new Hint("S-Tab", "profile"), new Hint("^/", "models"),
-      new Hint("^P", "provider"), new Hint("^N", "new"), new Hint("^C", "quit"));
+  private static final List<HintGroup> HINT_GROUPS = List.of(
+      new HintGroup("Navigate:", List.of(new Hint("Ctrl+J", "Threads"),
+          new Hint("Ctrl+←/→", "Threads"))),
+      new HintGroup("Actions:", List.of(new Hint("Ctrl+K", "Commands"),
+          new Hint("Ctrl+P", "Provider"), new Hint("Ctrl+/", "Models"))),
+      new HintGroup("Session:", List.of(new Hint("Ctrl+N", "New"),
+          new Hint("Shift+Tab", "Profile"), new Hint("Ctrl+T", "Todo"),
+          new Hint("Ctrl+C", "Quit"))));
   private static final String TAGLINE = "a calm middleware between you and the model";
-  private static final int FONT_WIDTH = 6;
-  private static final int FONT_HEIGHT = 7;
-  private static final String WORDMARK = ">AGENTTY";
+  private static final int FONT_WIDTH = 5;
+  private static final int FONT_HEIGHT = 5;
+  private static final int FONT_GAP = 1;
+  private static final String WORDMARK = "AJENT";
   private static final String[] SPINNER = {
       "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"
   };
@@ -116,35 +151,23 @@ public final class AppChrome {
   public static List<Row> welcome(Welcome config) {
     Objects.requireNonNull(config, "config");
     List<String> hints = hintLines(config.width() - 2);
-    int essential = 2 + hints.size();
-    boolean pixels = config.maxRows() >= essential + 5 && config.width() >= pixelWidth();
-    int sigilRows = pixels ? 5 : 1;
-    int spare = Math.clamp(config.maxRows() - essential - sigilRows, 0, 6);
-    boolean b0 = spare > 0, b1 = spare > 1, b2 = spare > 2;
-    boolean b3 = spare > 3, b4 = spare > 4, b5 = spare > 5;
+    boolean pixels = config.maxRows() >= 7 + hints.size()
+        && config.width() >= pixelWidth() + 4;
     var rows = new ArrayList<Row>();
-    if (b3) rows.add(row("", Tone.NORMAL));
     if (pixels) {
-      for (String line : pixelWordmark(config.animationAgeMillis())) {
+      for (String line : pixelWordmark()) {
         rows.add(row(center(line, config.width()), Tone.BRAND));
       }
     } else {
-      rows.add(row(center("» A G E N T T Y", config.width()), Tone.BRAND));
+      rows.add(row(center("AJENT", config.width()), Tone.BRAND));
     }
-    if (b0) rows.add(row("", Tone.NORMAL));
+    rows.add(row("", Tone.NORMAL));
     rows.add(row(center(TAGLINE, config.width()), Tone.MUTED));
-    if (b1) rows.add(row("", Tone.NORMAL));
-    if (b4) rows.add(row("", Tone.NORMAL));
-    String chips = compactModelBadge(config.modelId()) + "    ▌ "
-        + titleCase(config.profile().name()) + " ▐";
-    rows.add(row(center(chips, config.width()), Tone.ACCENT));
-    if (b2) rows.add(row("", Tone.NORMAL));
-    if (b5) rows.add(row("", Tone.NORMAL));
-    if (config.firstRun() && spare >= 6) {
+    if (config.firstRun() && config.maxRows() >= rows.size() + hints.size() + 9) {
+      rows.add(row("", Tone.NORMAL));
       addStarterCard(rows, config.width());
-      rows.add(row("", Tone.NORMAL));
-      rows.add(row("", Tone.NORMAL));
     }
+    rows.add(row("", Tone.NORMAL));
     for (String line : hints) rows.add(row(center(line, config.width()), Tone.MUTED));
     return List.copyOf(rows);
   }
@@ -153,7 +176,9 @@ public final class AppChrome {
     Objects.requireNonNull(config, "config");
     String left = phase(config);
     String right = config.provider();
-    if (config.contextMax() > 0) right += "  " + contextGauge(config.tokensIn(), config.contextMax());
+    if (config.tokensIn() > 0 && config.contextMax() > 0) {
+      right += "  " + contextGauge(config.tokensIn(), config.contextMax());
+    }
     String activity = joinMeasured(left, config.title(), right, config.width());
     var rows = new ArrayList<Row>();
     rows.add(row(activity, phaseTone(config.phase())));
@@ -171,11 +196,11 @@ public final class AppChrome {
     int inside = config.width() - 2;
     String border = "─".repeat(inside);
     var rows = new ArrayList<Row>();
-    rows.add(row("╭" + border + "╮", Tone.ACCENT));
+    rows.add(row("╭" + border + "╮", Tone.DIM));
 
     String placeholder = config.text().isEmpty() ? composerPlaceholder(config) : config.text();
     List<String> bodyLines = config.text().isEmpty()
-        ? List.of("❯ █" + placeholder)
+        ? List.of("❯ █  " + placeholder)
         : composerBodyLines(config.text(), config.cursor(), Math.max(1, inside - 2));
     int logicalRows = config.text().isEmpty() ? 1 : config.text().split("\\n", -1).length;
     int bodyRows = bodyLines.size() + Math.max(0, 2 - logicalRows);
@@ -184,24 +209,32 @@ public final class AppChrome {
       rows.add(row("│ " + fit(value, inside - 2) + " │", Tone.NORMAL));
     }
 
-    rows.add(row("│   " + "─".repeat(Math.max(0, inside - 4)) + " │", Tone.ACCENT));
-    String left = "↵ send  ·  ⇧↵ / ⌥↵ newline  ·  ^E expand";
-    String profile = "▎ " + letterSpaced(config.profile().name());
+    rows.add(row("│   " + "─".repeat(Math.max(0, inside - 4)) + " │", Tone.DIM));
+    String left = inside >= 70
+        ? "Enter send  ·  Shift+Enter newline  ·  Ctrl+E expand"
+        : "Enter send  ·  Shift+Enter newline";
+    String profile = titleCase(config.profile().name());
+    String identity = composerIdentity(config);
     String queued = config.queued() > 0
         ? "❚ " + String.format(Locale.ROOT, "%2d queued", config.queued()) + "  ·  "
         : "";
-    String right = columns(left) + columns(queued) + columns(profile) + 6 <= inside
-        ? queued + profile : profile;
+    String detailed = identity.isBlank() ? profile : identity;
+    String right = chooseComposerRight(left, inside, queued + detailed,
+        queued + config.provider(), queued + profile, profile);
+    if (!config.provider().isBlank() && (right.isBlank() || right.equals(profile))) {
+      left = "Enter send";
+      right = chooseComposerRight(left, inside, queued + config.provider(), profile);
+    }
     int content = inside;
-    int fixed = 3 + columns(left) + columns(right) + 2;
-    String hints = "   " + left + " ".repeat(Math.max(1, content - fixed)) + right + "  ";
+    int fixed = 2 + columns(left) + columns(right) + 2;
+    String hints = "  " + left + " ".repeat(Math.max(1, content - fixed)) + right + "  ";
     rows.add(row("│" + fit(hints, content) + "│", Tone.MUTED));
     int lineCount = config.text().split("\\n", -1).length;
     String caption = lineCount > 1 ? " " + lineCount + " lines " : "";
     rows.add(row(caption.isEmpty()
         ? "╰" + border + "╯"
         : "╰" + "─".repeat(Math.max(0, inside - columns(caption))) + caption + "╯",
-        Tone.ACCENT));
+        Tone.DIM));
     return List.copyOf(rows);
   }
 
@@ -212,9 +245,9 @@ public final class AppChrome {
     List<Row> activity = status(config);
     String middle = activity.getFirst().text();
     if (activity.size() > 1) middle = activity.getLast().text();
-    return List.of(row(rule, phaseTone(config.phase())),
+    return List.of(row(rule, Tone.DIM),
         row(fitStatusActivity(config, middle), phaseTone(config.phase())),
-        row(rule, phaseTone(config.phase())));
+        row(rule, Tone.DIM));
   }
 
   /** Maya's six-row bordered permission card. */
@@ -527,13 +560,13 @@ public final class AppChrome {
     Objects.requireNonNull(state, "state");
     if (state instanceof LoginModal.Closed) return List.of();
     if (width < 48) throw new IllegalArgumentException("login width must be at least 48");
-    var rows = pickerStart(" Sign in to agentty ", width);
+    var rows = pickerStart(" Sign in to Ajent ", width);
     switch (state) {
       case LoginModal.Picking ignored -> appendLoginPicking(rows, "", width);
       case LoginModal.Failed failed -> appendLoginPicking(rows, failed.message(), width);
       case LoginModal.OAuthCode oauth -> {
         rows.add(pickerBody("OAuth via claude.ai", width, Tone.NORMAL));
-        appendLoginText(rows, "Step 1 — open this URL and authorize agentty:", width,
+        appendLoginText(rows, "Step 1 — open this URL and authorize Ajent:", width,
             Tone.MUTED);
         rows.add(pickerBody("", width, Tone.NORMAL));
         appendLoginBox(rows, oauth.authorizeUri().toString(), width, Tone.ACCENT);
@@ -561,9 +594,9 @@ public final class AppChrome {
         rows.add(pickerBody(label + " API key", width, Tone.NORMAL));
         appendLoginText(rows, anthropic
             ? "Paste an sk-ant-… key. It will be saved to "
-                + "~/.config/agentty/credentials.json (0600)."
+                + "~/.config/ajent/credentials.json (0600)."
             : "Paste your " + label + " API key to switch to it. It's saved to "
-                + "~/.config/agentty settings so you won't be asked again.",
+                + "~/.config/ajent settings so you won't be asked again.",
             width, Tone.MUTED);
         rows.add(pickerBody("", width, Tone.NORMAL));
         appendLoginInput(rows, key.key().text(), true,
@@ -622,9 +655,9 @@ public final class AppChrome {
 
   private static String changeHints(String label, int width) {
     String[] ladder = {
-        "Ctrl+R review  A accept  X reject",
-        "A accept  X reject",
-        "A accept  ",
+        "Ctrl+R review  Shift+A accept  Shift+X reject",
+        "Shift+A accept  Shift+X reject",
+        "Shift+A accept",
         ""
     };
     for (String candidate : ladder) {
@@ -861,23 +894,13 @@ public final class AppChrome {
       return fit("▎ " + banner.stripTrailing(), config.width());
     }
     String phase = phase(config);
-    String full = " ▌ " + phase + " " + idleTokenStream() + "   ·   "
-        + fullStatusRight(config);
-    if (columns(full) <= config.width()) {
-      return fit(full, config.width());
-    }
     int gaugeCells = 10;
     String right = statusRight(config, gaugeCells);
-    String left = "▌ " + phase;
-    int fixed = 3 + columns(phase) + columns(right);
-    int leftover = config.width() - fixed - 7;
-    String title = config.title().isBlank() || leftover < 14 ? ""
-        : "▎ " + truncate(config.title(), Math.min(leftover, 28)) + "   ·   ";
+    String left = phase;
+    int availableTitle = config.width() - columns(left) - columns(right) - 8;
+    String title = config.phase() != Phase.IDLE || config.title().isBlank() || availableTitle < 8 ? ""
+        : "▎ " + truncate(config.title(), Math.min(availableTitle, 36)) + "  ·  ";
     int used = 1 + columns(title) + columns(left) + columns(right);
-
-    // Maya measures the fixed groups before admitting the breadcrumb. A short title can then
-    // consume one more cell than its measured leftover (the edge glyph and its space), and the
-    // flex row takes that cell from the context bar while preserving its percentage suffix.
     if (used > config.width() && config.contextMax() > 0) {
       gaugeCells = Math.max(0, gaugeCells - (used - config.width()));
       right = statusRight(config, gaugeCells);
@@ -888,22 +911,14 @@ public final class AppChrome {
   }
 
   private static String statusRight(Status config, int gaugeCells) {
-    String right = "● " + config.provider();
-    if (config.contextMax() > 0) right += " · "
+    String right = switch (config.providerAvailability()) {
+      case UNVERIFIED -> "Connection not checked";
+      case CONNECTED -> "Connected";
+      case UNAVAILABLE -> "Provider unavailable · " + config.provider();
+    };
+    if (config.tokensIn() > 0 && config.contextMax() > 0) right += " · "
         + compactNativeContextGauge(config.tokensIn(), config.contextMax(), gaugeCells);
     return right + " ";
-  }
-
-  private static String fullStatusRight(Status config) {
-    String right = "● " + config.provider();
-    if (config.contextMax() > 0) {
-      right += " · " + fullNativeContextGauge(config.tokensIn(), config.contextMax());
-    }
-    return right;
-  }
-
-  private static String idleTokenStream() {
-    return "⚡   0.0 t/s " + "▁".repeat(16);
   }
 
   private static String fullNativeContextGauge(int used, int maximum) {
@@ -1012,17 +1027,6 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
-  private static String compactModelBadge(String modelId) {
-    String value = modelId == null ? "" : modelId;
-    String lower = value.toLowerCase(Locale.ROOT);
-    String label = lower.contains("opus") ? "Opus"
-        : lower.contains("sonnet") ? "Sonnet"
-        : lower.contains("haiku") ? "Haiku"
-        : lower.contains("gpt") ? "GPT"
-        : lower.contains("gemini") ? "Gemini" : value;
-    return "● " + label;
-  }
-
   private static String titleCase(String value) {
     if (value.isEmpty()) return value;
     return value.substring(0, 1).toUpperCase(Locale.ROOT)
@@ -1032,6 +1036,24 @@ public final class AppChrome {
   private static String letterSpaced(String value) {
     return String.join(" ", value.toUpperCase(Locale.ROOT).chars()
         .mapToObj(codePoint -> Character.toString(codePoint)).toList());
+  }
+
+  private static String composerIdentity(Composer config) {
+    String provider = switch (config.providerAvailability()) {
+      case UNVERIFIED, CONNECTED -> config.provider();
+      case UNAVAILABLE -> config.provider().isBlank() ? "" : config.provider() + " (unavailable)";
+    };
+    if (provider.isBlank()) return config.modelId();
+    if (config.modelId().isBlank()) return provider;
+    return provider + " · " + config.modelId();
+  }
+
+  private static String chooseComposerRight(
+      String left, int width, String... candidates) {
+    for (String candidate : candidates) {
+      if (columns(left) + columns(candidate) + 5 <= width) return candidate;
+    }
+    return "";
   }
 
   private static void addStarterCard(List<Row> rows, int width) {
@@ -1094,43 +1116,42 @@ public final class AppChrome {
 
   private static List<String> hintLines(int available) {
     boolean keysOnly = available > 0 && available < 40;
-    var chips = new ArrayList<String>();
-    chips.add("type to begin");
-    for (Hint hint : HINTS) chips.add(keysOnly ? hint.key() : hint.key() + " " + hint.label());
     int maximum = available > 0 ? available : Integer.MAX_VALUE;
     var rows = new ArrayList<String>();
-    var line = new StringBuilder();
-    for (String chip : chips) {
-      String addition = line.isEmpty() ? chip : "  ·  " + chip;
-      if (!line.isEmpty() && columns(line + addition) > maximum) {
-        rows.add(line.toString());
-        line.setLength(0);
-        addition = chip;
+    for (HintGroup group : HINT_GROUPS) {
+      var line = new StringBuilder(keysOnly ? "" : group.label());
+      for (Hint hint : group.hints()) {
+        String chip = keysOnly ? hint.key() : hint.key() + " " + hint.label();
+        String addition = line.isEmpty() ? chip : keysOnly ? "  ·  " + chip
+            : line.toString().equals(group.label()) ? "  " + chip : "  ·  " + chip;
+        if (!line.isEmpty() && columns(line + addition) > maximum) {
+          rows.add(line.toString());
+          line.setLength(0);
+          addition = chip;
+        }
+        line.append(addition);
       }
-      line.append(addition);
+      if (!line.isEmpty()) rows.add(line.toString());
     }
-    rows.add(line.toString());
     return List.copyOf(rows);
   }
 
-  private static List<String> pixelWordmark(long animationAgeMillis) {
+  private static List<String> pixelWordmark() {
     int width = pixelWidth();
-    boolean[][] pixels = new boolean[10][width];
+    boolean[][] pixels = new boolean[6][width];
     for (int glyphIndex = 0; glyphIndex < WORDMARK.length(); glyphIndex++) {
       String[] glyph = glyph(WORDMARK.charAt(glyphIndex));
-      int x = glyphIndex * (FONT_WIDTH + 1);
-      int dy = animationAgeMillis < 0 ? 0 : wordmarkOffset(glyphIndex, animationAgeMillis);
+      int x = glyphIndex * (FONT_WIDTH + FONT_GAP);
       for (int row = 0; row < FONT_HEIGHT; row++) {
         for (int column = 0; column < FONT_WIDTH; column++) {
-          int y = row + 1 + dy;
-          if (glyph[row].charAt(column) == '#' && y >= 0 && y < pixels.length) {
-            pixels[y][x + column] = true;
+          if (glyph[row].charAt(column) == '#') {
+            pixels[row][x + column] = true;
           }
         }
       }
     }
-    var rows = new ArrayList<String>(5);
-    for (int row = 0; row < 10; row += 2) {
+    var rows = new ArrayList<String>(4);
+    for (int row = 0; row < 6; row += 2) {
       var line = new StringBuilder(width);
       for (int column = 0; column < width; column++) {
         boolean top = pixels[row][column], bottom = pixels[row + 1][column];
@@ -1141,38 +1162,20 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
-  private static int wordmarkOffset(int glyphIndex, long ageMillis) {
-    int dropStart = glyphIndex * 100;
-    int dropEnd = dropStart + 500;
-    if (ageMillis < dropStart) return -9;
-    if (ageMillis < dropEnd) {
-      double progress = (ageMillis - dropStart) / 500.0;
-      double eased = 1.0 - Math.pow(1.0 - progress, 3);
-      return roundAwayFromZero(-9.0 * (1.0 - eased));
-    }
-    double phase = 2.0 * Math.PI * (ageMillis - dropEnd) / 2_200.0
-        + glyphIndex * 0.7;
-    return roundAwayFromZero(Math.sin(phase) * 1.5);
-  }
-
-  private static int roundAwayFromZero(double value) {
-    return value < 0 ? (int) Math.ceil(value - 0.5) : (int) Math.floor(value + 0.5);
-  }
-
   private static String[] glyph(char value) {
     return switch (value) {
-      case '>' -> new String[]{"      ", "#  #  ", "## ## ", " ## ##", "## ## ", "#  #  ", "      "};
-      case 'A' -> new String[]{"  ##  ", " #  # ", "#    #", "######", "#    #", "#    #", "#    #"};
-      case 'G' -> new String[]{" #### ", "#    #", "#     ", "#  ###", "#    #", "#    #", " #### "};
-      case 'E' -> new String[]{"######", "#     ", "#     ", "##### ", "#     ", "#     ", "######"};
-      case 'N' -> new String[]{"#    #", "##   #", "# #  #", "#  # #", "#   ##", "#    #", "#    #"};
-      case 'T' -> new String[]{"######", "  ##  ", "  ##  ", "  ##  ", "  ##  ", "  ##  ", "  ##  "};
-      case 'Y' -> new String[]{"#    #", "#    #", " #  # ", "  ##  ", "  ##  ", "  ##  ", "  ##  "};
-      default -> new String[]{"      ", "      ", "      ", "      ", "      ", "      ", "      "};
+      case 'A' -> new String[]{" ### ", "#   #", "#####", "#   #", "#   #"};
+      case 'J' -> new String[]{"#####", "   # ", "   # ", "#  # ", " ##  "};
+      case 'E' -> new String[]{"#####", "#    ", "#### ", "#    ", "#####"};
+      case 'N' -> new String[]{"#   #", "##  #", "# # #", "#  ##", "#   #"};
+      case 'T' -> new String[]{"#####", "  #  ", "  #  ", "  #  ", "  #  "};
+      default -> new String[]{"     ", "     ", "     ", "     ", "     "};
     };
   }
 
-  private static int pixelWidth() { return WORDMARK.length() * FONT_WIDTH + WORDMARK.length() - 1; }
+  private static int pixelWidth() {
+    return WORDMARK.length() * FONT_WIDTH + (WORDMARK.length() - 1) * FONT_GAP;
+  }
   private static Row row(String text, Tone tone) { return new Row(text, tone); }
 
   private static String center(String value, int width) {

@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 final class RagCorpusCache {
-  static final String FILE_NAME = ".agentty_rag_cache.bin";
+  static final String FILE_NAME = ".ajent_rag_cache.bin";
   private static final int MAGIC_V3 = 0x52414703;
   private static final long MAX_CACHE_BYTES = 512L * 1024 * 1024;
   private static final int MAX_RECORDS = 10_000_000;

@@ -7,8 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/** Canonical AgenTTY search_docs retrieval funnel over all configured knowledge sources. */
-public final class AgenttyDocRetriever implements HostServices.DocRetriever {
+/** Canonical Ajent search_docs retrieval funnel over all configured knowledge sources. */
+public final class AjentDocRetriever implements HostServices.DocRetriever {
   private final Path docsRoot;
   private final SkillsKnowledgeSource skills;
   private final MemoryKnowledgeSource memory;
@@ -23,13 +23,13 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
   private final EmbeddingClient.Config embeddingConfig;
   private boolean docsBuilt;
 
-  public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
+  public AjentDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
                              MemoryKnowledgeSource memory, KnowledgeSource mcp,
                              boolean skillsEnabled, boolean memoryEnabled) {
     this(docsRoot, skills, memory, mcp, skillsEnabled, memoryEnabled, null, null, null, null);
   }
 
-  public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
+  public AjentDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
                              MemoryKnowledgeSource memory, KnowledgeSource mcp,
                              boolean skillsEnabled, boolean memoryEnabled,
                              RagQueryExpander expander, RagQueryExpander.Config expansionConfig) {
@@ -37,7 +37,7 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
         null, null);
   }
 
-  public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
+  public AjentDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
                              MemoryKnowledgeSource memory, KnowledgeSource mcp,
                              boolean skillsEnabled, boolean memoryEnabled,
                              RagQueryExpander expander, RagQueryExpander.Config expansionConfig,
@@ -46,7 +46,7 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
         neuralReranker, neuralConfig, new RagCorpus(), EmbeddingClient.Config.disabled());
   }
 
-  public AgenttyDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
+  public AjentDocRetriever(Path docsRoot, SkillsKnowledgeSource skills,
                              MemoryKnowledgeSource memory, KnowledgeSource mcp,
                              boolean skillsEnabled, boolean memoryEnabled,
                              RagQueryExpander expander, RagQueryExpander.Config expansionConfig,
@@ -80,7 +80,7 @@ public final class AgenttyDocRetriever implements HostServices.DocRetriever {
       if (memoryEnabled && memory != null) router.add(memory);
       if (mcp != null) router.add(mcp);
       if (router.sourceCount() == 0) return new HostServices.DocResponse(List.of(), "",
-          "no knowledge configured. Set AGENTTY_DOCS_DIR to a folder of documents "
+          "no knowledge configured. Set AJENT_DOCS_DIR to a folder of documents "
               + "(markdown/text/etc.), create ./docs, install skills, or store memories to give "
               + "search_docs something to retrieve from.");
 

@@ -112,9 +112,9 @@ class ToolRuntimeFactoryTest {
       }
     };
     Map<String, String> environment = Map.of(
-        "AGENTTY_RAG_SKILLS", "0", "AGENTTY_RAG_MEMORY", "false",
-        "AGENTTY_RAG_MCP", "1", "AGENTTY_EMBED_MODEL", "custom-embed",
-        "AGENTTY_OLLAMA_HOST", "ollama.test:1234");
+        "AJENT_RAG_SKILLS", "0", "AJENT_RAG_MEMORY", "false",
+        "AJENT_RAG_MCP", "1", "AJENT_EMBED_MODEL", "custom-embed",
+        "AJENT_OLLAMA_HOST", "ollama.test:1234");
     ToolDispatcher enabled = ToolRuntimeFactory.create(new ToolRuntimeFactory.Configuration(
         workspace, workspace, home, null, request -> {
           throw new AssertionError();
@@ -130,7 +130,7 @@ class ToolRuntimeFactoryTest {
         workspace, workspace, home, null, request -> {
           throw new AssertionError();
         }, null, null, new com.github.skanga.ajent.tools.process.ProcessRunner(), external,
-        Map.of("AGENTTY_RAG_SKILLS", "0", "AGENTTY_RAG_MEMORY", "0")));
+        Map.of("AJENT_RAG_SKILLS", "0", "AJENT_RAG_MEMORY", "0")));
     assertThat(disabled.execute("search_docs", object().put("query", "remote sentinel")))
         .isInstanceOfSatisfying(ToolResult.Failure.class,
             failure -> assertThat(failure.error().detail()).contains("no knowledge configured"));
@@ -175,12 +175,12 @@ class ToolRuntimeFactoryTest {
     server.start();
     try {
       Map<String, String> environment = Map.of(
-          "AGENTTY_RAG_SKILLS", "0", "AGENTTY_RAG_MEMORY", "0",
-          "AGENTTY_EMBED_MODEL", "embed-model", "AGENTTY_OLLAMA_HOST",
+          "AJENT_RAG_SKILLS", "0", "AJENT_RAG_MEMORY", "0",
+          "AJENT_EMBED_MODEL", "embed-model", "AJENT_OLLAMA_HOST",
           "127.0.0.1:" + server.getAddress().getPort(),
-          "AGENTTY_RAG_EXPAND", "1", "AGENTTY_RAG_EXPAND_MODEL", "expand-model",
-          "AGENTTY_RAG_EXPAND_N", "2", "AGENTTY_RAG_NEURAL", "true",
-          "AGENTTY_RAG_NEURAL_MODEL", "rank-model");
+          "AJENT_RAG_EXPAND", "1", "AJENT_RAG_EXPAND_MODEL", "expand-model",
+          "AJENT_RAG_EXPAND_N", "2", "AJENT_RAG_NEURAL", "true",
+          "AJENT_RAG_NEURAL_MODEL", "rank-model");
       ToolDispatcher dispatcher = ToolRuntimeFactory.create(new ToolRuntimeFactory.Configuration(
           workspace, workspace, home, docs, request -> {
             throw new AssertionError();
@@ -260,7 +260,7 @@ class ToolRuntimeFactoryTest {
 
     assertSuccess(dispatcher.execute("remember", object().put("text", "e2e sentinel fact alpha")
         .put("scope", "user")), "Remembered");
-    assertThat(workspace.resolve(".agentty/memory.jsonl")).isRegularFile();
+    assertThat(workspace.resolve(".ajent/memory.jsonl")).isRegularFile();
     assertSuccess(dispatcher.execute("forget", object().put("substring", "sentinel fact")
         .put("dry_run", true)), "alpha");
     success(dispatcher.execute("forget", object().put("substring", "sentinel fact")));

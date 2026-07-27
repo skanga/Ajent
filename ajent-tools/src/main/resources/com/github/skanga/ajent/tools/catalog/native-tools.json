@@ -343,7 +343,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Fetch a URL (HTTPS, follows redirects). For HTML pages, returns extracted plain text with links preserved as [text](url) — not raw HTML. Up to 64KB of cleaned content. Use for docs, articles, APIs. Supports #fragment to clip the output to that section. JS/SPA pages are auto-rendered via r.jina.ai when the primary fetch returns a near-empty shell (disable per-request by sending a `x-no-jina: 1` header, or globally by setting AGENTTY_NO_JINA=1).",
+    "description": "Fetch a URL (HTTPS, follows redirects). For HTML pages, returns extracted plain text with links preserved as [text](url) — not raw HTML. Up to 64KB of cleaned content. Use for docs, articles, APIs. Supports #fragment to clip the output to that section. JS/SPA pages are auto-rendered via r.jina.ai when the primary fetch returns a near-empty shell (disable per-request by sending a `x-no-jina: 1` header, or globally by setting AJENT_NO_JINA=1).",
     "inputSchema": {
       "properties": {
         "display_description": {

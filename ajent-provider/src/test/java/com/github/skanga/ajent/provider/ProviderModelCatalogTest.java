@@ -3,6 +3,9 @@ package com.github.skanga.ajent.provider;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
+import com.github.skanga.ajent.provider.codex.CodexAuthManager;
+import com.github.skanga.ajent.provider.codex.CodexCredentialStore;
+import com.github.skanga.ajent.provider.codex.CodexCredentials;
 import com.github.skanga.ajent.provider.openai.Endpoint;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -150,6 +153,57 @@ class ProviderModelCatalogTest {
     assertThat(catalog.listAnthropicModels(new ProviderAuth.ApiKey("key"),
         URI.create(base + "/bad"))).isEqualTo(
             catalog.listAnthropicModels(new ProviderAuth.Empty()));
+  }
+
+  @Test void codexDiscoversSubscriptionModelsWithAccountHeaders() throws Exception {
+    start();
+    server.createContext("/models", exchange -> {
+      assertThat(exchange.getRequestURI().getQuery()).isEqualTo("client_version=0.2.8");
+      assertThat(exchange.getRequestHeaders().getFirst("authorization"))
+          .isEqualTo("Bearer access");
+      assertThat(exchange.getRequestHeaders().getFirst("chatgpt-account-id"))
+          .isEqualTo("acct");
+      json(exchange, 200, """
+          {"models":[{"slug":"gpt-5.2-codex","display_name":"GPT-5.2 Codex",
+          "context_window":272000},{"slug":""}]}
+          """);
+    });
+    var store = new CodexCredentialStore(
+        java.nio.file.Files.createTempDirectory("codex-models").resolve("auth"), "seed");
+    assertThat(store.save(new CodexCredentials(
+        "access", "", "", "acct", Long.MAX_VALUE, 0))).isTrue();
+    var auth = new CodexAuthManager(store, HttpClient.newHttpClient(),
+        URI.create("http://127.0.0.1/unused"), "client", System::currentTimeMillis);
+
+    List<ProviderModel> models = new ProviderModelCatalog(HttpClient.newHttpClient())
+        .listCodexModels(auth, URI.create("http://127.0.0.1:"
+            + server.getAddress().getPort() + "/models"), "0.2.8");
+
+    assertThat(models).containsExactly(new ProviderModel(
+        "gpt-5.2-codex", "GPT-5.2 Codex", "codex",
+        java.util.Optional.of(true), 272_000));
+  }
+
+  @Test void codexDiscoveryReturnsTypedHttpAndEmptyCatalogFailures() throws Exception {
+    start();
+    server.createContext("/denied", exchange -> json(exchange, 401, "{}"));
+    server.createContext("/empty", exchange -> json(exchange, 200, "{\"models\":[]}"));
+    var store = new CodexCredentialStore(
+        java.nio.file.Files.createTempDirectory("codex-model-errors").resolve("auth"), "seed");
+    assertThat(store.save(new CodexCredentials(
+        "access", "", "", "acct", Long.MAX_VALUE, 0))).isTrue();
+    var auth = new CodexAuthManager(store, HttpClient.newHttpClient(),
+        URI.create("http://127.0.0.1/unused"), "client", System::currentTimeMillis);
+    var catalog = new ProviderModelCatalog(HttpClient.newHttpClient());
+    String base = "http://127.0.0.1:" + server.getAddress().getPort();
+
+    assertThat(catalog.discoverCodexModels(auth, URI.create(base + "/denied"), "0.2.8"))
+        .isEqualTo(new ProviderModelCatalog.Discovery.Failure(
+            ProviderModelCatalog.FailureKind.AUTHENTICATION,
+            "model discovery returned HTTP 401"));
+    assertThat(catalog.discoverCodexModels(auth, URI.create(base + "/empty"), "0.2.8"))
+        .isEqualTo(new ProviderModelCatalog.Discovery.Failure(
+            ProviderModelCatalog.FailureKind.EMPTY_CATALOG, "Codex returned no models"));
   }
 
   private void start() throws IOException {

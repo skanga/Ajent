@@ -2,8 +2,10 @@ package com.github.skanga.ajent.provider;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import com.github.skanga.ajent.provider.auth.ProviderAuth;
+import com.github.skanga.ajent.provider.codex.CodexAuthManager;
+import com.github.skanga.ajent.provider.codex.CodexClientVersion;
 import com.github.skanga.ajent.provider.openai.Endpoint;
 import com.github.skanga.ajent.provider.openai.OpenAiWire;
 import java.io.IOException;
@@ -20,6 +22,20 @@ import java.util.Optional;
 
 /** Discovers hosted OpenAI-compatible and local Ollama models. */
 public final class ProviderModelCatalog {
+  public enum FailureKind { AUTHENTICATION, TRANSPORT, INVALID_RESPONSE, EMPTY_CATALOG }
+
+  public sealed interface Discovery {
+    record Success(List<ProviderModel> models) implements Discovery {
+      public Success { models = List.copyOf(models); }
+    }
+    record Failure(FailureKind kind, String detail) implements Discovery {
+      public Failure {
+        Objects.requireNonNull(kind, "kind");
+        Objects.requireNonNull(detail, "detail");
+      }
+    }
+  }
+
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final int MODELS_BODY_MAX = 2 * 1024 * 1024;
   private static final int SHOW_BODY_MAX = 512 * 1024;
@@ -51,7 +67,7 @@ public final class ProviderModelCatalog {
       return endpoint.nativeApi()
           ? ollamaModels(root, auth, endpoint) : openAiModels(root, endpoint);
     } catch (IOException | RuntimeException exception) {
-      AgenttyDebugLog.log("openai.list_models.parse", exception);
+      AjentDebugLog.log("openai.list_models.parse", exception);
       return List.of();
     } catch (InterruptedException exception) {
       java.lang.Thread.currentThread().interrupt();
@@ -62,6 +78,79 @@ public final class ProviderModelCatalog {
   /** Lists Anthropic models, with AgenTTY's stable offline seed as the floor. */
   public List<ProviderModel> listAnthropicModels(ProviderAuth auth) {
     return listAnthropicModels(auth, ANTHROPIC_MODELS);
+  }
+
+  /** Discovers models enabled for the authenticated ChatGPT Codex account. */
+  public List<ProviderModel> listCodexModels(CodexAuthManager auth) {
+    return listCodexModels(auth,
+        URI.create("https://chatgpt.com/backend-api/codex/models"));
+  }
+
+  public List<ProviderModel> listCodexModels(CodexAuthManager auth, URI endpoint) {
+    return listCodexModels(auth, endpoint, CodexClientVersion.detect());
+  }
+
+  public List<ProviderModel> listCodexModels(
+      CodexAuthManager auth, URI endpoint, String clientVersion) {
+    Discovery discovery = discoverCodexModels(auth, endpoint, clientVersion);
+    return discovery instanceof Discovery.Success success ? success.models() : List.of();
+  }
+
+  public Discovery discoverCodexModels(
+      CodexAuthManager auth, URI endpoint, String clientVersion) {
+    Objects.requireNonNull(auth, "auth");
+    Objects.requireNonNull(endpoint, "endpoint");
+    Objects.requireNonNull(clientVersion, "clientVersion");
+    try {
+      List<ProviderModel> result = loadCodexModels(auth, endpoint, clientVersion);
+      return result.isEmpty()
+          ? new Discovery.Failure(FailureKind.EMPTY_CATALOG, "Codex returned no models")
+          : new Discovery.Success(result);
+    } catch (ModelDiscoveryException exception) {
+      AjentDebugLog.log("codex.list_models", exception);
+      return new Discovery.Failure(exception.kind(), exception.getMessage());
+    } catch (IOException | RuntimeException exception) {
+      AjentDebugLog.log("codex.list_models", exception);
+      return new Discovery.Failure(FailureKind.TRANSPORT,
+          exception.getMessage() == null ? exception.getClass().getSimpleName()
+              : exception.getMessage());
+    } catch (InterruptedException exception) {
+      java.lang.Thread.currentThread().interrupt();
+      return new Discovery.Failure(FailureKind.TRANSPORT, "model discovery interrupted");
+    }
+  }
+
+  private List<ProviderModel> loadCodexModels(
+      CodexAuthManager auth, URI endpoint, String clientVersion)
+      throws IOException, InterruptedException {
+    CodexAuthManager.Headers headers;
+    try {
+      headers = auth.headers();
+    } catch (RuntimeException exception) {
+      throw new ModelDiscoveryException(FailureKind.AUTHENTICATION,
+          exception.getMessage() == null ? "Codex credentials unavailable" : exception.getMessage(),
+          exception);
+    }
+    String separator = endpoint.getQuery() == null ? "?" : "&";
+    URI uri = URI.create(endpoint + separator + "client_version="
+        + java.net.URLEncoder.encode(clientVersion, StandardCharsets.UTF_8));
+    HttpRequest request = HttpRequest.newBuilder(uri)
+        .timeout(Duration.ofSeconds(10))
+        .header("accept", "application/json")
+        .header("authorization", headers.authorization())
+        .header("chatgpt-account-id", headers.accountId())
+        .header("user-agent", "ajent/0.2.8")
+        .GET().build();
+    JsonNode root = sendJson(request, MODELS_BODY_MAX);
+    var result = new ArrayList<ProviderModel>();
+    var seen = new java.util.HashSet<String>();
+    for (JsonNode value : root.path("models")) {
+      String id = value.path("slug").asText();
+      if (id.isBlank() || !seen.add(id)) continue;
+      result.add(new ProviderModel(id, value.path("display_name").asText(id), "codex",
+          Optional.of(true), value.path("context_window").asInt(0)));
+    }
+    return List.copyOf(result);
   }
 
   List<ProviderModel> listAnthropicModels(ProviderAuth auth, URI endpoint) {
@@ -95,7 +184,7 @@ public final class ProviderModelCatalog {
       }
       return result.isEmpty() ? ANTHROPIC_SEED : List.copyOf(result);
     } catch (IOException | RuntimeException exception) {
-      AgenttyDebugLog.log("anthropic.list_models.parse", exception);
+      AjentDebugLog.log("anthropic.list_models.parse", exception);
       return ANTHROPIC_SEED;
     } catch (InterruptedException exception) {
       java.lang.Thread.currentThread().interrupt();
@@ -165,7 +254,7 @@ public final class ProviderModelCatalog {
       }
       return new Probe(supportsTools, contextWindow);
     } catch (IOException | RuntimeException failure) {
-      AgenttyDebugLog.log("openai.probe_ollama_model.parse", failure);
+      AjentDebugLog.log("openai.probe_ollama_model.parse", failure);
       return Probe.UNKNOWN;
     }
   }
@@ -175,11 +264,38 @@ public final class ProviderModelCatalog {
     HttpResponse<java.io.InputStream> response =
         client.send(request, HttpResponse.BodyHandlers.ofInputStream());
     try (var body = response.body()) {
-      if (response.statusCode() != 200) return null;
+      if (response.statusCode() != 200) {
+        FailureKind kind = response.statusCode() == 401 || response.statusCode() == 403
+            ? FailureKind.AUTHENTICATION : FailureKind.TRANSPORT;
+        throw new ModelDiscoveryException(kind,
+            "model discovery returned HTTP " + response.statusCode());
+      }
       byte[] bytes = body.readNBytes(maximumBytes + 1);
-      if (bytes.length > maximumBytes) return null;
-      return JSON.readTree(bytes);
+      if (bytes.length > maximumBytes) {
+        throw new ModelDiscoveryException(
+            FailureKind.INVALID_RESPONSE, "model catalog response is too large");
+      }
+      try {
+        return JSON.readTree(bytes);
+      } catch (IOException exception) {
+        throw new ModelDiscoveryException(
+            FailureKind.INVALID_RESPONSE, "invalid model catalog response", exception);
+      }
     }
+  }
+
+  private static final class ModelDiscoveryException extends IOException {
+    private static final long serialVersionUID = 1L;
+    private final FailureKind kind;
+    ModelDiscoveryException(FailureKind kind, String message) {
+      super(message);
+      this.kind = kind;
+    }
+    ModelDiscoveryException(FailureKind kind, String message, Throwable cause) {
+      super(message, cause);
+      this.kind = kind;
+    }
+    FailureKind kind() { return kind; }
   }
 
   private record Probe(Optional<Boolean> supportsTools, int contextWindow) {

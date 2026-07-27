@@ -20,17 +20,20 @@ import com.github.skanga.ajent.core.persistence.SettingsStore;
 import com.github.skanga.ajent.core.persistence.Settings;
 import com.github.skanga.ajent.domain.ModelId;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
+import com.github.skanga.ajent.provider.stream.StreamEvent;
 import com.github.skanga.ajent.runtime.AgentState;
 import com.github.skanga.ajent.runtime.PermissionPort;
 import com.github.skanga.ajent.runtime.RuntimeMessage;
 import com.github.skanga.ajent.terminal.JLineTerminalSession;
 import com.github.skanga.ajent.terminal.input.TerminalKey;
+import com.github.skanga.ajent.terminal.input.TerminalEvent;
 import com.github.skanga.ajent.terminal.ui.LoginModal;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.http.HttpClient;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -47,6 +50,31 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 final class InteractiveCommandTest {
+  @Test void pageKeysProvideTranscriptScrollbackInsideTheAlternateScreen() {
+    var messages = new ArrayList<Message>();
+    for (int index = 0; index < 20; index++) {
+      messages.add(new Message(index % 2 == 0 ? Role.USER : Role.ASSISTANT,
+          "transcript row " + index, List.of(), List.of()));
+    }
+    var state = new AtomicReference<>(AgentState.initial(thread(messages)));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(50, 10);
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+
+    ui.render();
+    assertThat(ui.renderedText()).contains("PageUp: transcript history");
+    ui.key(special(TerminalKey.SpecialKey.PAGE_UP), agent);
+
+    assertThat(ui.historyScrollRows()).isPositive();
+    assertThat(ui.renderedText()).contains("History", "transcript row");
+
+    ui.key(special(TerminalKey.SpecialKey.PAGE_DOWN), agent);
+    ui.key(special(TerminalKey.SpecialKey.END), agent);
+    assertThat(ui.historyScrollRows()).isZero();
+  }
+
   @TempDir Path directory;
 
   @Test void configurationRejectsBadWorkspaceProfileAndSandboxThenComposesLocal() throws Exception {
@@ -71,7 +99,7 @@ final class InteractiveCommandTest {
     assertThat(command.configure(CliArguments.parse(new String[] {
         "--model", "persisted-before-sandbox", "--sandbox", "invalid"}), stream(error)))
         .isNull();
-    assertThat(new SettingsStore(directory.resolve(".agentty")).load().modelId().value())
+    assertThat(new SettingsStore(directory.resolve(".ajent")).load().modelId().value())
         .isEqualTo("persisted-before-sandbox");
 
     var configured = command.configure(CliArguments.parse(new String[] {
@@ -99,11 +127,11 @@ final class InteractiveCommandTest {
     assertThat(defaults.model()).isEqualTo("local");
     assertThat(defaults.providerConfiguration().provider()).isEqualTo("ollama");
 
-    var invalidDocs = command(Map.of("AGENTTY_DOCS_DIR", "\0"));
+    var invalidDocs = command(Map.of("AJENT_DOCS_DIR", "\0"));
     assertThat(invalidDocs.configure(CliArguments.parse(new String[] {
         "--sandbox", "off", "--provider", "ollama"}), stream(error))).isNotNull();
     Path knowledgeWorkspace = directory.resolve("knowledge-workspace");
-    java.nio.file.Files.createDirectories(knowledgeWorkspace.resolve(".agentty/knowledge"));
+    java.nio.file.Files.createDirectories(knowledgeWorkspace.resolve(".ajent/knowledge"));
     assertThat(command(Map.of()).configure(CliArguments.parse(new String[] {
         "--sandbox", "off", "--provider", "ollama", "--workspace",
         knowledgeWorkspace.toString()}), stream(error))).isNotNull();
@@ -115,7 +143,7 @@ final class InteractiveCommandTest {
   }
 
   @Test void interactiveStartupRehydratesProfileAndAlwaysAllowedTools() {
-    var store = new SettingsStore(directory.resolve(".agentty"));
+    var store = new SettingsStore(directory.resolve(".ajent"));
     assertThat(store.save(new Settings(new ModelId("local"), Profile.MINIMAL, List.of(),
         "ollama", Map.of(), Map.of("ollama", "local"), "", List.of("bash"))))
         .isTrue();
@@ -154,8 +182,188 @@ final class InteractiveCommandTest {
     });
   }
 
+  @Test void startupUsesAjentStateAndNeverImportsLegacyAgenttySettings() {
+    var legacy = new SettingsStore(directory.resolve(".agentty"));
+    assertThat(legacy.save(Settings.defaults()
+        .withProviderModel("ollama", new ModelId("qwen2.5-coder:7b")))).isTrue();
+
+    var configured = command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off"}), stream(new ByteArrayOutputStream()));
+
+    assertThat(configured).isNotNull();
+    assertThat(configured.dataDirectory()).isEqualTo(directory.resolve(".ajent"));
+    assertThat(configured.providerConfiguration().provider()).isEqualTo("anthropic");
+    assertThat(configured.model()).isEqualTo("claude-opus-4-5");
+
+    var missingModelError = new ByteArrayOutputStream();
+    assertThat(command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off", "--provider", "openai"}),
+        stream(missingModelError))).isNull();
+    assertThat(missingModelError.toString(StandardCharsets.UTF_8))
+        .contains("requires --model on first use");
+
+    var selected = command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off", "--provider", "openai", "--model", "gpt-5"}),
+        stream(new ByteArrayOutputStream()));
+    assertThat(selected).isNotNull();
+    assertThat(new SettingsStore(directory.resolve(".ajent")).load()).satisfies(settings -> {
+      assertThat(settings.provider()).isEqualTo("openai");
+      assertThat(settings.modelId().value()).isEqualTo("gpt-5");
+    });
+    assertThat(legacy.load().provider()).isEqualTo("ollama");
+  }
+
+  @Test
+  void sessionLifecyclePreservesNativeSelectionAndClosesOnCtrlC() throws Exception {
+    var configured = command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off"}), stream(new ByteArrayOutputStream()));
+    var terminal = new FakeSessionTerminal();
+    try {
+      assertThat(command(Map.of()).runSession(configured, terminal)).isZero();
+      assertThat(terminal.mouseEnabled).isFalse();
+      assertThat(terminal.resizeListener).isNotNull();
+      assertThat(terminal.bytes.toString())
+          .contains("a calm middleware between you and the model", "Ready");
+    } finally {
+      configured.mcp().close();
+    }
+  }
+
+  @Test
+  void liveControlCoversAtomicProviderPreparationAndCommit() throws Exception {
+    com.sun.net.httpserver.HttpServer ollama = com.sun.net.httpserver.HttpServer.create(
+        new java.net.InetSocketAddress("127.0.0.1", 11_434), 0);
+    ollama.createContext("/api/tags", exchange -> json(exchange, 200,
+        "{\"models\":[{\"name\":\"qwen-test\"}]}"));
+    ollama.createContext("/api/show", exchange -> json(exchange, 200,
+        "{\"capabilities\":[\"tools\"],\"model_info\":{\"qwen.context_length\":32768}}"));
+    ollama.start();
+    var configured = command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off"}), stream(new ByteArrayOutputStream()));
+    var terminal = new FakeSessionTerminal();
+    var preparations = new java.util.concurrent.CopyOnWriteArrayList<
+        InteractiveCommand.AgentControl.ProviderPreparation>();
+    var latch = new java.util.concurrent.CountDownLatch(3);
+    try {
+      assertThat(command(Map.of()).runSession(configured, terminal, control -> {
+        assertThat(control.commitPreparedProvider("ollama", "missing")).isFalse();
+        assertThat(control.selectProvider("codex")).isFalse();
+        assertThat(control.selectProvider("openai")).isFalse();
+        assertThat(control.selectProvider("ollama")).isTrue();
+        control.prepareProvider("codex", "Codex", result -> {
+          preparations.add(result);
+          latch.countDown();
+        });
+        control.prepareProvider("openai", "OpenAI", result -> {
+          preparations.add(result);
+          latch.countDown();
+        });
+        control.prepareProvider("ollama", "Ollama", result -> {
+          preparations.add(result);
+          latch.countDown();
+        });
+        try {
+          assertThat(latch.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException exception) {
+          java.lang.Thread.currentThread().interrupt();
+          throw new AssertionError(exception);
+        }
+        assertThat(control.commitPreparedProvider("ollama", "missing")).isFalse();
+        assertThat(control.commitPreparedProvider("ollama", "qwen-test")).isTrue();
+        assertThat(control.selectProvider("anthropic")).isTrue();
+        assertThat(control.installProviderKey("openai", "openai-key")).isTrue();
+        assertThat(control.selectProvider("openai")).isTrue();
+        assertThat(control.selectProvider("http://localhost:11434")).isTrue();
+        assertThat(control.selectProvider("ollama")).isTrue();
+        var modelsLoaded = new java.util.concurrent.CountDownLatch(1);
+        control.loadModels(loaded -> {
+          assertThat(loaded).extracting(
+              com.github.skanga.ajent.terminal.ui.ModelPicker.Model::id)
+              .contains("qwen-test");
+          modelsLoaded.countDown();
+        });
+        try {
+          assertThat(modelsLoaded.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException exception) {
+          java.lang.Thread.currentThread().interrupt();
+          throw new AssertionError(exception);
+        }
+        var anthropicReady = new java.util.concurrent.CountDownLatch(1);
+        control.prepareProvider("anthropic", "Anthropic", result -> {
+          preparations.add(result);
+          anthropicReady.countDown();
+        });
+        try {
+          assertThat(anthropicReady.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException exception) {
+          java.lang.Thread.currentThread().interrupt();
+          throw new AssertionError(exception);
+        }
+        control.cycleProfile();
+        control.cycleProfile();
+        control.cycleProfile();
+        control.dispatch(new RuntimeMessage.Tick());
+        control.newThread();
+        assertThat(control.installAnthropicKey("test-key")).isTrue();
+        assertThat(control.importCodex()).isFalse();
+        assertThat(control.resolvePendingChanges(List.of())).isEmpty();
+        control.cancelPreparedProvider();
+      })).isZero();
+      assertThat(preparations).extracting(
+          InteractiveCommand.AgentControl.ProviderPreparation::failure)
+          .contains(InteractiveCommand.AgentControl.ProviderFailure.CODEX_AUTH_REQUIRED,
+              InteractiveCommand.AgentControl.ProviderFailure.AUTH_REQUIRED,
+              InteractiveCommand.AgentControl.ProviderFailure.NONE);
+      assertThat(preparations).filteredOn(
+          preparation -> preparation.provider().equals("anthropic"))
+          .singleElement().satisfies(
+              preparation -> assertThat(preparation.ready()).isTrue());
+    } finally {
+      configured.mcp().close();
+      ollama.stop(0);
+    }
+  }
+
+  @Test void providerDisplayTracksUnverifiedConnectedAndUnavailableStates() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(120, 30);
+    var ui = new InteractiveCommand.Ui(terminal, state, new InteractiveCommand.PermissionGate(),
+        new ManualAnimation(), Map.of(), Profile.WRITE, "qwen2.5-coder:7b",
+        "ollama", 0, List::of);
+
+    ui.render();
+    assertThat(ui.renderedText())
+        .contains("Connection not checked", "Ollama · qwen2.5-coder:7b")
+        .doesNotContain("Selected · Ollama", "Ollama (selected)")
+        .doesNotContain("Connected · Ollama");
+
+    ui.observe(new RuntimeMessage.ProviderEvent(1, new StreamEvent.TextDelta("hello")));
+    ui.render();
+    assertThat(ui.renderedText())
+        .contains("Connected", "Ollama · qwen2.5-coder:7b")
+        .doesNotContain("Ollama (selected)");
+
+    ui.observe(new RuntimeMessage.ProviderEvent(1, new StreamEvent.Error("connection refused")));
+    ui.render();
+    assertThat(ui.renderedText())
+        .contains("Provider unavailable · connection refused", "Ollama (unavailable)")
+        .doesNotContain("Connected · Ollama");
+
+    ui.observe(new RuntimeMessage.ProviderEvent(1, new StreamEvent.Error(
+        "cancelled", Optional.empty(),
+        com.github.skanga.ajent.provider.ErrorClass.CANCELLED, false)));
+    ui.render();
+    assertThat(ui.renderedText()).doesNotContain("Provider unavailable · cancelled");
+
+    ui.observe(new RuntimeMessage.ProviderEvent(2, new StreamEvent.Error("old provider failed")),
+        "anthropic");
+    ui.render();
+    assertThat(ui.renderedText()).doesNotContain("old provider failed");
+  }
+
   @Test void interactiveStartupPersistsCliModelAndProviderWithPerProviderRecall() {
-    var store = new SettingsStore(directory.resolve(".agentty"));
+    var store = new SettingsStore(directory.resolve(".ajent"));
     assertThat(store.save(store.load()
         .withProviderModel("anthropic", new ModelId("claude-opus-4-5"))
         .withProviderModel("ollama", new ModelId("qwen2.5-coder:7b"))
@@ -199,7 +407,7 @@ final class InteractiveCommandTest {
     var agent = new FakeAgent(state);
     ui.render();
     assertThat(terminal.bytes.toString()).contains(
-        "a calm middleware between you and the m", "^C", "Ready", "Anthropic");
+        "a calm middleware between you and the m", "Ctrl+C", "Ready", "Anthropic");
 
     assertThat(ui.key(character('a'), agent)).isTrue();
     ui.key(special(TerminalKey.SpecialKey.LEFT), agent);
@@ -228,10 +436,12 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     ui.key(special(TerminalKey.SpecialKey.DOWN), agent);
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+    assertThat(agent.provider).isEqualTo("anthropic");
+    assertThat(ui.renderedText()).contains("Select a model for Ollama");
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(agent.provider).isEqualTo("ollama");
     assertThat(terminal.bytes.toString()).contains("Providers");
-    assertThat(ui.renderedText()).contains("provider: Ollama");
-    ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent); // closes model picker opened after switch
+    assertThat(agent.model).isEqualTo("alpha");
 
     ui.key(character('k', true), agent);
     for (int codePoint : "switch provider".codePoints().toArray()) ui.key(character(codePoint), agent);
@@ -287,6 +497,27 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ESCAPE), agent);
     assertThat(agent.messages.getLast()).isInstanceOf(RuntimeMessage.Cancel.class);
     assertThat(ui.key(character('c', true), agent)).isFalse();
+  }
+
+  @Test void roomyWelcomeKeepsIdentityInTheComposerAndAnchorsItAtTheBottom() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(120, 36);
+    var ui = new InteractiveCommand.Ui(terminal, state, new InteractiveCommand.PermissionGate(),
+        new ManualAnimation(), Map.of(), Profile.WRITE, "gpt-5.6-solo",
+        "codex", 0, List::of);
+
+    ui.render();
+
+    List<String> rows = ui.renderedText().lines().toList();
+    assertThat(ui.renderedText())
+        .contains("Codex · gpt-5.6-solo")
+        .contains("Navigate:", "Actions:", "Session:")
+        .doesNotContain("● GPT", "·  Write", "Codex (selected)", "Selected · Codex");
+    assertThat(count(ui.renderedText(), "Write")).isZero();
+    assertThat(rows.indexOf(rows.stream().filter(row -> row.contains("╭"))
+        .reduce((first, second) -> second).orElseThrow())).isGreaterThan(20);
+    assertThat(rows).hasSize(35);
   }
 
   @Test void liveAppChromeShowsProviderContextAndPendingChanges() {
@@ -502,9 +733,9 @@ final class InteractiveCommandTest {
       scheduler.request(second::countDown);
       assertThat(second.await(2, TimeUnit.SECONDS)).isTrue();
     }
-    try (var local = new InteractiveCommand.FrameScheduler(Map.of("MAYA_FORCE_SYNC", "1"));
+    try (var local = new InteractiveCommand.FrameScheduler(Map.of("AJENT_FORCE_SYNC", "1"));
          var ssh = new InteractiveCommand.FrameScheduler(Map.of(
-             "MAYA_FORCE_SYNC", "1", "SSH_CONNECTION", "remote"))) {
+             "AJENT_FORCE_SYNC", "1", "SSH_CONNECTION", "remote"))) {
       assertThat(local.delayMillis()).isEqualTo(33);
       assertThat(ssh.delayMillis()).isEqualTo(80);
     }
@@ -517,7 +748,7 @@ final class InteractiveCommandTest {
         new InteractiveCommand.PermissionGate(), new InteractiveCommand.AnimationPort() {
           @Override public long nowNanos() { return 1; }
           @Override public void request(Runnable frame) { }
-        }, Map.of("MAYA_FORCE_SYNC", "1"));
+        }, Map.of("AJENT_FORCE_SYNC", "1"));
 
     ui.render();
 
@@ -984,11 +1215,53 @@ final class InteractiveCommandTest {
 
     selectCommand(ui, agent, "review changes");
     ui.key(character('a'), agent);
-    assertThat(agent.changes).allSatisfy(file -> assertThat(file.hunks())
-        .allSatisfy(hunk -> assertThat(hunk.status())
-            .isEqualTo(com.github.skanga.ajent.terminal.ui.DiffReview.Status.ACCEPTED)));
+    assertThat(agent.changes).isEmpty();
+
+    agent.changes = List.of(
+        new com.github.skanga.ajent.terminal.ui.DiffReview.File("a.txt", List.of(
+            new com.github.skanga.ajent.terminal.ui.DiffReview.Hunk("-old\n+new",
+                com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING))));
+    selectCommand(ui, agent, "review changes");
     ui.key(character('x'), agent);
     assertThat(agent.changes).isEmpty();
+  }
+
+  @Test void mainScreenUppercaseAcceptAndRejectResolvePendingChanges() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var terminal = new FakeTerminal();
+    var ui = new InteractiveCommand.Ui(terminal, state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.changes = List.of(new com.github.skanga.ajent.terminal.ui.DiffReview.File(
+        "a.txt", List.of(new com.github.skanga.ajent.terminal.ui.DiffReview.Hunk(
+            "-old\n+new", com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING))));
+
+    ui.key(character('A'), agent);
+    assertThat(agent.changes).isEmpty();
+    assertThat(ui.renderedText()).contains("accepted 1 hunk");
+
+    agent.changes = List.of(new com.github.skanga.ajent.terminal.ui.DiffReview.File(
+        "a.txt", List.of(new com.github.skanga.ajent.terminal.ui.DiffReview.Hunk(
+            "-old\n+new", com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING))));
+    ui.key(character('X'), agent);
+    assertThat(agent.changes).isEmpty();
+    assertThat(ui.renderedText()).contains("rejected 1 hunk");
+  }
+
+  @Test void lowercaseAcceptLetterStillTypesWhileChangesArePending() {
+    var state = new AtomicReference<>(AgentState.initial(thread(List.of())));
+    var ui = new InteractiveCommand.Ui(new FakeTerminal(), state,
+        new InteractiveCommand.PermissionGate());
+    var agent = new FakeAgent(state);
+    agent.changes = List.of(new com.github.skanga.ajent.terminal.ui.DiffReview.File(
+        "a.txt", List.of(new com.github.skanga.ajent.terminal.ui.DiffReview.Hunk(
+            "+new", com.github.skanga.ajent.terminal.ui.DiffReview.Status.PENDING))));
+
+    ui.key(character('a'), agent);
+    ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
+
+    assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text()).isEqualTo("a");
+    assertThat(agent.changes).hasSize(1);
   }
 
   @Test void livePlanTracksTodoToolUpdatesAndOwnsKeysUntilEscape() {
@@ -1439,6 +1712,90 @@ final class InteractiveCommandTest {
     assertThat(InteractiveCommand.mergeReview(List.of(change), List.of(
         reviewed.withHunks(List.of(reviewed.hunks().getFirst())))).getFirst().hunks())
         .hasSize(2);
+  }
+
+  @Test void applyingRejectedReviewRestoresModifiedAndRemovesCreatedFiles() throws Exception {
+    Path modified = directory.resolve("modified.txt");
+    Path created = directory.resolve("created.txt");
+    Files.writeString(modified, "after", StandardCharsets.UTF_8);
+    Files.writeString(created, "created", StandardCharsets.UTF_8);
+    var modifiedChange = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        modified.toString(), "before", "after");
+    var createdChange = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        created.toString(), "", "created");
+    var rejected = List.of(modifiedChange, createdChange).stream().map(change ->
+        change.withHunks(change.hunks().stream().map(hunk -> hunk.withStatus(
+            com.github.skanga.ajent.tools.runtime.DiffHunk.Status.REJECTED)).toList())).toList();
+
+    assertThat(InteractiveCommand.applyReviewedChanges(directory, rejected)).isEmpty();
+    assertThat(Files.readString(modified, StandardCharsets.UTF_8)).isEqualTo("before");
+    assertThat(created).doesNotExist();
+  }
+
+  @Test void acceptingReviewKeepsCurrentContentAndSequentialEditsCoalesce() throws Exception {
+    Path file = directory.resolve("sequential.txt");
+    var changes = new AtomicReference<List<com.github.skanga.ajent.tools.runtime.FileChange>>(
+        List.of());
+    var first = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        file.toString(), "zero", "one");
+    var second = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        file.toString(), "one", "two");
+    InteractiveCommand.recordChange(new RuntimeMessage.ToolCompleted(1, "first",
+        new com.github.skanga.ajent.runtime.ToolCompletion.Success(
+            "ok", Optional.of(first))), changes);
+    InteractiveCommand.recordChange(new RuntimeMessage.ToolCompleted(2, "second",
+        new com.github.skanga.ajent.runtime.ToolCompletion.Success(
+            "ok", Optional.of(second))), changes);
+    Files.writeString(file, "two", StandardCharsets.UTF_8);
+    var accepted = changes.get().getFirst().withHunks(
+        changes.get().getFirst().hunks().stream().map(hunk -> hunk.withStatus(
+            com.github.skanga.ajent.tools.runtime.DiffHunk.Status.ACCEPTED)).toList());
+
+    assertThat(changes.get()).hasSize(1);
+    assertThat(changes.get().getFirst().before()).isEqualTo("zero");
+    assertThat(changes.get().getFirst().after()).isEqualTo("two");
+    assertThat(InteractiveCommand.applyReviewedChanges(directory, List.of(accepted))).isEmpty();
+    assertThat(Files.readString(file, StandardCharsets.UTF_8)).isEqualTo("two");
+  }
+
+  @Test void applyingMixedReviewKeepsOnlyAcceptedHunks() throws Exception {
+    Path file = directory.resolve("mixed.txt");
+    String before = java.util.stream.IntStream.rangeClosed(1, 14)
+        .mapToObj(index -> "line-" + index).collect(java.util.stream.Collectors.joining("\n"));
+    String after = before.replace("line-2", "new-2").replace("line-12", "new-12");
+    Files.writeString(file, after, StandardCharsets.UTF_8);
+    var change = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        file.toString(), before, after);
+    var hunks = new ArrayList<>(change.hunks());
+    hunks.set(0, hunks.getFirst().withStatus(
+        com.github.skanga.ajent.tools.runtime.DiffHunk.Status.ACCEPTED));
+    hunks.set(1, hunks.get(1).withStatus(
+        com.github.skanga.ajent.tools.runtime.DiffHunk.Status.REJECTED));
+
+    assertThat(InteractiveCommand.applyReviewedChanges(
+        directory, List.of(change.withHunks(hunks)))).isEmpty();
+    assertThat(Files.readString(file, StandardCharsets.UTF_8))
+        .contains("new-2").contains("line-12").doesNotContain("new-12");
+  }
+
+  @Test void reviewApplicationRefusesExternalEditsAndOutsidePaths() throws Exception {
+    Path file = directory.resolve("conflict.txt");
+    Files.writeString(file, "external edit", StandardCharsets.UTF_8);
+    var conflict = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        file.toString(), "before", "after");
+    var rejected = conflict.withHunks(conflict.hunks().stream().map(hunk -> hunk.withStatus(
+        com.github.skanga.ajent.tools.runtime.DiffHunk.Status.REJECTED)).toList());
+
+    assertThat(InteractiveCommand.applyReviewedChanges(directory, List.of(rejected)))
+        .contains("changed since Ajent");
+    assertThat(Files.readString(file, StandardCharsets.UTF_8)).isEqualTo("external edit");
+
+    Path outside = directory.getParent().resolve("outside.txt");
+    var outsideChange = com.github.skanga.ajent.tools.runtime.UnifiedDiff.compute(
+        outside.toString(), "", "created");
+    assertThat(InteractiveCommand.applyReviewedChanges(directory, List.of(outsideChange)))
+        .contains("outside the workspace");
+    assertThat(outside).doesNotExist();
   }
 
   private static void selectCommand(
@@ -2028,7 +2385,7 @@ final class InteractiveCommandTest {
         new InteractiveCommand.PermissionGate(), new ManualAnimation(), Map.of());
     var collapsed = new InteractiveCommand.Ui(new FakeTerminal(), state,
         new InteractiveCommand.PermissionGate(), new ManualAnimation(),
-        Map.of("AGENTTY_FROZEN_COLLAPSE", "true"));
+        Map.of("AJENT_FROZEN_COLLAPSE", "true"));
 
     expanded.render();
     collapsed.render();
@@ -2148,6 +2505,16 @@ final class InteractiveCommandTest {
     return source.lines().filter(line -> !line.isBlank()).findFirst().orElse("");
   }
 
+  private static void json(
+      com.sun.net.httpserver.HttpExchange exchange, int status, String body)
+      throws java.io.IOException {
+    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().add("content-type", "application/json");
+    exchange.sendResponseHeaders(status, bytes.length);
+    exchange.getResponseBody().write(bytes);
+    exchange.close();
+  }
+
   private static TerminalKey character(int value) { return character(value, false); }
   private static TerminalKey character(int value, boolean ctrl) {
     return new TerminalKey(new TerminalKey.CharacterKey(value),
@@ -2168,6 +2535,37 @@ final class InteractiveCommandTest {
     @Override public void write(String value) { bytes.append(value); }
   }
 
+  private static final class FakeSessionTerminal implements InteractiveCommand.SessionTerminal {
+    private final StringBuilder bytes = new StringBuilder();
+    private boolean mouseEnabled;
+    private java.util.function.Consumer<JLineTerminalSession.Size> resizeListener;
+    private boolean delivered;
+    @Override public JLineTerminalSession.Size size() {
+      return new JLineTerminalSession.Size(100, 30);
+    }
+    @Override public void write(String value) { bytes.append(value); }
+    @Override public void write(byte[] value, int offset, int length) {
+      bytes.append(new String(value, offset, length, StandardCharsets.UTF_8));
+    }
+    @Override public <T> T suspend(java.util.function.Supplier<T> action) {
+      return action.get();
+    }
+    @Override public JLineTerminalSession.SignalGuard ignoreInterrupts() { return () -> {}; }
+    @Override public boolean interactive() { return false; }
+    @Override public void readSingleKey() {}
+    @Override public void onResize(
+        java.util.function.Consumer<JLineTerminalSession.Size> listener) {
+      resizeListener = listener;
+    }
+    @Override public void enableMouse() { mouseEnabled = true; }
+    @Override public List<TerminalEvent> read() {
+      if (delivered) return List.of();
+      delivered = true;
+      return List.of(new TerminalEvent.Key(character('c', true)));
+    }
+    @Override public List<TerminalEvent> flushEscape() { return List.of(); }
+  }
+
   private static final class FakeAgent implements InteractiveCommand.AgentControl {
     private final AtomicReference<AgentState> state;
     private final List<RuntimeMessage> messages = new ArrayList<>();
@@ -2178,6 +2576,7 @@ final class InteractiveCommandTest {
         com.github.skanga.ajent.domain.Effort.NONE;
     private List<String> favorites = List.of();
     private String provider = "anthropic";
+    private String preparedProvider = "";
     private boolean rejectProvider;
     private boolean deferModels;
     private List<com.github.skanga.ajent.terminal.ui.ModelPicker.Model> availableModels;
@@ -2307,6 +2706,27 @@ final class InteractiveCommandTest {
       provider = value;
       return true;
     }
+    @Override public void prepareProvider(String value, String label,
+        java.util.function.Consumer<InteractiveCommand.AgentControl.ProviderPreparation> completed) {
+      if (rejectProvider) {
+        completed.accept(new InteractiveCommand.AgentControl.ProviderPreparation(
+            value, label, List.of(), "",
+            InteractiveCommand.AgentControl.ProviderFailure.AUTH_REQUIRED, "credentials required"));
+        return;
+      }
+      preparedProvider = value;
+      completed.accept(new InteractiveCommand.AgentControl.ProviderPreparation(
+          value, label, modelRows(), "",
+          InteractiveCommand.AgentControl.ProviderFailure.NONE, ""));
+    }
+    @Override public boolean commitPreparedProvider(String value, String selectedModel) {
+      if (!preparedProvider.equals(value)) return false;
+      provider = value;
+      model = selectedModel;
+      preparedProvider = "";
+      return true;
+    }
+    @Override public void cancelPreparedProvider() { preparedProvider = ""; }
     @Override public LoginModal.OAuthAttempt newOAuthAttempt() {
       return new LoginModal.OAuthAttempt("verifier", "state",
           URI.create("https://example.test/authorize"));
@@ -2347,7 +2767,11 @@ final class InteractiveCommandTest {
         List<com.github.skanga.ajent.terminal.ui.DiffReview.File> reviewed) {
       changes = List.copyOf(reviewed);
     }
-    @Override public void clearPendingChanges() { changes = List.of(); }
+    @Override public String resolvePendingChanges(
+        List<com.github.skanga.ajent.terminal.ui.DiffReview.File> reviewed) {
+      changes = List.of();
+      return "";
+    }
   }
 
   private static final class ManualAnimation implements InteractiveCommand.AnimationPort {

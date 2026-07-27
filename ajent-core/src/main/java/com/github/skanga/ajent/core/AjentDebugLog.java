@@ -7,13 +7,13 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
-/** Best-effort catch-site diagnostics compatible with {@code AGENTTY_DEBUG_LOG}. */
-public final class AgenttyDebugLog {
+/** Best-effort catch-site diagnostics configured with {@code AJENT_DEBUG_LOG}. */
+public final class AjentDebugLog {
   private static final DateTimeFormatter TIMESTAMP =
       DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
   private static final Object LOCK = new Object();
 
-  private AgenttyDebugLog() {}
+  private AjentDebugLog() {}
 
   public static boolean enabled() {
     return !Holder.path.isEmpty();
@@ -44,6 +44,6 @@ public final class AgenttyDebugLog {
   }
 
   private static final class Holder {
-    private static final String path = System.getenv().getOrDefault("AGENTTY_DEBUG_LOG", "");
+    private static final String path = System.getenv().getOrDefault("AJENT_DEBUG_LOG", "");
   }
 }

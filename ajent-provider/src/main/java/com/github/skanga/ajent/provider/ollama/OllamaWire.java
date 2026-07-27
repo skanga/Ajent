@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import com.github.skanga.ajent.domain.Message;
 import com.github.skanga.ajent.domain.Role;
 import com.github.skanga.ajent.domain.ToolStatus;
@@ -80,11 +80,11 @@ public final class OllamaWire {
 
   public static Map<String, Object> buildOptions(
       OllamaRequestOptions request, Map<String, String> environment) {
-    int context = leadingInteger(environment.get("AGENTTY_OLLAMA_NUM_CTX"));
+    int context = leadingInteger(environment.get("AJENT_OLLAMA_NUM_CTX"));
     if (context <= 0) context = request.contextWindow() > 0
         ? Math.clamp(request.contextWindow(), CONTEXT_FLOOR, CONTEXT_CEILING)
         : CONTEXT_FLOOR;
-    int prediction = leadingInteger(environment.get("AGENTTY_OLLAMA_NUM_PREDICT"));
+    int prediction = leadingInteger(environment.get("AJENT_OLLAMA_NUM_PREDICT"));
     if (prediction <= 0) {
       prediction = request.maxTokens() > 0 ? request.maxTokens() : 4_096;
       prediction = Math.min(prediction, context / 2);
@@ -97,7 +97,7 @@ public final class OllamaWire {
       options.put("temperature", 0.2);
       options.put("top_p", 0.9);
     }
-    Double temperature = leadingDouble(environment.get("AGENTTY_OLLAMA_TEMPERATURE"));
+    Double temperature = leadingDouble(environment.get("AJENT_OLLAMA_TEMPERATURE"));
     if (temperature != null) options.put("temperature", temperature);
     return Map.copyOf(options);
   }
@@ -224,14 +224,14 @@ public final class OllamaWire {
     var matcher = java.util.regex.Pattern.compile(
         "^[\\s]*[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?").matcher(value);
     if (!matcher.find()) {
-      if (!value.isEmpty()) AgenttyDebugLog.log(
+      if (!value.isEmpty()) AjentDebugLog.log(
           "ollama.env_temperature.parse", "invalid floating-point value: " + value);
       return null;
     }
     try {
       return Double.parseDouble(matcher.group());
     } catch (NumberFormatException failure) {
-      AgenttyDebugLog.log("ollama.env_temperature.parse", failure);
+      AjentDebugLog.log("ollama.env_temperature.parse", failure);
       return null;
     }
   }

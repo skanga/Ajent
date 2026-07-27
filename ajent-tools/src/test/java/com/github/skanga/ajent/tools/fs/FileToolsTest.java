@@ -24,6 +24,7 @@ class FileToolsTest {
     ToolResult.Success written = success(tools.execute("write", object()
         .put("file_path", file.toString()).put("content", "line1\nline2\nline3\n")));
     assertThat(written.output().change()).isPresent().get().satisfies(change -> {
+      assertThat(change.existedBefore()).isFalse();
       assertThat(change.path()).isEqualTo(file.toAbsolutePath().normalize().toString());
       assertThat(change.added()).isEqualTo(3);
       assertThat(change.after()).isEqualTo("line1\nline2\nline3\n");
@@ -44,6 +45,7 @@ class FileToolsTest {
         .contains("--- a/" + file.toAbsolutePath().normalize(), "-line2", "+LINE-TWO")
         .endsWith("\n```");
     assertThat(edited.output().change()).isPresent().get().satisfies(change -> {
+      assertThat(change.existedBefore()).isTrue();
       assertThat(change.before()).contains("line2");
       assertThat(change.after()).contains("LINE-TWO");
       assertThat(change.hunks()).singleElement().satisfies(hunk ->
@@ -62,6 +64,23 @@ class FileToolsTest {
 
     assertThat(success(tools.execute("list_dir", object().put("path", directory.toString())))
         .output().text()).contains("hello.txt", "dup.txt");
+  }
+
+  @Test
+  void overwritePreservesExecutablePermissionsWhenSupported(@TempDir Path directory)
+      throws Exception {
+    if (!Files.getFileStore(directory).supportsFileAttributeView("posix")) return;
+    Path file = Files.writeString(directory.resolve("script.sh"), "old");
+    var permissions = java.util.EnumSet.of(
+        java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+        java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+        java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
+    Files.setPosixFilePermissions(file, permissions);
+
+    success(tools(directory).execute("write",
+        object().put("path", file.toString()).put("content", "new")));
+
+    assertThat(Files.getPosixFilePermissions(file)).isEqualTo(permissions);
   }
 
   @Test

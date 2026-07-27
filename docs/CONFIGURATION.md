@@ -1,8 +1,9 @@
 # Configuration and state
 
-Ajent preserves AgenTTY's command-line, environment, and persistence contracts.
-This guide distinguishes transient process configuration from durable state so
-that an override never silently becomes a saved secret.
+Ajent owns its command-line, environment, credential, and persistence
+namespaces. It does not read or import AgenTTY state. This guide distinguishes
+transient process configuration from durable state so an override never
+silently becomes a saved secret.
 
 ## Precedence
 
@@ -46,15 +47,15 @@ Authentication:
 
 Runtime and transport:
 
-- `AGENTTY_SOCKS_PROXY=host:port` routes outbound HTTP through the air-gap
+- `AJENT_SOCKS_PROXY=host:port` routes outbound HTTP through the air-gap
   bridge contract.
-- `AGENTTY_API_HOST=host:port` overrides the provider dial destination while
+- `AJENT_API_HOST=host:port` overrides the provider dial destination while
   retaining the logical request host.
-- `AGENTTY_OAUTH_HOST=host:port` overrides the OAuth dial destination.
-- `AGENTTY_INSECURE=1` disables TLS certificate and hostname verification for
+- `AJENT_OAUTH_HOST=host:port` overrides the OAuth dial destination.
+- `AJENT_INSECURE=1` disables TLS certificate and hostname verification for
   controlled test or tunnel environments. It is process-wide and unsafe on an
   untrusted network.
-- `AGENTTY_DEBUG_LOG=PATH` writes best-effort diagnostic events to a file;
+- `AJENT_DEBUG_LOG=PATH` writes best-effort diagnostic events to a file;
   protocol stdout remains clean.
 
 Location and launcher variables:
@@ -64,16 +65,16 @@ Location and launcher variables:
 - `XDG_CONFIG_HOME`, then `HOME`/`USERPROFILE`, determines the compatible
   credential location.
 
-The `AGENTTY_` names are retained intentionally for native compatibility. See
-`ENVIRONMENT.md` for the complete provider, MCP, RAG, Ollama, terminal,
-air-gap, and diagnostics reference.
+Only the `AJENT_` namespace is recognized. See `ENVIRONMENT.md` for the
+complete provider, MCP, RAG, Ollama, terminal, air-gap, and diagnostics
+reference.
 
 ## Persistent files
 
-Ajent keeps AgenTTY-compatible application data under `~/.agentty`:
+Ajent keeps application data under `~/.ajent`:
 
 ```text
-~/.agentty/
+~/.ajent/
   settings.json
   threads/
     THREAD_ID.json
@@ -92,18 +93,13 @@ thinking/signatures, tool results, errors, checkpoints, timestamps, and wire
 compaction records. `acp_sessions.json` is a metadata sidecar mapping ACP
 session ids to working directories, titles, and update times; it is not a
 conversation file and is skipped by the saved-thread metadata walk. Completed
-turns are flushed before process shutdown. The executable parity gate compares
-both files against AgenTTY after a real streamed ACP turn and also verifies
-model-setting persistence before later startup validation fails.
+turns are flushed before process shutdown.
 
 Anthropic login credentials are stored separately at
-`$XDG_CONFIG_HOME/agentty/credentials.json`, or
-`~/.config/agentty/credentials.json` when XDG configuration is unset. The file
-uses the compatible encrypted credential envelope described in `AUTH.md`.
-
-The legacy `.agentty` names are part of data compatibility, not a typo. Do not
-rename these locations without a migration that reads both formats and proves
-round-trip compatibility.
+`$XDG_CONFIG_HOME/ajent/credentials.json`, or
+`~/.config/ajent/credentials.json` when XDG configuration is unset. The file
+uses Ajent's encrypted credential envelope described in `AUTH.md`. Ajent does
+not inspect `.agentty` or `.config/agentty`.
 
 ## Workspace configuration and authored context
 
@@ -113,7 +109,7 @@ composition path. Depending on provider and feature, these include:
 - `CLAUDE.md` in the user home and workspace;
 - `CLAUDE.local.md` in the workspace;
 - workspace `docs/` content for the lightweight knowledge index;
-- `.agentty/knowledge` for compatible local knowledge;
+- `.ajent/knowledge` for local knowledge;
 - discovered skill specifications described by the `skills` command.
 
 Instruction files are bounded before entering a provider prompt. Tool path
@@ -136,7 +132,7 @@ both in the active session and in settings. ACP starts in `ask` unless its
 ## Recovery
 
 To diagnose state without deleting it, run `ajent status`, set
-`AGENTTY_DEBUG_LOG`, and inspect `~/.agentty/settings.json`. Back up the data
+`AJENT_DEBUG_LOG`, and inspect `~/.ajent/settings.json`. Back up the data
 directory before manual edits. Removing one corrupt thread file loses that
 thread; removing `settings.json` resets preferences; `ajent logout` is the
 supported way to remove saved Anthropic credentials.

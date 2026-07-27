@@ -1,7 +1,8 @@
 # Authentication and credentials
 
-Ajent supports Anthropic API keys, Anthropic's interactive OAuth flow, API keys
-for OpenAI-compatible hosted providers, and keyless local providers. This
+Ajent supports Anthropic API keys, Anthropic's interactive OAuth flow,
+ChatGPT/Codex subscription sessions, API keys for OpenAI-compatible hosted
+providers, and keyless local providers. This
 document describes resolution order, storage, refresh, and troubleshooting.
 
 ## Quick start
@@ -29,6 +30,14 @@ $env:OPENAI_API_KEY = "..."
 ```
 
 Local Ollama and llama.cpp endpoints do not require authentication.
+
+ChatGPT/Codex subscription access:
+
+```powershell
+codex login
+.\ajent.cmd login --provider codex
+.\ajent.cmd --provider codex --model MODEL_ID --workspace .
+```
 
 ## Resolution precedence
 
@@ -76,14 +85,26 @@ responsive login modal renders the same method picker, URL/code panel,
 exchange state, masked API-key input, and recoverable failure panel as AgenTTY.
 Secrets are masked by UTF-8 byte length and are never painted in clear text.
 
-Ajent currently does not implement ChatGPT/Codex OAuth. OpenAI-compatible
-providers use API keys. OpenAI's public Codex documentation describes browser
-and device-code sign-in for supported Codex clients, but does not publish a
-third-party OAuth client contract that Ajent can safely embed. Ajent therefore
-does not copy Codex client credentials, scrape its credential cache, or claim
-another application's tokens. This is not an AgenTTY parity omission; adding
-it would be an Ajent extension requiring a separately supported public OAuth
-contract.
+## ChatGPT/Codex subscription import
+
+Codex is separate from API-key OpenAI. Ajent does not ask for an OpenAI API key
+for `--provider codex`, and never sends a ChatGPT subscription token to
+`api.openai.com`.
+
+Run the official Codex CLI login, then explicitly run
+`ajent login --provider codex`. Ajent reads `CODEX_HOME/auth.json`, or
+`~/.codex/auth.json` when `CODEX_HOME` is unset, validates its bounded JSON,
+derives the account id from the ID token when necessary, and copies the session
+into `~/.config/ajent/codex-credentials.json`. The Ajent copy is encrypted;
+subsequent requests do not depend on or modify the Codex CLI file.
+
+If Codex uses the OS keyring (`cli_auth_credentials_store = "keyring"` or
+`"auto"`), Ajent reports that state but does not extract keyring secrets.
+Configure Codex for `file` storage, sign in again, and retry the import.
+
+Ajent refreshes expiring imported sessions, persists rotated tokens in its own
+encrypted store, and sends the bearer and `chatgpt-account-id` headers. Tokens
+and refresh bodies are bounded and never included in diagnostics.
 
 ## Refresh during a turn
 
@@ -105,18 +126,24 @@ provider output could be duplicated.
 
 ## Credential file
 
-Ajent uses AgenTTY-compatible credential paths and a versioned authenticated
-envelope. `CredentialPaths` selects the platform configuration root. The
-payload is encrypted as `v1` with:
+Ajent uses its own credential path and versioned authenticated envelope:
+`$XDG_CONFIG_HOME/ajent/credentials.json`, or
+`~/.config/ajent/credentials.json` when XDG configuration is unset. It never
+reads `.config/agentty`. `CredentialPaths` selects the platform configuration
+root. The payload is encrypted as `v1` with:
 
 - a machine/user-specific seed (Windows MachineGuid plus user identity, or the
   corresponding POSIX machine/user sources);
-- HKDF-SHA256 using the AgenTTY credential context;
+- HKDF-SHA256 using Ajent's `ajent-credentials-v1` context;
 - AES-256-GCM with a fresh nonce and authenticated envelope metadata;
 - atomic replacement and private file permissions where the platform permits.
 
 The file is bound to the machine/user seed by design. Copying it to another
 machine is not a portable backup. Re-run `ajent login` on the destination.
+
+Codex credentials use the separate encrypted
+`~/.config/ajent/codex-credentials.json`, so Anthropic and ChatGPT credential
+lifecycles cannot overwrite one another.
 
 Legacy plaintext credentials are accepted only for migration. A successful
 read rewrites them in the encrypted format. Authentication failure or envelope
@@ -135,6 +162,8 @@ valid empty credential.
 distinguish environment, saved API key, valid OAuth, expiring OAuth, expired
 OAuth, and absent credentials. `logout` removes the saved credential
 idempotently; it cannot remove an environment variable from the parent shell.
+Pass `--provider codex` to `login`, `status`, or `logout` to operate on the
+separate ChatGPT subscription credential store.
 
 The ACP server resolves credentials at startup. Its `authenticate` request
 requires the ACP v1 `methodId` string and confirms that credentials are

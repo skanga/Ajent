@@ -5,11 +5,14 @@ import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.auth.Credential;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.OAuthTokenClient;
+import com.github.skanga.ajent.provider.codex.CodexAuthImporter;
+import com.github.skanga.ajent.provider.codex.CodexCredentialStore;
 import java.awt.Desktop;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -30,6 +33,7 @@ public final class AuthCommands {
   private final LoginFlow loginFlow;
   private final Consumer<URI> browser;
   private final LongSupplier clock;
+  private final CodexCredentialStore codexStore;
 
   public static AuthCommands systemDefault() {
     var oauth = new AnthropicOAuthLogin(EnvironmentHttpClient.createOAuth(System.getenv()));
@@ -38,16 +42,87 @@ public final class AuthCommands {
       @Override public OAuthTokenClient.Result exchange(String code, String verifier, String state) {
         return oauth.exchange(code, verifier, state);
       }
-    }, AuthCommands::openBrowser, System::currentTimeMillis);
+    }, AuthCommands::openBrowser, System::currentTimeMillis,
+        CodexCredentialStore.systemDefault());
   }
 
   AuthCommands(CredentialStore store, Map<String, String> environment, LoginFlow loginFlow,
                Consumer<URI> browser, LongSupplier clock) {
+    this(store, environment, loginFlow, browser, clock, CodexCredentialStore.systemDefault());
+  }
+
+  AuthCommands(CredentialStore store, Map<String, String> environment, LoginFlow loginFlow,
+               Consumer<URI> browser, LongSupplier clock, CodexCredentialStore codexStore) {
     this.store = Objects.requireNonNull(store, "store");
     this.environment = Map.copyOf(environment);
     this.loginFlow = Objects.requireNonNull(loginFlow, "loginFlow");
     this.browser = Objects.requireNonNull(browser, "browser");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.codexStore = Objects.requireNonNull(codexStore, "codexStore");
+  }
+
+  public int loginCodex(PrintStream output, PrintStream error) {
+    Path home = Path.of(System.getProperty("user.home"));
+    return switch (CodexAuthImporter.inspect(environment, home)) {
+      case CodexAuthImporter.Result.Available available -> {
+        if (!codexStore.save(available.credentials())) {
+          error.print("Failed to save imported Codex credentials.\n");
+          yield 1;
+        }
+        output.print("Imported Codex CLI login from " + available.source()
+            + "\nSaved an encrypted Ajent copy to " + codexStore.path() + "\n");
+        yield 0;
+      }
+      case CodexAuthImporter.Result.Keyring keyring -> {
+        error.print("Codex stores this login in the OS keyring (" + keyring.config()
+            + "). Ajent cannot explicitly import keyring secrets. Configure "
+            + "cli_auth_credentials_store = \"file\", run `codex login`, then retry.\n");
+        yield 1;
+      }
+      case CodexAuthImporter.Result.Missing missing -> {
+        error.print("No Codex CLI login found at " + missing.expected()
+            + ". Run `codex login`, then retry.\n");
+        yield 1;
+      }
+      case CodexAuthImporter.Result.Invalid invalid -> {
+        error.print("Cannot import " + invalid.source() + ": " + invalid.reason() + ".\n");
+        yield 1;
+      }
+    };
+  }
+
+  public int logoutCodex(PrintStream output, PrintStream error) {
+    if (codexStore.load().isEmpty()) {
+      output.print("No saved Codex credentials.\n");
+      return 0;
+    }
+    if (!codexStore.clear()) {
+      error.print("Failed to remove " + codexStore.path() + "\n");
+      return 1;
+    }
+    output.print("Removed " + codexStore.path() + "\n");
+    return 0;
+  }
+
+  public int statusCodex(PrintStream output) {
+    output.print("Codex credentials file: " + codexStore.path() + "\n");
+    var saved = codexStore.load();
+    if (saved.isEmpty()) {
+      output.print("Saved Codex credentials: (none)\n");
+      return 0;
+    }
+    var credentials = saved.orElseThrow();
+    output.print("Saved method: chatgpt_subscription\n");
+    if (credentials.expiresAtMillis() == 0) {
+      output.print("Token: no expiration info\n");
+    } else {
+      long remaining = (credentials.expiresAtMillis() - clock.getAsLong()) / 1000;
+      output.print(remaining <= 0 ? "Token: expired\n"
+          : "Token expires in " + remaining + "s\n");
+    }
+    output.print(credentials.refreshToken().isEmpty()
+        ? "Refresh token: (none)\n" : "Refresh token: present\n");
+    return 0;
   }
 
   public int login(BufferedReader input, PrintStream output, PrintStream error) {

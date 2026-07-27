@@ -57,7 +57,7 @@ public final class SystemClipboardReader implements ClipboardReader {
   }
 
   @Override public Optional<Attachment> image() {
-    String override = environment.getOrDefault("AGENTTY_CLIPBOARD_CMD", "");
+    String override = environment.getOrDefault("AJENT_CLIPBOARD_CMD", "");
     if (!override.isBlank()) {
       return capture.run(shell(override))
           .flatMap(bytes -> ImagePaste.raw(bytes, "<clipboard>"));

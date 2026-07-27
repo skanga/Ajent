@@ -50,8 +50,9 @@ class FsmTest {
     }
     assertThat(log).isEmpty();
 
-    try (var ignored = new Fsm.CapabilityToken<>("conn-fail", value -> log.add("~" + value))) {
+    try (var token = new Fsm.CapabilityToken<>("conn-fail", value -> log.add("~" + value))) {
       // Dropping the token models a failed transition.
+      assertThat(token).isNotNull();
     }
     assertThat(log).containsExactly("~conn-fail");
   }

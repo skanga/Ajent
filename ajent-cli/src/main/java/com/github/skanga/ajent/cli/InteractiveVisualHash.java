@@ -173,10 +173,7 @@ final class InteractiveVisualHash {
 
     private void mix(String input) {
       mix(input.length());
-      if (input.isEmpty()) return;
-      mix(input.charAt(0));
-      mix(input.charAt(input.length() - 1));
-      if (input.length() >= 16) mix(input.charAt(input.length() / 2));
+      for (int index = 0; index < input.length(); index++) mix(input.charAt(index));
     }
   }
 }

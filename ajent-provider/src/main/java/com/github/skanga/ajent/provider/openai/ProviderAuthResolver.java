@@ -19,6 +19,9 @@ public final class ProviderAuthResolver {
     if (preset.isPresent() && preset.get().kind() == ProviderRegistry.Kind.ANTHROPIC) {
       return anthropicCredentials;
     }
+    if (preset.isPresent() && preset.get().kind() == ProviderRegistry.Kind.CODEX) {
+      return new ProviderAuth.Empty();
+    }
     if (preset.isPresent() && preset.get().authStyle() == ProviderRegistry.AuthStyle.NONE) {
       return new ProviderAuth.Empty();
     }

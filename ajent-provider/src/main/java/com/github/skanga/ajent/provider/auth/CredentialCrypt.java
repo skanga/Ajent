@@ -14,11 +14,11 @@ import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-/** AgenTTY v1 credential envelope: HKDF-SHA256 plus AES-256-GCM. */
+/** Ajent v1 credential envelope: HKDF-SHA256 plus AES-256-GCM. */
 public final class CredentialCrypt {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final byte[] INFO =
-      "agentty-credentials-v1".getBytes(StandardCharsets.UTF_8);
+      "ajent-credentials-v1".getBytes(StandardCharsets.UTF_8);
   private static final int SALT_SIZE = 16;
   private static final int NONCE_SIZE = 12;
   private static final int TAG_SIZE = 16;

@@ -54,17 +54,17 @@ public final class EnvironmentHttpClient {
 
   public static HttpClient createProvider(Map<String, String> environment) {
     Objects.requireNonNull(environment, "environment");
-    HostPort socks = parseDialAddress(environment.get("AGENTTY_SOCKS_PROXY")).orElse(null);
-    HostPort api = parseDialAddress(environment.get("AGENTTY_API_HOST")).orElse(null);
+    HostPort socks = parseDialAddress(environment.get("AJENT_SOCKS_PROXY")).orElse(null);
+    HostPort api = parseDialAddress(environment.get("AJENT_API_HOST")).orElse(null);
     if (socks == null && api == null) return builder(environment, Route.PROVIDER).build();
-    HostPort oauth = parseDialAddress(environment.get("AGENTTY_OAUTH_HOST")).orElse(null);
+    HostPort oauth = parseDialAddress(environment.get("AJENT_OAUTH_HOST")).orElse(null);
     var directEnvironment = new HashMap<>(environment);
-    directEnvironment.remove("AGENTTY_SOCKS_PROXY");
-    directEnvironment.remove("AGENTTY_API_HOST");
-    directEnvironment.remove("AGENTTY_OAUTH_HOST");
+    directEnvironment.remove("AJENT_SOCKS_PROXY");
+    directEnvironment.remove("AJENT_API_HOST");
+    directEnvironment.remove("AJENT_OAUTH_HOST");
     HttpClient configuration = builder(directEnvironment, Route.PROVIDER).build();
     return new RoutedHttpClient(configuration, api, oauth, socks,
-        "1".equals(environment.get("AGENTTY_INSECURE")));
+        "1".equals(environment.get("AJENT_INSECURE")));
   }
 
   public static HttpClient createOAuth(Map<String, String> environment) {
@@ -85,16 +85,16 @@ public final class EnvironmentHttpClient {
 
   private static HttpClient.Builder builder(Map<String, String> environment, Route route) {
     Objects.requireNonNull(environment, "environment");
-    boolean insecure = "1".equals(environment.get("AGENTTY_INSECURE"));
+    boolean insecure = "1".equals(environment.get("AJENT_INSECURE"));
     // JDK HttpClient otherwise re-enables endpoint identification internally. This property is
-    // intentionally process-wide, just like AgenTTY's one-shot AGENTTY_INSECURE TLS context.
+    // Intentionally process-wide because the insecure TLS context is configured once per process.
     if (insecure) System.setProperty(DISABLE_HOSTNAME_VERIFICATION, "true");
     HttpClient.Builder builder = HttpClient.newBuilder().proxy(DIRECT);
-    HostPort socks = parseDialAddress(environment.get("AGENTTY_SOCKS_PROXY")).orElse(null);
+    HostPort socks = parseDialAddress(environment.get("AJENT_SOCKS_PROXY")).orElse(null);
     HostPort api = route == Route.PROVIDER
-        ? parseDialAddress(environment.get("AGENTTY_API_HOST")).orElse(null) : null;
+        ? parseDialAddress(environment.get("AJENT_API_HOST")).orElse(null) : null;
     HostPort oauth = route != Route.GENERAL
-        ? parseDialAddress(environment.get("AGENTTY_OAUTH_HOST")).orElse(null) : null;
+        ? parseDialAddress(environment.get("AJENT_OAUTH_HOST")).orElse(null) : null;
     var configuration = new BridgeConfig(socks, api, oauth, route);
     if (configuration.active()) {
       SocksBridge bridge = BRIDGES.computeIfAbsent(configuration, SocksBridge::open);

@@ -109,15 +109,15 @@ class OllamaWireTest {
   void optionEnvironmentOverridesMatchAgenTTYParsingAndPrecedence() {
     var request = new OllamaRequestOptions(16_384, 32_768, true);
     assertThat(OllamaWire.buildOptions(request, Map.of(
-        "AGENTTY_OLLAMA_NUM_CTX", "12288trailing",
-        "AGENTTY_OLLAMA_NUM_PREDICT", "3000x",
-        "AGENTTY_OLLAMA_TEMPERATURE", "0.15ignored")))
+        "AJENT_OLLAMA_NUM_CTX", "12288trailing",
+        "AJENT_OLLAMA_NUM_PREDICT", "3000x",
+        "AJENT_OLLAMA_TEMPERATURE", "0.15ignored")))
         .containsEntry("num_ctx", 12_288)
         .containsEntry("num_predict", 3_000)
         .containsEntry("temperature", 0.15);
     assertThat(OllamaWire.buildOptions(request, Map.of(
-        "AGENTTY_OLLAMA_NUM_CTX", "invalid",
-        "AGENTTY_OLLAMA_TEMPERATURE", "nope")))
+        "AJENT_OLLAMA_NUM_CTX", "invalid",
+        "AJENT_OLLAMA_TEMPERATURE", "nope")))
         .containsEntry("num_ctx", 32_768)
         .containsEntry("temperature", 0.2);
   }

@@ -121,6 +121,16 @@ $env:OPENAI_API_KEY = "..."
 .\ajent.cmd --provider openai --model MODEL_ID --workspace .
 ```
 
+ChatGPT subscription access is a distinct `codex` provider. Sign in with the
+official Codex CLI, then explicitly copy that login into Ajent's encrypted
+store:
+
+```powershell
+codex login
+.\ajent.cmd login --provider codex
+.\ajent.cmd --provider codex --model MODEL_ID --workspace .
+```
+
 Local providers do not require a key:
 
 ```powershell
@@ -138,6 +148,10 @@ include:
 
 - `Enter`: submit; `Shift-Enter` or `Alt-Enter`: insert a newline
 - `Esc`: cancel an active model turn or close the current modal
+- `Page Up` / `Page Down`: browse the in-session transcript;
+  `Esc` or `End` returns to the live view
+- mouse drag uses the terminal's native text selection; in Windows Terminal,
+  `Ctrl-Shift-C` copies the selection and `Ctrl-Shift-V` pastes
 - `Ctrl-C`: exit
 - `Ctrl-J`: browse saved threads
 - `Alt-Left` / `Alt-Right`: cycle recent threads
@@ -149,13 +163,15 @@ include:
 - `#` at a word boundary: attach a workspace symbol excerpt
 - bracketed text paste: insert one compact paste attachment chip
 - `Ctrl-V` / `Alt-V`: smart-paste an image first, then clipboard text
-- `Y` / `N` and `A` / `X` in change review: mark one hunk or all hunks
+- `Y` / `N` in change review: mark the active hunk; `A` / `X` apply to all
+- `Shift-A` / `Shift-X` outside the modal: accept or reject all pending changes
 
 Write, execution, and network tools are governed by the active permission
 profile. The `ask` profile prompts before consequential operations; `minimal`
 also prompts for reads, while `write` is fully autonomous. A fresh interactive
-settings file starts in AgenTTY-compatible `write` mode, and later launches
-restore the saved profile.
+settings file starts in `write` mode, and later launches restore the saved
+profile from `~/.ajent/settings.json`. Ajent does not read AgenTTY state or
+credentials.
 The `task` tool delegates a self-contained job to an isolated subagent using
 the currently selected provider and model. Explorer and reviewer delegates are
 read-only; tester, coder, and general delegates receive their native scoped
@@ -210,7 +226,7 @@ remaining native behavior.
 - [Environment variable reference](docs/ENVIRONMENT.md)
 - [Authentication](docs/AUTH.md) and [providers](docs/PROVIDERS.md)
 - [Terminal UI](docs/UI.md), [rendering](docs/RENDERING.md), and
-  [inline scrollback](docs/INLINE_SCROLLBACK.md)
+  [session scrollback](docs/INLINE_SCROLLBACK.md)
 - [Tools, permissions, and subagents](docs/TOOLS.md)
 - [ACP and MCP protocols](docs/PROTOCOLS.md)
 - [Running assistant code blocks](docs/RUN_CODE_BLOCK.md)

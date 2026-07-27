@@ -13,31 +13,31 @@ class MachineSeedTest {
     assertThat(MachineSeed.windows(
         Optional.of("machine-guid"), Optional.of("fallback-host"),
         Map.of("USERNAME", "alice")))
-        .isEqualTo("machine-guid\u001falice\u001fagentty-credentials-v1");
+        .isEqualTo("machine-guid\u001falice\u001fajent-credentials-v1");
     assertThat(MachineSeed.windows(
         Optional.empty(), Optional.of("computer"), Map.of("USERNAME", "bob")))
-        .isEqualTo("computer\u001fbob\u001fagentty-credentials-v1");
+        .isEqualTo("computer\u001fbob\u001fajent-credentials-v1");
   }
 
   @Test
   void windowsFallbackAndUnixUidBindingMatchAgenTTY() {
     assertThat(MachineSeed.windows(Optional.empty(), Optional.empty(), Map.of()))
-        .isEqualTo("agentty-fallback-seed\u001fagentty-credentials-v1");
+        .isEqualTo("ajent-fallback-seed\u001fajent-credentials-v1");
     assertThat(MachineSeed.unix(Optional.of("machine-id"), Optional.of("host"), 1001))
-        .isEqualTo("machine-id\u001f1001\u001fagentty-credentials-v1");
+        .isEqualTo("machine-id\u001f1001\u001fajent-credentials-v1");
     assertThat(MachineSeed.unix(Optional.empty(), Optional.of("host"), 42))
-        .isEqualTo("host\u001f42\u001fagentty-credentials-v1");
+        .isEqualTo("host\u001f42\u001fajent-credentials-v1");
     assertThat(MachineSeed.unix(Optional.empty(), Optional.empty(), 0))
-        .isEqualTo("\u001f0\u001fagentty-credentials-v1");
+        .isEqualTo("\u001f0\u001fajent-credentials-v1");
     assertThat(MachineSeed.windows(
         Optional.empty(), Optional.empty(), Map.of("USERNAME", "")))
-        .isEqualTo("\u001f\u001fagentty-credentials-v1");
+        .isEqualTo("\u001f\u001fajent-credentials-v1");
   }
 
   @Test
   void currentSeedUsesTheNativeMachineDiscoveryPath() {
     assertThat(MachineSeed.current())
         .isNotBlank()
-        .endsWith("\u001fagentty-credentials-v1");
+        .endsWith("\u001fajent-credentials-v1");
   }
 }

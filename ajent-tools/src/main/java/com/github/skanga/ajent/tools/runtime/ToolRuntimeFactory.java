@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.tools.runtime;
 
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import com.github.skanga.ajent.provider.EnvironmentHttpClient;
 import com.github.skanga.ajent.provider.ToolSpecification;
 import com.github.skanga.ajent.tools.fs.FileTools;
@@ -14,7 +14,7 @@ import com.github.skanga.ajent.tools.policy.EffectSet;
 import com.github.skanga.ajent.tools.process.ProcessTools;
 import com.github.skanga.ajent.tools.process.ProcessRunner;
 import com.github.skanga.ajent.tools.prompt.AgentSystemPrompt;
-import com.github.skanga.ajent.tools.rag.AgenttyDocRetriever;
+import com.github.skanga.ajent.tools.rag.AjentDocRetriever;
 import com.github.skanga.ajent.tools.rag.EmbeddingClient;
 import com.github.skanga.ajent.tools.rag.JdkOllamaEmbeddingClient;
 import com.github.skanga.ajent.tools.rag.JdkOllamaGenerationTransport;
@@ -133,27 +133,27 @@ public final class ToolRuntimeFactory {
     EmbeddingClient.Config embedding = EmbeddingClient.Config.fromEnvironment(environment);
     var localClient = EnvironmentHttpClient.builder(environment).build();
     var embeddings = new JdkOllamaEmbeddingClient(localClient);
-    boolean expand = enabled(environment.get("AGENTTY_RAG_EXPAND"), false);
-    boolean neural = enabled(environment.get("AGENTTY_RAG_NEURAL"), false);
+    boolean expand = enabled(environment.get("AJENT_RAG_EXPAND"), false);
+    boolean neural = enabled(environment.get("AJENT_RAG_NEURAL"), false);
     var expander = expand
         ? new RagQueryExpander(new JdkOllamaGenerationTransport(localClient)) : null;
     var expansionConfig = expand ? new RagQueryExpander.Config(
         embedding.host(), embedding.port(), expansionModel(environment), expansionVariants(
-            environment.get("AGENTTY_RAG_EXPAND_N"))) : null;
+            environment.get("AJENT_RAG_EXPAND_N"))) : null;
     var reranker = neural
         ? new NeuralReranker(new JdkOllamaScoringTransport(localClient)) : null;
     var neuralConfig = neural ? new NeuralReranker.Config(
         embedding.host(), embedding.port(), environment.getOrDefault(
-            "AGENTTY_RAG_NEURAL_MODEL", "").isEmpty() ? "llama3.2"
-                : environment.get("AGENTTY_RAG_NEURAL_MODEL"),
+            "AJENT_RAG_NEURAL_MODEL", "").isEmpty() ? "llama3.2"
+                : environment.get("AJENT_RAG_NEURAL_MODEL"),
         4, Duration.ofSeconds(30)) : null;
-    var mcp = enabled(environment.get("AGENTTY_RAG_MCP"), false)
+    var mcp = enabled(environment.get("AJENT_RAG_MCP"), false)
         ? configuration.externalTools().knowledgeSource(embedding, embeddings).orElse(null) : null;
-    var retriever = new AgenttyDocRetriever(
+    var retriever = new AjentDocRetriever(
         configuration.docsRoot(), new SkillsKnowledgeSource(skills),
         new MemoryKnowledgeSource(memory), mcp,
-        enabled(environment.get("AGENTTY_RAG_SKILLS"), true),
-        enabled(environment.get("AGENTTY_RAG_MEMORY"), true),
+        enabled(environment.get("AJENT_RAG_SKILLS"), true),
+        enabled(environment.get("AJENT_RAG_MEMORY"), true),
         expander, expansionConfig, reranker, neuralConfig, new RagCorpus(embeddings), embedding);
     var host = new HostTools(
         configuration.todoSink(), skills.resolver(), retriever, configuration.subagentRunner());
@@ -172,7 +172,7 @@ public final class ToolRuntimeFactory {
     if (Files.isDirectory(docs)) {
       return docs;
     }
-    Path knowledge = workspace.resolve(".agentty/knowledge");
+    Path knowledge = workspace.resolve(".ajent/knowledge");
     return Files.isDirectory(knowledge) ? knowledge : null;
   }
 
@@ -183,8 +183,8 @@ public final class ToolRuntimeFactory {
   }
 
   private static String expansionModel(Map<String, String> environment) {
-    String model = environment.getOrDefault("AGENTTY_RAG_EXPAND_MODEL", "");
-    if (model.isEmpty()) model = environment.getOrDefault("AGENTTY_MODEL", "");
+    String model = environment.getOrDefault("AJENT_RAG_EXPAND_MODEL", "");
+    if (model.isEmpty()) model = environment.getOrDefault("AJENT_MODEL", "");
     return model.isEmpty() ? "llama3.2" : model;
   }
 
@@ -193,7 +193,7 @@ public final class ToolRuntimeFactory {
     try {
       return Math.clamp(Integer.parseInt(value), 1, 8);
     } catch (NumberFormatException exception) {
-      AgenttyDebugLog.log("rag.expand_n.env", exception);
+      AjentDebugLog.log("rag.expand_n.env", exception);
       return 4;
     }
   }

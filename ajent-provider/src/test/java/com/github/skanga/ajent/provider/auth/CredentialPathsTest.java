@@ -12,19 +12,19 @@ class CredentialPathsTest {
   void xdgPathTakesPriority() {
     assertThat(CredentialPaths.credentialsPath(
         Map.of("XDG_CONFIG_HOME", "C:/config", "HOME", "C:/home"), Path.of("C:/cwd")))
-        .isEqualTo(Path.of("C:/config/agentty/credentials.json"));
+        .isEqualTo(Path.of("C:/config/ajent/credentials.json"));
   }
 
   @Test
-  void homeThenUserProfileThenWorkingDirectoryFollowAgenTTY() {
+  void homeThenUserProfileThenWorkingDirectoryUseAjentNamespace() {
     assertThat(CredentialPaths.credentialsPath(Map.of("HOME", "C:/home"), Path.of("C:/cwd")))
-        .isEqualTo(Path.of("C:/home/.config/agentty/credentials.json"));
+        .isEqualTo(Path.of("C:/home/.config/ajent/credentials.json"));
     assertThat(CredentialPaths.credentialsPath(
         Map.of("USERPROFILE", "C:/users/alice"), Path.of("C:/cwd")))
-        .isEqualTo(Path.of("C:/users/alice/.config/agentty/credentials.json"));
+        .isEqualTo(Path.of("C:/users/alice/.config/ajent/credentials.json"));
     assertThat(CredentialPaths.credentialsPath(Map.of(), Path.of("C:/cwd")))
-        .isEqualTo(Path.of("C:/cwd/.config/agentty/credentials.json"));
+        .isEqualTo(Path.of("C:/cwd/.config/ajent/credentials.json"));
     assertThat(CredentialPaths.systemCredentialsPath().toString())
-        .endsWith(Path.of("agentty", "credentials.json").toString());
+        .endsWith(Path.of("ajent", "credentials.json").toString());
   }
 }

@@ -95,11 +95,49 @@ class LiveProviderFactoryTest {
   }
 
   @Test
+  void routesCodexToItsOwnResponsesRequestType(@TempDir Path root) throws Exception {
+    var components = components(root);
+    var configuration = new LiveProviderFactory.Configuration(
+        "codex", "gpt-5.2-codex", new ProviderAuth.Empty(), "high",
+        components.systemPrompt(), 272_000, Map.of());
+
+    assertThat(LiveProviderFactory.request(configuration,
+        List.of(new Message(Role.USER, "hello", List.of(), List.of()))))
+        .isInstanceOfSatisfying(HttpProviderPort.Request.Codex.class, value -> {
+          assertThat(value.value().model()).isEqualTo("gpt-5.2-codex");
+          assertThat(value.value().instructions()).startsWith("You are ajent");
+          assertThat(value.value().reasoningEffort()).isEqualTo("high");
+          assertThat(value.value().messages()).hasSize(1);
+          assertThat(value.value().tools()).extracting(ToolSpecification::name).hasSize(22);
+        });
+  }
+
+  @Test
+  void explicitRequestPathClampsCodexEffortAndUsesSuppliedPromptAndTools(
+      @TempDir Path root) throws Exception {
+    var components = components(root);
+    var configuration = new LiveProviderFactory.Configuration(
+        "codex", "codex-mini-latest", new ProviderAuth.Empty(), "low",
+        components.systemPrompt(), 272_000, Map.of());
+    var tool = new ToolSpecification("custom", "custom",
+        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode(), false);
+
+    assertThat(LiveProviderFactory.request(
+        configuration, List.of(), "explicit prompt", List.of(tool), 1234))
+        .isInstanceOfSatisfying(HttpProviderPort.Request.Codex.class, value -> {
+          assertThat(value.value().instructions()).isEqualTo("explicit prompt");
+          assertThat(value.value().tools()).containsExactly(tool);
+          assertThat(value.value().maxTokens()).isEqualTo(1234);
+          assertThat(value.value().reasoningEffort()).isEqualTo("medium");
+        });
+  }
+
+  @Test
   void defaultsBlankProviderAndModelAndHonorsOutputOverride(@TempDir Path root) throws Exception {
     var components = components(root);
     var configuration = new LiveProviderFactory.Configuration(
         "", "", new ProviderAuth.Empty(), "", components.systemPrompt(), 0,
-        Map.of("AGENTTY_MAX_OUTPUT_TOKENS", "12345suffix"));
+        Map.of("AJENT_MAX_OUTPUT_TOKENS", "12345suffix"));
 
     assertThat(LiveProviderFactory.request(configuration, List.of()))
         .isInstanceOfSatisfying(HttpProviderPort.Request.Anthropic.class, value -> {

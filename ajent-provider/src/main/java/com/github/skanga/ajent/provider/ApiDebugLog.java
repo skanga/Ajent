@@ -24,11 +24,11 @@ final class ApiDebugLog {
   }
 
   static ApiDebugLog open(Map<String, String> environment) {
-    String enabled = environment.get("AGENTTY_DEBUG_API");
+    String enabled = environment.get("AJENT_DEBUG_API");
     if (enabled == null || enabled.isEmpty() || enabled.charAt(0) == '0') return null;
-    String configured = environment.get("AGENTTY_DEBUG_FILE");
+    String configured = environment.get("AJENT_DEBUG_FILE");
     Path path = Path.of(configured == null || configured.isEmpty()
-        ? "agentty-api.log" : configured).toAbsolutePath().normalize();
+        ? "ajent-api.log" : configured).toAbsolutePath().normalize();
     return LOGS.computeIfAbsent(path, ApiDebugLog::open);
   }
 

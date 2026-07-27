@@ -18,7 +18,7 @@ class SystemClipboardReaderTest {
     var commands = new ArrayList<List<String>>();
     var desktop = desktop(image("desktop"), Optional.of("desktop text"));
     var windows = new SystemClipboardReader(
-        Map.of("AGENTTY_CLIPBOARD_CMD", "get-image"), "Windows 11", desktop,
+        Map.of("AJENT_CLIPBOARD_CMD", "get-image"), "Windows 11", desktop,
         command -> { commands.add(command); return Optional.of(PNG); });
 
     assertThat(windows.image()).get().extracting(Attachment::path).isEqualTo("<clipboard>");
@@ -26,7 +26,7 @@ class SystemClipboardReaderTest {
         List.of("cmd.exe", "/d", "/s", "/c", "get-image"));
 
     var unix = new SystemClipboardReader(
-        Map.of("AGENTTY_CLIPBOARD_CMD", "get-image"), "Linux", desktop,
+        Map.of("AJENT_CLIPBOARD_CMD", "get-image"), "Linux", desktop,
         command -> { commands.add(command); return Optional.of("bad".getBytes()); });
     assertThat(unix.image()).isEmpty();
     assertThat(commands.getLast()).isEqualTo(List.of("/bin/sh", "-c", "get-image"));

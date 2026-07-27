@@ -14,15 +14,15 @@ final class McpConfigLoaderTest {
       throws Exception {
     Path workspace = Files.createDirectories(root.resolve("workspace"));
     Path home = Files.createDirectories(root.resolve("home"));
-    Path project = Files.createDirectories(workspace.resolve(".agentty")).resolve("mcp.json");
-    Path user = Files.createDirectories(home.resolve(".agentty")).resolve("mcp.json");
+    Path project = Files.createDirectories(workspace.resolve(".ajent")).resolve("mcp.json");
+    Path user = Files.createDirectories(home.resolve(".ajent")).resolve("mcp.json");
     Path explicit = root.resolve("explicit.json");
     Files.writeString(project, config("project", "project-command"));
     Files.writeString(user, config("user", "user-command"));
     Files.writeString(explicit, config("explicit", "explicit-command"));
 
     McpConfigLoader.LoadResult selected = McpConfigLoader.load(workspace, home,
-        Map.of("AGENTTY_MCP_CONFIG", explicit.toString()));
+        Map.of("AJENT_MCP_CONFIG", explicit.toString()));
     assertThat(selected.path()).contains(explicit.toAbsolutePath());
     assertThat(selected.projectLocal()).isFalse();
     assertThat(selected.permitted()).isTrue();
@@ -35,10 +35,10 @@ final class McpConfigLoaderTest {
     assertThat(blocked.permitted()).isFalse();
     assertThat(blocked.servers()).isEmpty();
     assertThat(blocked.diagnostics()).singleElement().asString()
-        .contains("AGENTTY_MCP_ALLOW_PROJECT=1");
+        .contains("AJENT_MCP_ALLOW_PROJECT=1");
 
     McpConfigLoader.LoadResult allowed = McpConfigLoader.load(workspace, home,
-        Map.of("AGENTTY_MCP_ALLOW_PROJECT", "Yes"));
+        Map.of("AJENT_MCP_ALLOW_PROJECT", "Yes"));
     assertThat(allowed.permitted()).isTrue();
     assertThat(allowed.servers()).singleElement().satisfies(server ->
         assertThat(server.name()).isEqualTo("project"));
@@ -51,7 +51,7 @@ final class McpConfigLoaderTest {
         assertThat(server.name()).isEqualTo("user"));
 
     McpConfigLoader.LoadResult missingExplicit = McpConfigLoader.load(workspace, home,
-        Map.of("AGENTTY_MCP_CONFIG", root.resolve("absent.json").toString()));
+        Map.of("AJENT_MCP_CONFIG", root.resolve("absent.json").toString()));
     assertThat(missingExplicit.path()).isEmpty();
     assertThat(missingExplicit.servers()).isEmpty();
   }
@@ -69,9 +69,9 @@ final class McpConfigLoaderTest {
         }}
         """);
     McpConfigLoader.LoadResult loaded = McpConfigLoader.load(root, root,
-        Map.of("AGENTTY_MCP_CONFIG", config.toString(),
-            "AGENTTY_MCP_TIMEOUT_MS", "2500",
-            "AGENTTY_MCP_CONNECT_TIMEOUT_MS", "9000"));
+        Map.of("AJENT_MCP_CONFIG", config.toString(),
+            "AJENT_MCP_TIMEOUT_MS", "2500",
+            "AJENT_MCP_CONNECT_TIMEOUT_MS", "9000"));
 
     assertThat(loaded.callTimeout()).isEqualTo(Duration.ofMillis(2500));
     assertThat(loaded.connectTimeout()).isEqualTo(Duration.ofMillis(9000));
@@ -102,9 +102,9 @@ final class McpConfigLoaderTest {
     Path malformed = root.resolve("malformed.json");
     Files.writeString(malformed, "{");
     McpConfigLoader.LoadResult bad = McpConfigLoader.load(root, root,
-        Map.of("AGENTTY_MCP_CONFIG", malformed.toString(),
-            "AGENTTY_MCP_TIMEOUT_MS", "nope",
-            "AGENTTY_MCP_CONNECT_TIMEOUT_MS", "-1"));
+        Map.of("AJENT_MCP_CONFIG", malformed.toString(),
+            "AJENT_MCP_TIMEOUT_MS", "nope",
+            "AJENT_MCP_CONNECT_TIMEOUT_MS", "-1"));
     assertThat(bad.servers()).isEmpty();
     assertThat(bad.callTimeout()).isEqualTo(Duration.ofSeconds(60));
     assertThat(bad.connectTimeout()).isEqualTo(Duration.ofSeconds(15));
@@ -113,7 +113,7 @@ final class McpConfigLoaderTest {
     Path empty = root.resolve("empty.json");
     Files.writeString(empty, "{}");
     McpConfigLoader.LoadResult noServers = McpConfigLoader.load(root, root,
-        Map.of("AGENTTY_MCP_CONFIG", empty.toString()));
+        Map.of("AJENT_MCP_CONFIG", empty.toString()));
     assertThat(noServers.servers()).isEmpty();
     assertThat(noServers.diagnostics()).isEmpty();
   }

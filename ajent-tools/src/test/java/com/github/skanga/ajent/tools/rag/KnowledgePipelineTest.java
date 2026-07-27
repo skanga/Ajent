@@ -159,7 +159,7 @@ final class KnowledgePipelineTest {
   @Test void skillsAndBothMemoryScopesAreLazyKnowledgeSources(@TempDir Path root) throws Exception {
     Path home = Files.createDirectories(root.resolve("home"));
     Path work = Files.createDirectories(root.resolve("work"));
-    Path skillFile = work.resolve(".agentty/skills/pdf/SKILL.md");
+    Path skillFile = work.resolve(".ajent/skills/pdf/SKILL.md");
     Files.createDirectories(skillFile.getParent());
     Files.writeString(skillFile, "---\nname: pdf\ndescription: Extract tabular PDF data\n---\n"
         + "Use pdfplumber for tables and OCR fallback.\n");

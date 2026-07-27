@@ -245,8 +245,9 @@ final class McpHttpTransportTest {
         default -> respond(exchange, 202, null, null, "");
       }
     })) {
-      try (var transport = new McpHttpTransport(
-          new McpConfigLoader.Server.Http("branches", endpoint(server), Map.of()))) {
+      var transport = new McpHttpTransport(
+          new McpConfigLoader.Server.Http("branches", endpoint(server), Map.of()));
+      try {
         var changed = new AtomicReference<JsonNode>();
         transport.onNotification((method, parameters) -> changed.set(parameters));
         var parameters = JSON.createObjectNode().put("present", true);
@@ -265,6 +266,8 @@ final class McpHttpTransportTest {
         transport.request("after", JSON.createObjectNode(), Duration.ofSeconds(5));
         transport.notify("empty-notification", JSON.createObjectNode().put("present", true));
         transport.close();
+        transport.close();
+      } finally {
         transport.close();
       }
     }

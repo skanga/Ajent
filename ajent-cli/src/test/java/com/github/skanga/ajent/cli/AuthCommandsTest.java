@@ -6,6 +6,7 @@ import com.github.skanga.ajent.provider.auth.AnthropicOAuthLogin;
 import com.github.skanga.ajent.provider.auth.Credential;
 import com.github.skanga.ajent.provider.auth.CredentialStore;
 import com.github.skanga.ajent.provider.auth.OAuthTokenClient;
+import com.github.skanga.ajent.provider.codex.CodexCredentialStore;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -94,6 +95,35 @@ final class AuthCommandsTest {
     assertThat(login(commands, "api\nsk-ant-alias\n").code()).isZero();
   }
 
+  @Test void explicitlyImportsCodexCliCredentialsIntoAjentsEncryptedStore() throws Exception {
+    Path codexHome = java.nio.file.Files.createDirectories(temporary.resolve("codex-home"));
+    String jwt = jwt("""
+        {"https://api.openai.com/auth":{"chatgpt_account_id":"acct"}}
+        """);
+    java.nio.file.Files.writeString(codexHome.resolve("auth.json"), """
+        {"tokens":{"access_token":"access","refresh_token":"refresh","id_token":"%s"}}
+        """.formatted(jwt));
+    var codexStore = new CodexCredentialStore(temporary.resolve("ajent-codex.json"), "seed");
+    var commands = new AuthCommands(store(), Map.of("CODEX_HOME", codexHome.toString()),
+        successFlow(), ignored -> {}, () -> 1_000_000_000L, codexStore);
+    var output = new ByteArrayOutputStream();
+    var error = new ByteArrayOutputStream();
+
+    assertThat(commands.loginCodex(print(output), print(error))).isZero();
+    assertThat(error.toString(StandardCharsets.UTF_8)).isEmpty();
+    assertThat(output.toString(StandardCharsets.UTF_8))
+        .contains("Imported Codex CLI login", codexStore.path().toString());
+    assertThat(codexStore.load().orElseThrow().accountId()).isEqualTo("acct");
+    output.reset();
+    assertThat(commands.statusCodex(print(output))).isZero();
+    assertThat(output.toString(StandardCharsets.UTF_8))
+        .contains("Saved method: chatgpt_subscription", "Refresh token: present")
+        .doesNotContain("access", "refresh", jwt);
+    output.reset();
+    assertThat(commands.logoutCodex(print(output), print(error))).isZero();
+    assertThat(codexStore.load()).isEmpty();
+  }
+
   private CredentialStore store() {
     return new CredentialStore(temporary.resolve("credentials.json"), "machine-seed");
   }
@@ -129,4 +159,10 @@ final class AuthCommandsTest {
     return output.toString(StandardCharsets.UTF_8);
   }
   private record Execution(int code, String output, String error) {}
+
+  private static String jwt(String payload) {
+    var encoder = java.util.Base64.getUrlEncoder().withoutPadding();
+    return encoder.encodeToString("{}".getBytes(StandardCharsets.UTF_8)) + "."
+        + encoder.encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + ".sig";
+  }
 }

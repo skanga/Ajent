@@ -28,7 +28,7 @@ public final class ProcessTools {
 
   public ProcessTools(WorkspaceSandbox sandbox) { this(sandbox, new ProcessRunner()); }
   public ProcessTools(WorkspaceSandbox sandbox, ProcessRunner runner) {
-    this(sandbox, runner, Path.of(System.getProperty("java.io.tmpdir"), "agentty-bash"));
+    this(sandbox, runner, Path.of(System.getProperty("java.io.tmpdir"), "ajent-bash"));
   }
 
   ProcessTools(WorkspaceSandbox sandbox, ProcessRunner runner, Path spillRoot) {

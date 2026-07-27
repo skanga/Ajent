@@ -94,7 +94,7 @@ final class AcpCommand {
       error.print("ajent: " + exception.getMessage() + "\n");
       return USAGE_ERROR;
     }
-    Path dataDirectory = home.resolve(".agentty");
+    Path dataDirectory = home.resolve(".ajent");
     Settings settings = new SettingsStore(dataDirectory).load();
     String provider = arguments.provider().isBlank() ? settings.provider() : arguments.provider();
     if (provider.isBlank()) provider = "anthropic";
@@ -138,7 +138,7 @@ final class AcpCommand {
           () -> !activeAuth.get().isEmpty() || keylessLocal);
       error.print("ajent: ACP agent ready on stdio (profile="
           + profile.name().toLowerCase(java.util.Locale.ROOT) + ")\n");
-      String trace = environment.get("AGENTTY_ACP_TRACE");
+      String trace = environment.get("AJENT_ACP_TRACE");
       var wireTrace = trace != null && !trace.isEmpty() && !"0".equals(trace)
           ? (java.util.function.Consumer<String>) line -> error.print(line + "\n")
           : (java.util.function.Consumer<String>) ignored -> { };
@@ -175,7 +175,7 @@ final class AcpCommand {
   }
 
   private Path resolveDocs(Path workspace) {
-    String configured = environment.getOrDefault("AGENTTY_DOCS_DIR", "");
+    String configured = environment.getOrDefault("AJENT_DOCS_DIR", "");
     if (!configured.isBlank()) {
       try {
         return resolve(configured);
@@ -185,7 +185,7 @@ final class AcpCommand {
     }
     Path docs = workspace.resolve("docs");
     if (Files.isDirectory(docs)) return docs;
-    Path knowledge = workspace.resolve(".agentty/knowledge");
+    Path knowledge = workspace.resolve(".ajent/knowledge");
     return Files.isDirectory(knowledge) ? knowledge : null;
   }
 

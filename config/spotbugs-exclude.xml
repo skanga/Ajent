@@ -57,7 +57,7 @@
   <!-- Injected service/cache objects intentionally retain shared runtime identity.
        WorkspaceIndex stores and returns immutable List.copyOf snapshots. -->
   <Match>
-    <Class name="~com\.github\.skanga\.ajent\.tools\.(host\.HostTools|memory\.MemoryTools|rag\.(AgenttyDocRetriever|CorpusKnowledgeSource|McpResourceKnowledgeSource|MemoryKnowledgeSource)|runtime\.(ToolDispatcher|ToolRuntimeFactory.*)|workspace\.WorkspaceIndex)"/>
+    <Class name="~com\.github\.skanga\.ajent\.tools\.(host\.HostTools|memory\.MemoryTools|rag\.(AjentDocRetriever|CorpusKnowledgeSource|McpResourceKnowledgeSource|MemoryKnowledgeSource)|runtime\.(ToolDispatcher|ToolRuntimeFactory.*)|workspace\.WorkspaceIndex)"/>
     <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
   </Match>
 

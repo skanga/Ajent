@@ -77,10 +77,10 @@ class CredentialStoreTest {
   void productionFactoryUsesResolvedCompatibilityPathAndSeed(@TempDir Path directory) {
     var store = CredentialStore.forEnvironment(
         Map.of("XDG_CONFIG_HOME", directory.toString()), directory,
-        "machine\u001fuser\u001fagentty-credentials-v1");
+        "machine\u001fuser\u001fajent-credentials-v1");
 
     assertThat(store.save(new Credential.ApiKey("shared"))).isTrue();
-    assertThat(Files.exists(directory.resolve("agentty/credentials.json"))).isTrue();
+    assertThat(Files.exists(directory.resolve("ajent/credentials.json"))).isTrue();
     assertThat(store.load()).contains(new Credential.ApiKey("shared"));
   }
 }

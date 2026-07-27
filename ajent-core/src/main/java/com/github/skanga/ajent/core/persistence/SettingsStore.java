@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.core.persistence;
 
-import com.github.skanga.ajent.core.AgenttyDebugLog;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -62,7 +62,7 @@ public final class SettingsStore {
           text(root, "effort"),
           grants);
     } catch (IOException | RuntimeException exception) {
-      AgenttyDebugLog.log("persistence.load_settings", exception);
+      AjentDebugLog.log("persistence.load_settings", exception);
       return Settings.defaults();
     }
   }

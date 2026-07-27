@@ -24,14 +24,14 @@ final class AirgapCommandTest {
     assertThat(run(root, Map.of(), List.of(), ignored -> 0).code()).isEqualTo(64);
     assertThat(run(root, Map.of(), List.of("host", "extra"), ignored -> 0).error())
         .startsWith("ajent airgap: unrecognized argument: extra");
-    assertThat(run(root, Map.of(), List.of("--remote-agentty"), ignored -> 0).code())
+    assertThat(run(root, Map.of(), List.of("--remote-ajent"), ignored -> 0).code())
         .isEqualTo(64);
   }
 
   @Test
   void printsNoPtyZedConfigurationAndForwardsAcpTail(@TempDir Path root) {
     var result = run(root, Map.of(),
-        List.of("user@host", "--remote-agentty", "/opt/ajent", "--acp",
+        List.of("user@host", "--remote-ajent", "/opt/ajent", "--acp",
             "-m", "claude", "--profile", "ask"),
         ignored -> { throw new AssertionError("must not spawn"); });
 
@@ -39,7 +39,7 @@ final class AirgapCommandTest {
     assertThat(result.error()).contains(
         "\"command\": \"ssh\"",
         "\"-T\", \"-R\", \"1080\"",
-        "AGENTTY_SOCKS_PROXY=localhost:1080 exec /opt/ajent acp -m claude --profile ask",
+        "AJENT_SOCKS_PROXY=localhost:1080 exec /opt/ajent acp -m claude --profile ask",
         root.resolve(".config/zed/settings.json").toString(),
         "ajent (airgap)");
   }
@@ -48,8 +48,8 @@ final class AirgapCommandTest {
   void launchesInteractiveSshWithNativeOrderingAndForwardedEnvironment(@TempDir Path root) {
     var calls = new ArrayList<List<String>>();
     Map<String, String> environment = Map.of(
-        "AGENTTY_AIRGAP_SSH", "-p 2222 -J bastion",
-        "AGENTTY_CLIPBOARD_CMD", "printf 'image'",
+        "AJENT_AIRGAP_SSH", "-p 2222 -J bastion",
+        "AJENT_CLIPBOARD_CMD", "printf 'image'",
         "TERM", "xterm-256color", "COLORTERM", "truecolor");
     var result = run(root, environment, List.of("user@host"), call -> {
       calls.add(call); return 23;
@@ -61,7 +61,7 @@ final class AirgapCommandTest {
           "ServerAliveInterval=30");
       assertThat(call).containsSubsequence("-p", "2222", "-J", "bastion", "user@host");
       assertThat(call.getLast()).contains(
-          "AGENTTY_CLIPBOARD_CMD='printf '\\''image'\\'''",
+          "AJENT_CLIPBOARD_CMD='printf '\\''image'\\'''",
           "TERM='xterm-256color'", "COLORTERM='truecolor'", "exec ajent");
     });
   }
@@ -82,7 +82,7 @@ final class AirgapCommandTest {
 
   @Test
   void setupCopiesCredentialsInThreeFailFastSteps(@TempDir Path root) throws Exception {
-    Path credential = root.resolve(".config/agentty/credentials.json");
+    Path credential = root.resolve(".config/ajent/credentials.json");
     Files.createDirectories(credential.getParent());
     Files.writeString(credential, "credential");
     var calls = new ArrayList<List<String>>();
@@ -91,10 +91,10 @@ final class AirgapCommandTest {
     });
     assertThat(result.code()).isZero();
     assertThat(calls).containsExactly(
-        List.of("ssh", "host", "mkdir -p ~/.config/agentty && chmod 700 ~/.config/agentty"),
+        List.of("ssh", "host", "mkdir -p ~/.config/ajent && chmod 700 ~/.config/ajent"),
         List.of("scp", "-q", credential.toString(),
-            "host:.config/agentty/credentials.json"),
-        List.of("ssh", "host", "chmod 600 ~/.config/agentty/credentials.json"));
+            "host:.config/ajent/credentials.json"),
+        List.of("ssh", "host", "chmod 600 ~/.config/ajent/credentials.json"));
     assertThat(result.error()).contains("credentials copied");
 
     var attempts = new AtomicInteger();
@@ -126,7 +126,7 @@ final class AirgapCommandTest {
     assertThat(noHome).isEqualTo(1);
     assertThat(noHomeError.toString(StandardCharsets.UTF_8)).contains("HOME is unset");
 
-    Path credential = root.resolve(".config/agentty/credentials.json");
+    Path credential = root.resolve(".config/ajent/credentials.json");
     Files.createDirectories(credential.getParent());
     Files.writeString(credential, "credential");
     assertThat(run(root, Map.of(), List.of("--setup", "host"), ignored -> -1))

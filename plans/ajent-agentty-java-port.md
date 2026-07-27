@@ -168,7 +168,7 @@ Exit: domain/core contracts are green without network, terminal, or real filesys
 Tasks:
 
 1. Port thread/settings JSON exactly, including old-field compatibility, message/tool status variants, compactions, metadata-only thread listing, title generation, deletion, and debounced per-thread saves.
-2. Implement atomic `temp -> fsync -> replace` writes with platform-specific best effort and tests for crash/failure paths. Default Ajent data to `~/.ajent`; provide an explicit compatibility/import command for `~/.agentty` rather than silently sharing files.
+2. Implement atomic `temp -> fsync -> replace` writes with platform-specific best effort and tests for crash/failure paths. Ajent data lives only under `~/.ajent`; never read or import `~/.agentty`.
 3. Port credential source precedence and file permissions, and reproduce the v1 envelope exactly: platform machine/user seed (Windows MachineGuid + USERNAME; POSIX machine-id + uid), HKDF-SHA256 with `agentty-credentials-v1`, and AES-256-GCM JSON envelope. Prove Java reads reference fixtures and AgenTTY reads Java fixtures. Any desired format change requires explicit user approval and a consistent top-level parity-scope change; one-time import alone is not parity.
 4. Port the storage-side PKCE/auth value records and API-key/OAuth credential persistence. HTTP exchange, refresh, TLS, proxying, and browser launching belong to S4.
 
@@ -215,7 +215,7 @@ Exit: every built-in except `task` has schema/effect/output golden evidence and 
 
 Tasks:
 
-1. Port skill discovery across `.ajent/.agents/.claude` user/project roots, shadowing, lenient frontmatter, resources, linting, activation/dedup/reset, and allowlisted reads. Add `.agentty` compatibility only as documented import/interop behavior.
+1. Port skill discovery across `.ajent/.agents/.claude` user/project roots, shadowing, lenient frontmatter, resources, linting, activation/dedup/reset, and allowlisted reads. Do not scan `.agentty`.
 2. Port JSONL user/project memory, selection budgets, remember/forget/wipe, corruption tolerance, and prompt injection boundaries.
 3. Port chunking, stemming, BM25, cosine, RRF, HNSW persistence/search, query fusion, MMR, reranking, confidence, compression, knowledge sources/router/pipeline, and optional Ollama embeddings. Algorithms must match reference fixtures before optimizing with Vector API.
 4. Port `search_docs` fallback/index cache and `repo_map` behavior, limits, language heuristics, and guidance.
