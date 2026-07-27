@@ -417,6 +417,7 @@ public final class ThreadStore {
     throw new InvalidData(new DeserializeError(kind, field, detail));
   }
 
+  @SuppressWarnings("serial")
   private static final class InvalidData extends RuntimeException {
     private final DeserializeError error;
     private InvalidData(DeserializeError error) { this.error = error; }

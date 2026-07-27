@@ -65,8 +65,16 @@ final class AcpCommandTest {
         .isEqualTo(2);
     assertThat(run(root, workspace, "", "", Map.of(), workspace.toString(), "invalid")
         .stderr()).contains("--sandbox must be auto, on, or off");
-    assertThat(run(root, workspace, "", "", Map.of(), workspace.toString(), "on")
-        .stderr()).contains("--sandbox=on but no backend available");
+    // Force an OS with no sandbox backend so this stays deterministic regardless of whether the
+    // host has bwrap/sandbox-exec installed.
+    String previousOs = System.setProperty("os.name", "none");
+    try {
+      assertThat(run(root, workspace, "", "", Map.of(), workspace.toString(), "on")
+          .stderr()).contains("--sandbox=on but no backend available");
+    } finally {
+      if (previousOs == null) System.clearProperty("os.name");
+      else System.setProperty("os.name", previousOs);
+    }
   }
 
   @Test

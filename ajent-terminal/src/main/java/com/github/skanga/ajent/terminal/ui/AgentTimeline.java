@@ -168,7 +168,7 @@ public final class AgentTimeline {
     String label;
     Tone tone;
     if (!allDone) {
-      int frame = (int) Math.floorMod(nowNanos / 80_000_000L, SPINNER.length);
+      int frame = Math.floorMod(nowNanos / 80_000_000L, SPINNER.length);
       glyph = SPINNER[frame];
       label = "running";
       tone = Tone.MUTED;

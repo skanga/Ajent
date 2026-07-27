@@ -44,7 +44,7 @@ final class JLineTerminalSessionTest {
   @Test void reportsSizeResizeAndEofAndCloseDisablesActiveMouse() throws Exception {
     var output = new ByteArrayOutputStream();
     Terminal terminal = virtual(new byte[0], output);
-    terminal.setSize(new Size(120, 40));
+    terminal.setSize(Size.of(120, 40));
     var resized = new AtomicReference<JLineTerminalSession.Size>();
     var session = JLineTerminalSession.forTerminal(terminal);
     assertThat(session.size()).isEqualTo(new JLineTerminalSession.Size(120, 40));

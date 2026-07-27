@@ -1104,13 +1104,19 @@ final class NativeMcpParityIT {
       stdin.flush();
     }
 
-    @Override public void close() throws Exception {
+    @Override public void close() throws IOException {
       stdin.close();
-      if (!process.waitFor(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS)) {
+      try {
+        if (!process.waitFor(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS)) {
+          process.destroyForcibly();
+          throw new AssertionError("MCP process did not exit");
+        }
+        stderrReader.join(Duration.ofSeconds(2));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
         process.destroyForcibly();
-        throw new AssertionError("MCP process did not exit");
+        throw new AssertionError("Interrupted awaiting MCP process exit", interrupted);
       }
-      stderrReader.join(Duration.ofSeconds(2));
       assertThat(process.exitValue()).as(stderr()).isZero();
     }
 

@@ -42,6 +42,7 @@ class FsmTest {
   }
 
   @Test
+  @SuppressWarnings("try") // ignored token is dropped unused to model a failed transition.
   void ownedCapabilityCleansUpExactlyOnceOnFailureButNotAfterTransfer() {
     List<String> log = new ArrayList<>();
     try (var token = new Fsm.CapabilityToken<>("conn-ok", value -> log.add("~" + value))) {

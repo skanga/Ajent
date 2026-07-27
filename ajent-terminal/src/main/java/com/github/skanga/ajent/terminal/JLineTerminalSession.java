@@ -56,7 +56,7 @@ public final class JLineTerminalSession implements AutoCloseable {
       Terminal terminal = TerminalBuilder.builder().name("ajent").system(false)
           .streams(System.in, System.out).encoding(StandardCharsets.UTF_8)
           .type("xterm-256color")
-          .size(new org.jline.terminal.Size(fixed.columns(), fixed.rows()))
+          .size(org.jline.terminal.Size.of(fixed.columns(), fixed.rows()))
           .nativeSignals(false).build();
       try {
         return new JLineTerminalSession(terminal);
@@ -96,7 +96,8 @@ public final class JLineTerminalSession implements AutoCloseable {
   }
 
   public Size size() {
-    return new Size(Math.max(0, terminal.getWidth()), Math.max(0, terminal.getHeight()));
+    org.jline.terminal.Size size = terminal.getSize();
+    return new Size(Math.max(0, size.getColumns()), Math.max(0, size.getRows()));
   }
 
   /** Whether JLine owns a real terminal rather than its redirected dumb fallback. */

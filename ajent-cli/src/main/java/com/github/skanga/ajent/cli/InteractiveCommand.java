@@ -141,6 +141,7 @@ final class InteractiveCommand {
         CredentialStore.systemDefault(), EnvironmentHttpClient.createProvider(System.getenv()));
   }
 
+  @SuppressWarnings("try") // mcp is an AutoCloseable held open for the session's duration.
   int run(CliArguments arguments, PrintStream error) {
     Configuration configured = configure(arguments, error);
     if (configured == null) return USAGE_ERROR;

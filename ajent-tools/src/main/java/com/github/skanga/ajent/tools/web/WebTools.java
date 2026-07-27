@@ -55,7 +55,7 @@ public final class WebTools {
     if (!Set.of("GET", "HEAD", "POST").contains(method)) method = "GET";
     var headers = new LinkedHashMap<String, String>();
     JsonNode rawHeaders = args.raw("headers");
-    if (rawHeaders != null && rawHeaders.isObject()) rawHeaders.fields().forEachRemaining(entry -> {
+    if (rawHeaders != null && rawHeaders.isObject()) rawHeaders.properties().forEach(entry -> {
       String key = entry.getKey().toLowerCase(Locale.ROOT);
       if (!key.equals("x-no-jina") && !key.equals("x-agentty-no-jina"))
         headers.put(key, entry.getValue().isTextual() ? entry.getValue().textValue()

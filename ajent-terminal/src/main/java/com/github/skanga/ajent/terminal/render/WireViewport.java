@@ -119,11 +119,11 @@ public final class WireViewport {
 
   private static int saturatingAdd(int left, int right) {
     long value = (long) left + right;
-    return (int) Math.clamp(value, Integer.MIN_VALUE, Integer.MAX_VALUE);
+    return Math.clamp(value, Integer.MIN_VALUE, Integer.MAX_VALUE);
   }
 
   private static int saturatingSubtract(int left, int right) {
     long value = (long) left - right;
-    return (int) Math.clamp(value, Integer.MIN_VALUE, Integer.MAX_VALUE);
+    return Math.clamp(value, Integer.MIN_VALUE, Integer.MAX_VALUE);
   }
 }

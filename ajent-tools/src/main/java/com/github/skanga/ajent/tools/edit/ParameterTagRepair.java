@@ -18,9 +18,8 @@ public final class ParameterTagRepair {
   public static boolean repair(String toolName, ObjectNode arguments) {
     if (!("edit".equals(toolName) || "write".equals(toolName))) return false;
     boolean marker = false;
-    var fields = arguments.fields();
-    while (fields.hasNext()) {
-      JsonNode value = fields.next().getValue();
+    for (var field : arguments.properties()) {
+      JsonNode value = field.getValue();
       if (value.isTextual() && value.textValue().contains(OPEN)) { marker = true; break; }
     }
     if (!marker) return false;
@@ -86,7 +85,7 @@ public final class ParameterTagRepair {
 
   private static Map<String, String> extractTags(ObjectNode arguments) {
     Map<String, String> tags = new LinkedHashMap<>();
-    arguments.fields().forEachRemaining(field -> {
+    arguments.properties().forEach(field -> {
       if (!field.getValue().isTextual()) return;
       String value = field.getValue().textValue();
       int position = 0;

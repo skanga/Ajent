@@ -88,7 +88,7 @@ public final class WorkspaceMatcher {
     }
     if (needleIndex < needle.length()) return Integer.MIN_VALUE;
     score -= skipped;
-    score -= 2 * path.chars().filter(value -> value == '/' || value == '\\').count();
+    score -= 2 * (int) path.chars().filter(value -> value == '/' || value == '\\').count();
     return score + classBias(path) + bonus;
   }
 

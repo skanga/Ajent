@@ -104,7 +104,8 @@ final class InteractiveCodeBlockExecutionTest {
     private int maxBytes;
     private Duration timeout;
 
-    @Override public Result interactivePosixShell(String command, Path directory,
+    @Override @SuppressWarnings("try") // ignored SignalGuard is exercised only for its close().
+    public Result interactivePosixShell(String command, Path directory,
         LiveOutput liveOutput, Supplier<SignalGuard> signalGuard, Heartbeat heartbeat) {
       posixCalls++;
       this.command = command;

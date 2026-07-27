@@ -223,7 +223,8 @@ final class McpHttpTransportTest {
     }
   }
 
-  @Test void handlesBatchesNotificationsMalformedJsonAndMissingResults() throws Exception {
+  @Test @SuppressWarnings("try") // explicit double close() verifies close() is idempotent.
+  void handlesBatchesNotificationsMalformedJsonAndMissingResults() throws Exception {
     var session = new AtomicReference<>("fresh-session");
     try (var server = server(exchange -> {
       JsonNode request = read(exchange);

@@ -157,9 +157,7 @@ public final class ProviderModelCatalog {
         supportsTools = Optional.of(found);
       }
       int contextWindow = 0;
-      var fields = root.path("model_info").fields();
-      while (fields.hasNext()) {
-        var field = fields.next();
+      for (var field : root.path("model_info").properties()) {
         if (field.getKey().endsWith(".context_length") && field.getValue().canConvertToInt()) {
           contextWindow = field.getValue().intValue();
           break;

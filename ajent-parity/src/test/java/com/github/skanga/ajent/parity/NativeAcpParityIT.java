@@ -2867,13 +2867,19 @@ final class NativeAcpParityIT {
       return List.copyOf(frames);
     }
 
-    @Override public void close() throws Exception {
+    @Override public void close() throws IOException {
       stdin.close();
-      if (!process.waitFor(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS)) {
+      try {
+        if (!process.waitFor(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS)) {
+          process.destroyForcibly();
+          throw new AssertionError("ACP process did not exit");
+        }
+        stderrReader.join(Duration.ofSeconds(2));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
         process.destroyForcibly();
-        throw new AssertionError("ACP process did not exit");
+        throw new AssertionError("Interrupted awaiting ACP process exit", interrupted);
       }
-      stderrReader.join(Duration.ofSeconds(2));
       assertThat(process.exitValue()).as(stderr()).isZero();
     }
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 /** Typed MCP protocol/transport failure. */
+@SuppressWarnings("serial")
 public final class McpTransportException extends RuntimeException {
   private final int code;
   private final JsonNode data;

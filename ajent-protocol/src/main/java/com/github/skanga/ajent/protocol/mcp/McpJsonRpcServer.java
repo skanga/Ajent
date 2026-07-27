@@ -221,6 +221,7 @@ public final class McpJsonRpcServer {
     }
   }
 
+  @SuppressWarnings("serial")
   private static final class RpcFailure extends RuntimeException {
     private final int code;
 

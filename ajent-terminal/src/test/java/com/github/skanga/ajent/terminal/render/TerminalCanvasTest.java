@@ -41,7 +41,8 @@ final class TerminalCanvasTest {
     assertThat(canvas.get(1, 1)).isEqualTo(PackedCell.BLANK);
   }
 
-  @Test void fillAndNestedClipsUseRectangleIntersection() {
+  @Test @SuppressWarnings("try") // ignored clip scope is exercised only for its close().
+  void fillAndNestedClipsUseRectangleIntersection() {
     var canvas = new TerminalCanvas(10, 6);
     canvas.pushClip(new TerminalCanvas.Rect(1, 1, 5, 4));
     try (var ignored = canvas.clipScope(new TerminalCanvas.Rect(2, 2, 2, 2))) {
