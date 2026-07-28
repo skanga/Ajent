@@ -17,7 +17,9 @@ import java.util.Set;
 /** Parentless-commit worktree snapshots compatible with AgenTTY's checkpoint refs. */
 public final class GitCheckpointStore {
   private static final String REF_PREFIX = "refs/ajent/checkpoints/";
+  private static final String BACKUP_PREFIX = "refs/ajent/rewind-backups/";
   private static final int KEEP = 64;
+  private static final int KEEP_BACKUPS = 16;
   private static final Duration TIMEOUT = Duration.ofSeconds(120);
   private final Path workingDirectory;
   private final ProcessRunner runner;
@@ -44,18 +46,23 @@ public final class GitCheckpointStore {
 
   public synchronized boolean create(CheckpointId id) {
     if (!valid(id)) return false;
+    if (!snapshot(ref(id), "ajent checkpoint " + id.value())) return false;
+    pruneRefs(REF_PREFIX, KEEP);
+    return true;
+  }
+
+  /** Snapshots the current working tree (respecting .gitignore) to {@code refName}. */
+  private boolean snapshot(String refName, String message) {
     Path scratch = prepareScratch();
     try {
       if (!ok(scratch(List.of("add", "-A", "--ignore-errors"), scratch, 512 * 1024))) return false;
       ProcessRunner.Result tree = scratch(List.of("write-tree"), scratch, 512 * 1024);
       if (!ok(tree)) return false;
       ProcessRunner.Result commit = git(List.of("-c", "user.name=ajent", "-c",
-          "user.email=checkpoint@ajent", "commit-tree", chomp(tree.output()), "-m",
-          "ajent checkpoint " + id.value()), 512 * 1024);
-      if (!ok(commit) || !ok(git(List.of("update-ref", ref(id), chomp(commit.output())),
-          512 * 1024))) return false;
-      prune();
-      return true;
+          "user.email=checkpoint@ajent", "commit-tree", chomp(tree.output()), "-m", message),
+          512 * 1024);
+      if (!ok(commit)) return false;
+      return ok(git(List.of("update-ref", refName, chomp(commit.output())), 512 * 1024));
     } finally {
       deleteQuietly(scratch);
     }
@@ -112,6 +119,13 @@ public final class GitCheckpointStore {
     List<String> current = nulList(git(List.of("ls-files", "-z", "-c", "-o",
         "--exclude-standard"), 16 * 1024 * 1024));
     if (current == null) return failure("failed to list current files");
+    // Restore is destructive (overwrites edits, deletes files added since the checkpoint), so
+    // back up the current working tree first to keep the rewind recoverable. Best effort: a
+    // failed backup must not block the rewind the user asked for.
+    if (snapshot(BACKUP_PREFIX + System.currentTimeMillis(), "ajent rewind backup before "
+        + id.value())) {
+      pruneRefs(BACKUP_PREFIX, KEEP_BACKUPS);
+    }
     Path scratch = prepareScratch();
     try {
       if (!ok(scratch(List.of("read-tree", commit), scratch, 512 * 1024))
@@ -166,12 +180,12 @@ public final class GitCheckpointStore {
     return scratch;
   }
 
-  private void prune() {
+  private void pruneRefs(String prefix, int keep) {
     ProcessRunner.Result listed = git(List.of("for-each-ref", "--sort=creatordate",
-        "--format=%(refname)", REF_PREFIX), 512 * 1024);
+        "--format=%(refname)", prefix), 512 * 1024);
     if (!ok(listed)) return;
     List<String> refs = listed.output().lines().filter(line -> !line.isBlank()).toList();
-    for (int index = 0; index < refs.size() - KEEP; index++) {
+    for (int index = 0; index < refs.size() - keep; index++) {
       git(List.of("update-ref", "-d", refs.get(index)), 8192);
     }
   }

@@ -274,6 +274,33 @@ class FileToolsTest {
         .startsWith("Listing fixture\n");
   }
 
+  @Test
+  void fileStateCacheEvictsLeastRecentlyUsedBeyondCapacity(@TempDir Path directory)
+      throws Exception {
+    int previous = FileTools.fileStateCacheCapacity;
+    FileTools.resetFileStateCaches();
+    FileTools.fileStateCacheCapacity = 2;
+    try {
+      var tools = tools(directory);
+      Path a = Files.writeString(directory.resolve("a.txt"), "aaa\n");
+      Path b = Files.writeString(directory.resolve("b.txt"), "bbb\n");
+      Path c = Files.writeString(directory.resolve("c.txt"), "ccc\n");
+      // Read a, then b, then c: with capacity 2 the least-recently-used entry (a) is evicted.
+      success(tools.execute("read", object().put("path", a.toString())));
+      success(tools.execute("read", object().put("path", b.toString())));
+      success(tools.execute("read", object().put("path", c.toString())));
+      // c is still cached, so a re-read reports "unchanged"...
+      assertThat(success(tools.execute("read", object().put("path", c.toString())))
+          .output().text()).contains("File unchanged since last read");
+      // ...but a was evicted, so its re-read returns real content, not the stale-read signal.
+      assertThat(success(tools.execute("read", object().put("path", a.toString())))
+          .output().text()).contains("aaa").doesNotContain("File unchanged since last read");
+    } finally {
+      FileTools.fileStateCacheCapacity = previous;
+      FileTools.resetFileStateCaches();
+    }
+  }
+
   private static FileTools tools(Path root) {
     return new FileTools(new WorkspaceSandbox(root, root, root));
   }

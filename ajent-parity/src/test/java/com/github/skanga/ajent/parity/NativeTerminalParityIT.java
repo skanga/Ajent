@@ -445,9 +445,11 @@ final class NativeTerminalParityIT {
           "Anthropic API key", "masked login API-key viewport");
       assertMatchingRegion(nativeCapture.checkpointFrame(), javaCapture.checkpointFrame(),
           "Rewind to Checkpoint", "checkpoint picker viewport");
-      assertMatchingRegion(nativeCapture.checkpointRewoundFrame(),
-          javaCapture.checkpointRewoundFrame(),
-          "rewound · files restored, prompt back in composer", "checkpoint rewind viewport");
+      // Ajent intentionally diverges from AgenTTY on the rewind banner: it surfaces the
+      // recovery backup ref so a rewind is discoverable-recoverable (docs/UI.md, docs/PARITY.md).
+      // Verify Ajent's own banner instead of native parity for this one line.
+      assertViewportContains(javaCapture.checkpointRewoundFrame(),
+          "rewound · files restored · backup at refs/ajent/rewind-backups");
       assertMatchingRegion(nativeCapture.queuedComposerFrame(),
           javaCapture.queuedComposerFrame(), "queued #1 / 1", "queued composer viewport");
       assertThat(nativeWorkspace.resolve("review.txt")).doesNotExist();
@@ -988,7 +990,10 @@ final class NativeTerminalParityIT {
     String checkpointFrame = combined(output, error);
     process.getOutputStream().write('\r');
     process.getOutputStream().flush();
-    awaitViewportText(output, error, "rewound · files restored, prompt back in composer",
+    // Shared native+Java driver: the native binary keeps AgenTTY's banner, Ajent diverges.
+    awaitAnyViewportText(output, error, List.of(
+        "rewound · files restored, prompt back in composer",
+        "rewound · files restored · backup at refs/ajent/rewind-backups"),
         Duration.ofSeconds(10));
     Thread.sleep(350);
     String checkpointRewoundFrame = combined(output, error);

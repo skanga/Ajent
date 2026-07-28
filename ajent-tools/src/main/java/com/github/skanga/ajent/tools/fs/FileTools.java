@@ -17,11 +17,12 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /** AgenTTY-compatible read/write/edit/list_dir implementations. */
@@ -54,8 +55,27 @@ public final class FileTools {
   private record Edit(String oldText, String newText, int line) {}
 
   private final WorkspaceSandbox sandbox;
-  private static final Map<ReadKey, FileTime> READ_CACHE = new ConcurrentHashMap<>();
-  private static final Map<Path, Snapshot> SNAPSHOTS = new ConcurrentHashMap<>();
+  // Process-wide file-state caches shared across sessions. Bounded LRU so long-lived server
+  // processes cannot grow without limit; the capacity is generous enough that realistic sessions
+  // never evict. Deliberate divergence from AgenTTY's unbounded cache (see docs/PARITY.md).
+  // ponytail: coarse global lock via synchronizedMap, fine at file-tool call rates.
+  static int fileStateCacheCapacity = 8192; // package-private so tests can force eviction
+  private static final Map<ReadKey, FileTime> READ_CACHE = Collections.synchronizedMap(new LruMap<>());
+  private static final Map<Path, Snapshot> SNAPSHOTS = Collections.synchronizedMap(new LruMap<>());
+
+  private static final class LruMap<K, V> extends LinkedHashMap<K, V> {
+    @java.io.Serial private static final long serialVersionUID = 1L;
+    LruMap() { super(64, 0.75f, true); }
+    @Override protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+      return size() > fileStateCacheCapacity;
+    }
+  }
+
+  /** Clears the process-wide file-state caches. Test isolation only. */
+  static void resetFileStateCaches() {
+    READ_CACHE.clear();
+    SNAPSHOTS.clear();
+  }
 
   public FileTools(WorkspaceSandbox sandbox) { this.sandbox = sandbox; }
 

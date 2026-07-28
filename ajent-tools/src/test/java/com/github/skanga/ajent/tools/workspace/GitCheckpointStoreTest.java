@@ -50,6 +50,38 @@ final class GitCheckpointStoreTest {
     assertThat(Files.readString(directory.resolve("ignored.txt"))).isEqualTo("new ignored\n");
   }
 
+  @Test void restoreBacksUpCurrentStateSoRewindIsRecoverable(@TempDir Path directory)
+      throws Exception {
+    var runner = new ProcessRunner();
+    git(runner, directory, "init", "-q");
+    git(runner, directory, "config", "core.autocrlf", "false");
+    Files.writeString(directory.resolve("tracked.txt"), "before\n");
+    git(runner, directory, "add", "tracked.txt");
+
+    var store = new GitCheckpointStore(directory, runner);
+    var id = new CheckpointId("checkpoint-1");
+    assertThat(store.create(id)).isTrue();
+
+    // Diverge from the checkpoint: edit a tracked file and create an untracked one.
+    Files.writeString(directory.resolve("tracked.txt"), "after\n");
+    Files.writeString(directory.resolve("new.txt"), "new\n");
+
+    assertThat(store.restore(id).restored()).isTrue();
+    // Rewind is destructive (new.txt is gone, tracked.txt is back to "before")...
+    assertThat(directory.resolve("new.txt")).doesNotExist();
+    assertThat(Files.readString(directory.resolve("tracked.txt"))).isEqualTo("before\n");
+
+    // ...but the pre-rewind working tree must be recoverable from a backup ref.
+    String backups = git(runner, directory, "for-each-ref", "--format=%(refname)",
+        "refs/ajent/rewind-backups/");
+    List<String> refs = backups.lines().filter(line -> !line.isBlank()).toList();
+    assertThat(refs).hasSize(1);
+    String backup = refs.get(0);
+    assertThat(git(runner, directory, "ls-tree", "-r", "--name-only", backup))
+        .contains("new.txt");
+    assertThat(git(runner, directory, "show", backup + ":tracked.txt")).isEqualTo("after\n");
+  }
+
   @Test void safelyRejectsNonReposBadIdsAndMissingRefs(@TempDir Path directory) {
     var outside = new GitCheckpointStore(directory, new ProcessRunner());
     assertThat(outside.inGitRepo()).isFalse();

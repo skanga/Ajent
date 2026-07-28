@@ -1940,7 +1940,7 @@ final class InteractiveCommand {
             render();
             return;
           }
-          resetForThreadSwap("rewound · files restored, prompt back in composer");
+          resetForThreadSwap("rewound · files restored · backup at refs/ajent/rewind-backups");
           insert(result.prompt());
         });
       });

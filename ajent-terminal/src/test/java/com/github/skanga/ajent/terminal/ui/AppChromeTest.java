@@ -141,9 +141,9 @@ final class AppChromeTest {
 
     List<AppChrome.Row> banner = AppChrome.statusPanel(new AppChrome.Status(
         "", "OpenAI", AppChrome.Phase.IDLE, "", 0, 128_000, 0,
-        "rewound · files restored, prompt back in composer", 78));
+        "rewound · files restored · backup at refs/ajent/rewind-backups", 78));
     assertThat(banner.get(1).text())
-        .startsWith("▎ ▶  rewound · files restored, prompt back in composer")
+        .startsWith("▎ ▶  rewound · files restored · backup at refs/ajent/rewind-backups")
         .doesNotContain("…")
         .hasSize(78);
   }
@@ -488,9 +488,9 @@ final class AppChromeTest {
         .isEqualTo(AppChrome.Tone.WARNING);
     assertThat(status("context compacted").getLast().tone()).isEqualTo(AppChrome.Tone.ACCENT);
     AppChrome.Row rewound =
-        status("rewound · files restored, prompt back in composer").getLast();
+        status("rewound · files restored · backup at refs/ajent/rewind-backups").getLast();
     assertThat(rewound.text())
-        .startsWith("▶  rewound · files restored, prompt back in composer")
+        .startsWith("▶  rewound · files restored · backup at refs/ajent/rewind-backups")
         .hasSize(80);
     assertThat(rewound.tone()).isEqualTo(AppChrome.Tone.ACCENT);
     assertThat(status("ready")).hasSize(1);

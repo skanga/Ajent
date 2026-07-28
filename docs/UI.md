@@ -314,7 +314,16 @@ and stages the old prompt for editing. Rows use native `#<turn>` labels,
 relative time, and `N file(s) +A −D`, `no changes`, or a loading ellipsis.
 The selected row starts on the newest checkpoint; Up/Down moves, Enter rewinds,
 and Escape cancels. A completed rewind clears the inline surface and shows
-`▎ ▶ rewound · files restored, prompt back in composer`.
+`▎ ▶ rewound · files restored · backup at refs/ajent/rewind-backups`.
+
+Rewind is destructive: it overwrites uncommitted edits and deletes files added
+since the checkpoint. Before restoring, Ajent snapshots the current working
+tree to a `refs/ajent/rewind-backups/<timestamp>` ref (newest 16 kept), so a
+rewind is recoverable, and the banner points at that namespace. To inspect or
+restore the pre-rewind state, run `git for-each-ref refs/ajent/rewind-backups/`
+and check out or diff that commit. These backup refs are internal and never
+appear in the checkpoint picker. This banner is a deliberate divergence from
+AgenTTY (see [PARITY.md](PARITY.md)).
 
 ## Change review
 

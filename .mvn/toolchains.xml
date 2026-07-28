@@ -9,7 +9,7 @@
       <vendor>oracle</vendor>
     </provides>
     <configuration>
-      <jdkHome>C:\lang\jdk-25</jdkHome>
+      <jdkHome>${env.AJENT_JAVA_HOME}</jdkHome>
     </configuration>
   </toolchain>
 </toolchains>

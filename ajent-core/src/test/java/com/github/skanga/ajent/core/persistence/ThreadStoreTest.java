@@ -29,6 +29,20 @@ class ThreadStoreTest {
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @Test
+  void saveReportsFailureInsteadOfSilentlySucceedingWhenTargetIsUnwritable(
+      @TempDir Path directory) throws Exception {
+    // dataDirectory sits under a regular file, so the threads directory cannot be created.
+    Path blocker = Files.createFile(directory.resolve("blocker"));
+    var store = new ThreadStore(blocker.resolve("nested"));
+    var thread = new Thread(new ThreadId("thread"), "Title",
+        List.of(new Message(new MessageId("m"), Role.USER, "hi", List.of(), List.of(),
+            "", "", List.of(), Instant.ofEpochSecond(1),
+            Optional.empty(), Optional.empty(), false)),
+        Instant.ofEpochSecond(1), Instant.ofEpochSecond(2), List.of());
+    assertThat(store.save(thread)).isFalse();
+  }
+
+  @Test
   void savesAndLoadsEveryPersistedConversationField(@TempDir Path directory) throws Exception {
     var store = new ThreadStore(directory);
     var call = new ToolUse(new ToolCallId("call"), new ToolName("read"),

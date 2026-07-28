@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.skanga.ajent.core.AjentDebugLog;
 import com.github.skanga.ajent.domain.Attachment;
 import com.github.skanga.ajent.domain.CheckpointId;
 import com.github.skanga.ajent.domain.CompactionRecord;
@@ -77,6 +78,7 @@ public final class ThreadStore {
           threadsDirectory.resolve(thread.id().value() + ".json"),
           JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(root));
     } catch (IOException | RuntimeException exception) {
+      AjentDebugLog.log("persistence.save", exception);
       return false;
     }
   }
@@ -114,7 +116,8 @@ public final class ThreadStore {
         if (fileName == null || "acp_sessions.json".equals(fileName.toString())) continue;
         readMetadata(file).ifPresent(result::add);
       }
-    } catch (IOException ignored) {
+    } catch (IOException exception) {
+      AjentDebugLog.log("persistence.load_all", exception);
       return List.of();
     }
     result.sort(Comparator.comparing(Thread::updatedAt).reversed());
@@ -125,6 +128,7 @@ public final class ThreadStore {
     try {
       return Files.deleteIfExists(threadsDirectory.resolve(id.value() + ".json"));
     } catch (IOException exception) {
+      AjentDebugLog.log("persistence.delete", exception);
       return false;
     }
   }
@@ -264,6 +268,7 @@ public final class ThreadStore {
       return id.isEmpty() ? Optional.empty() : Optional.of(new Thread(
           new ThreadId(id), title, List.of(), created, updated, List.of()));
     } catch (IOException | RuntimeException exception) {
+      AjentDebugLog.log("persistence.read_metadata", exception);
       return Optional.empty();
     }
   }

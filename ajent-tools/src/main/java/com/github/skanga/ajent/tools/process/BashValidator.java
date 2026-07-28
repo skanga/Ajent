@@ -4,7 +4,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** Rejects commands that cannot safely complete in an unattended agent session. */
+/**
+ * Rejects commands that cannot safely complete in an unattended agent session.
+ *
+ * <p>This is a UX guardrail, not a security boundary. Its reliable job is refusing commands that
+ * would hang a non-interactive session: interactive editors and pagers, a bare REPL, or an
+ * editor-opening {@code git commit}. The {@code DANGERS} substring checks and the {@code curl|sh}
+ * pattern are only a best-effort guard against obvious accidental footguns; they match literal
+ * text and are trivially bypassed by quoting, spacing, variables, or encoding, so they must never
+ * be relied on to contain hostile input.
+ *
+ * <p>Real containment for {@code bash} is enforced elsewhere by three layers: the permission
+ * policy ({@code bash} carries the {@code EXEC} effect and prompts before it runs), the OS-level
+ * {@code ProcessSandbox} (bwrap or sandbox-exec), and the {@code WorkspaceSandbox} path checks.
+ */
 public final class BashValidator {
   private static final Set<String> INTERACTIVE = Set.of("vim", "vi", "nvim", "nano", "emacs",
       "pico", "ed", "joe", "mcedit", "less", "more", "man", "top", "htop", "btop", "tmux",
@@ -12,6 +25,8 @@ public final class BashValidator {
       "pry", "lua", "tclsh", "gdb", "lldb", "fzf", "dialog", "whiptail");
   private static final Set<String> REPL = Set.of("python", "python3", "node", "deno", "ruby",
       "php", "iex", "bash", "sh", "zsh", "fish", "pwsh", "powershell", "cmd");
+  // Best-effort refusal of obvious accidental footguns only. Literal-substring matching, so it is
+  // trivially bypassed by obfuscation; this is not a security control (see class javadoc).
   private static final List<String[]> DANGERS = List.of(
       new String[] {"rm -rf /", "refusing wide rm that could wipe the filesystem root"},
       new String[] {"rm -rf /*", "refusing wide rm that could wipe the filesystem root"},

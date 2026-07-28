@@ -95,6 +95,14 @@ Configuration can request native/default/off behavior, but validators still
 apply command and workspace rules. Cancellation stops the process tree as far
 as the operating system permits.
 
+The command validator (`BashValidator`) is a usability guardrail, not a
+security boundary: it blocks commands that would hang the session (interactive
+editors, bare REPLs, an editor-opening `git commit`) and refuses a few obvious
+accidental footguns by literal-substring match, which is trivially bypassed by
+obfuscation. Bash containment is enforced by the permission prompt (the `bash`
+tool carries the `EXEC` effect), the process sandbox, and the workspace path
+checks — not by the validator.
+
 Subprocess capture is bounded independently from provider context. Large shell
 output can spill to a sandbox-readable file while returning a head/error/tail
 envelope and explicit location.

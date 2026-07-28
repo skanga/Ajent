@@ -1442,7 +1442,7 @@ final class InteractiveCommandTest {
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(agent.restoredCheckpoint).isEqualTo(new CheckpointId("cp2"));
     assertThat(terminal.bytes.toString())
-        .contains("▎ ▶  rewound · files restored, prompt back in composer");
+        .contains("▎ ▶  rewound · files restored · backup at refs/ajent/rewind-backups");
     ui.key(special(TerminalKey.SpecialKey.ENTER), agent);
     assertThat(((RuntimeMessage.Submit) agent.messages.getLast()).text())
         .isEqualTo("second change\nmore");
