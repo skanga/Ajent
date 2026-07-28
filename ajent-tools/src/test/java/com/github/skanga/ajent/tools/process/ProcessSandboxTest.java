@@ -19,12 +19,14 @@ class ProcessSandboxTest {
     assertThat(ProcessSandbox.initialize("off", workspace, base, "Windows 11"))
         .satisfies(result -> {
           assertThat(result.valid()).isTrue();
+          assertThat(result.sandboxed()).isFalse();
           assertThat(result.description()).isEqualTo("sandbox: off");
           assertThat(result.runner()).isSameAs(base);
         });
     assertThat(ProcessSandbox.initialize("auto", workspace, base, "Windows 11"))
         .satisfies(result -> {
           assertThat(result.valid()).isTrue();
+          assertThat(result.sandboxed()).isFalse();
           assertThat(result.description()).isEqualTo(
               "sandbox: unavailable, running unsandboxed (no backend on this platform)");
           assertThat(result.runner()).isSameAs(base);
@@ -32,6 +34,7 @@ class ProcessSandboxTest {
     assertThat(ProcessSandbox.initialize("on", workspace, base, "Windows 11"))
         .satisfies(result -> {
           assertThat(result.valid()).isFalse();
+          assertThat(result.sandboxed()).isFalse();
           assertThat(result.description()).isEqualTo(
               "sandbox: requested but no backend (unsupported on this platform)");
         });
@@ -45,6 +48,7 @@ class ProcessSandboxTest {
     Path directory = workspace.resolve("sub");
 
     initialized.runner().shell("echo ok", directory, 1234, Duration.ofSeconds(9));
+    assertThat(initialized.sandboxed()).isTrue();
     assertThat(initialized.description()).isEqualTo("sandbox: active (bwrap)");
     assertThat(base.lastArgv).startsWith("bwrap", "--ro-bind", "/usr", "/usr");
     assertThat(base.lastArgv).containsSubsequence(
@@ -74,6 +78,7 @@ class ProcessSandboxTest {
     initialized.runner().shell("pwd", workspace, 100, Duration.ofSeconds(1));
 
     assertThat(initialized.valid()).isTrue();
+    assertThat(initialized.sandboxed()).isTrue();
     assertThat(initialized.description()).isEqualTo("sandbox: active (sandbox-exec)");
     assertThat(base.lastArgv).startsWith("sandbox-exec", "-p");
     String escapedRoot = workspace.toAbsolutePath().normalize().toString()
@@ -115,6 +120,7 @@ class ProcessSandboxTest {
     var base = new CapturingRunner(true);
     var initialized = ProcessSandbox.initialize("auto", root, base, "Linux");
 
+    assertThat(initialized.sandboxed()).isTrue();
     assertThat(initialized.description()).contains("sandbox: degraded (bwrap");
     initialized.runner().shell("pwd", null, 1, Duration.ofSeconds(1));
     assertThat(base.lastArgv).containsSubsequence("--chdir", root.toString());

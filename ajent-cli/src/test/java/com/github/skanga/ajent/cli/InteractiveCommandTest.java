@@ -50,6 +50,27 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 final class InteractiveCommandTest {
+  @Test void unsandboxedNoticeShowsPersistentWarningInChrome() {
+    var terminal = new FakeTerminal();
+    terminal.size = new JLineTerminalSession.Size(80, 24);
+
+    // A sandboxed (clean) session shows no warning.
+    var clean = new InteractiveCommand.Ui(terminal,
+        new AtomicReference<>(AgentState.initial(thread(List.of()))),
+        new InteractiveCommand.PermissionGate());
+    clean.render();
+    assertThat(clean.renderedText()).doesNotContain("running unsandboxed");
+
+    // An unsandboxed session surfaces a persistent warning row (notice set before first render,
+    // as runSession does).
+    var warned = new InteractiveCommand.Ui(terminal,
+        new AtomicReference<>(AgentState.initial(thread(List.of()))),
+        new InteractiveCommand.PermissionGate());
+    warned.sandboxNotice("sandbox: unavailable, running unsandboxed (install bubblewrap to enable)");
+    warned.render();
+    assertThat(warned.renderedText()).contains("⚠", "running unsandboxed");
+  }
+
   @Test void pageKeysProvideTranscriptScrollbackInsideTheAlternateScreen() {
     var messages = new ArrayList<Message>();
     for (int index = 0; index < 20; index++) {

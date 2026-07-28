@@ -99,6 +99,14 @@ Runtime and UI notifications replace the activity detail with a full-width
 severity banner and truncate by terminal-cell width instead of wrapping the
 fixed chrome.
 
+When process tools are not OS-sandboxed — `--sandbox=off`, or the default
+`auto` mode on a platform with no backend (Windows, or Linux/WSL without
+bubblewrap) — the chrome shows a persistent `⚠  sandbox: …` warning row above
+the status panel, and the same notice is printed to stderr at startup. Bash and
+other process tools still run (contained only by the permission prompt and the
+workspace path checks), so the warning stays visible for the whole session.
+This is a deliberate divergence from AgenTTY (see [PARITY.md](PARITY.md)).
+
 ## Composer
 
 The composer stores text, a UTF-16 cursor index, and an attachment list.

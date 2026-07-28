@@ -208,6 +208,7 @@ final class InteractiveCommand {
           configured.providerConfiguration().provider(),
           configured.providerConfiguration().contextWindow(), pendingChanges::get);
       activeUi.set(ui);
+      ui.sandboxNotice(configured.sandboxNotice());
       configured.todos().onChange(ui::updatePlan);
       permission.onChange(ui::render);
       var threadStore = new ThreadStore(configured.dataDirectory());
@@ -717,6 +718,9 @@ final class InteractiveCommand {
           + sandbox.description() + "\n");
       return null;
     }
+    if (!sandbox.sandboxed()) {
+      error.print("ajent: " + sandbox.description() + "\n");
+    }
     settings = settingsStore.load();
     Profile profile;
     try {
@@ -773,7 +777,8 @@ final class InteractiveCommand {
           () -> Set.copyOf(settingsStore.load().alwaysAllowTools())),
           dataDirectory, profile, model, settingsStore, providers,
           new ProviderModelCatalog(client), todos, workspace, sandbox.runner(), checkpoints,
-          workspaceIndex, subagents, mcp);
+          workspaceIndex, subagents, mcp,
+          sandbox.sandboxed() ? "" : sandbox.description());
     } catch (RuntimeException exception) {
       mcp.close();
       throw exception;
@@ -1012,7 +1017,7 @@ final class InteractiveCommand {
       SettingsStore settings, LiveProviderFactory.Configuration providerConfiguration,
       ProviderModelCatalog models, TodoLedger todos, Path workspace, ProcessRunner codeRunner,
       GitCheckpointStore checkpoints, WorkspaceIndex workspaceIndex,
-      ProviderBackedSubagentRunner subagents, McpRuntime mcp) {}
+      ProviderBackedSubagentRunner subagents, McpRuntime mcp, String sandboxNotice) {}
 
   private record PreparedProvider(String provider, ProviderAuth auth, List<String> models) {
     private PreparedProvider {
@@ -1218,6 +1223,7 @@ final class InteractiveCommand {
     private boolean modelsLoading;
     private Effort effort = Effort.NONE;
     private String uiStatus = "";
+    private String sandboxNotice = "";
     private String composer = "";
     private List<Attachment> composerAttachments = List.of();
     private final List<ComposerSnapshot> composerUndo = new ArrayList<>();
@@ -1313,6 +1319,11 @@ final class InteractiveCommand {
       if (contextMax < 0) throw new IllegalArgumentException("negative context maximum");
       this.contextMax = contextMax;
       this.pendingChanges = Objects.requireNonNull(pendingChanges, "pendingChanges");
+    }
+
+    /** Persistent chrome warning shown when process tools are not OS-sandboxed; empty when clean. */
+    void sandboxNotice(String notice) {
+      this.sandboxNotice = notice == null ? "" : notice;
     }
 
     void observe(RuntimeMessage message) {
@@ -3397,8 +3408,10 @@ final class InteractiveCommand {
           state.thread().title(), providerLabel(providerId), providerAvailability, chromePhase(state),
           chromePhaseDetail(state, permission), phaseElapsedMillis(state, nowNanos),
           state.tokensIn(), effectiveContextMax(), state.queued().size(), banner, chromeWidth));
+      List<AppChrome.Row> sandboxRows = sandboxNotice.isEmpty() ? List.of()
+          : List.of(new AppChrome.Row("⚠  " + sandboxNotice, AppChrome.Tone.WARNING));
       if (messages.isEmpty() && permission == null && changes.isEmpty()) {
-        int fixedRows = 1 + composerRows.size() + statusRows.size();
+        int fixedRows = 1 + composerRows.size() + sandboxRows.size() + statusRows.size();
         int padding = Math.max(0, terminalRows - 1 - output.size() - fixedRows);
         for (int index = 0; index < padding; index++) {
           output.add(new StyledLine("", Style.NORMAL));
@@ -3406,6 +3419,7 @@ final class InteractiveCommand {
       }
       output.add(new StyledLine("", Style.NORMAL));
       appendInsetChrome(output, composerRows);
+      appendInsetChrome(output, sandboxRows);
       appendInsetChrome(output, statusRows);
       var text = new StringBuilder();
       for (StyledLine line : output) text.append(line.text()).append('\n');

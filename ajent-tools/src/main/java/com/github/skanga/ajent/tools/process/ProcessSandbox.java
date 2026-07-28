@@ -12,7 +12,8 @@ import java.util.function.Consumer;
 public final class ProcessSandbox {
   private enum Backend { NONE, BWRAP, SANDBOX_EXEC }
 
-  public record Initialization(boolean valid, String description, ProcessRunner runner) {
+  public record Initialization(boolean valid, boolean sandboxed, String description,
+      ProcessRunner runner) {
     public Initialization {
       description = Objects.requireNonNull(description, "description");
       runner = Objects.requireNonNull(runner, "runner");
@@ -36,18 +37,18 @@ public final class ProcessSandbox {
     Path root = Objects.requireNonNull(workspace, "workspace").toAbsolutePath().normalize();
     Objects.requireNonNull(base, "base");
     if (mode.equals("off")) {
-      return new Initialization(true, "sandbox: off", base);
+      return new Initialization(true, false, "sandbox: off", base);
     }
     Backend backend = probe(root, base, operatingSystem);
     if (backend == Backend.NONE) {
       String unavailable = unavailableDescription(operatingSystem, mode.equals("on"));
-      return new Initialization(!mode.equals("on"), unavailable, base);
+      return new Initialization(!mode.equals("on"), false, unavailable, base);
     }
     String tag = backend == Backend.BWRAP ? "bwrap" : "sandbox-exec";
     String description = root.getParent() == null
         ? "sandbox: degraded (" + tag + ", --workspace / gives no filesystem containment)"
         : "sandbox: active (" + tag + ')';
-    return new Initialization(true, description, new SandboxedRunner(base, root, backend));
+    return new Initialization(true, true, description, new SandboxedRunner(base, root, backend));
   }
 
   private static Backend probe(Path workspace, ProcessRunner runner, String operatingSystem) {
