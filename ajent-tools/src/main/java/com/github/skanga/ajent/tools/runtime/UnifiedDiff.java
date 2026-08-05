@@ -6,7 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Pure port of AgenTTY's bounded LCS unified-diff and hunk reconstruction engine. */
+/** Pure port of Ajent's bounded LCS unified-diff and hunk reconstruction engine. */
 public final class UnifiedDiff {
   private static final long CELL_CAP = 6_000_000;
   private static final int CONTEXT = 3;

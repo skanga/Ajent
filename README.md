@@ -1,18 +1,11 @@
 # Ajent
 
-Ajent is a modern Java 25 port of [AgenTTY](https://github.com/1ay1/agentty),
-an interactive coding agent for the terminal. The port preserves AgenTTY's
-conversation model, provider protocols, native tool contracts, permission
-profiles, persistence formats, terminal behavior, and keyboard-driven
-workflows while using Java records, sealed interfaces, virtual threads, and
-the JDK HTTP client.
-
-Ajent is under active parity work. The main interactive agent, Anthropic and
-OpenAI-compatible providers, the native tool catalog, saved threads, plans,
-code-block execution, Git checkpoints/rewind, MCP server, ACP server, skills,
-authentication, and air-gap commands are runnable today. See
-[docs/PARITY.md](docs/PARITY.md) for the precise translated-test and feature
-ledger.
+Ajent is a standalone Java 25 interactive coding agent for the terminal. It
+provides Anthropic and OpenAI-compatible providers, a native tool catalog,
+permission profiles, saved threads, plans, code-block execution, Git
+checkpoints and rewind, MCP and ACP servers, skills, authentication, and
+air-gap commands. The implementation uses Java records, sealed interfaces,
+virtual threads, and the JDK HTTP client.
 
 ## Requirements
 
@@ -170,8 +163,7 @@ Write, execution, and network tools are governed by the active permission
 profile. The `ask` profile prompts before consequential operations; `minimal`
 also prompts for reads, while `write` is fully autonomous. A fresh interactive
 settings file starts in `write` mode, and later launches restore the saved
-profile from `~/.ajent/settings.json`. Ajent does not read AgenTTY state or
-credentials.
+profile from `~/.ajent/settings.json`.
 The `task` tool delegates a self-contained job to an isolated subagent using
 the currently selected provider and model. Explorer and reviewer delegates are
 read-only; tester, coder, and general delegates receive their native scoped
@@ -199,25 +191,16 @@ wrapping them with commands that write unrelated text to stdout.
 - `ajent-protocol`: ACP and MCP protocol servers and clients
 - `ajent-terminal`: terminal input, rendering, composer, and modal models
 - `ajent-cli`: process commands and the interactive composition root
-- `ajent-parity`: source/binary parity fixtures and manifests
-- `ajent-benchmarks`: standalone JMH ports of native performance probes
-- `agentty`: local upstream reference checkout; never included in Ajent releases
+- `ajent-benchmarks`: standalone JMH performance probes and diagnostics
 
-## Development and parity
+## Development
 
-Ported behavior starts with Java tests that reproduce AgenTTY's original test
-conditions. Run every module from the reactor root; do not validate modules in
-isolation:
+Behavior changes start with focused Java tests. Run every module from the
+reactor root so cross-module composition is covered:
 
 ```powershell
 mvn -q test
 ```
-
-The authoritative construction sequence is
-[plans/ajent-agentty-java-port.md](plans/ajent-agentty-java-port.md). Source
-provenance is recorded in [docs/PROVENANCE.md](docs/PROVENANCE.md), while
-[docs/PARITY.md](docs/PARITY.md) distinguishes implemented, verified, and
-remaining native behavior.
 
 ## Documentation
 
@@ -231,13 +214,11 @@ remaining native behavior.
 - [ACP and MCP protocols](docs/PROTOCOLS.md)
 - [Running assistant code blocks](docs/RUN_CODE_BLOCK.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Dependencies](docs/DEPENDENCIES.md), [source provenance](docs/PROVENANCE.md),
-  and the [parity ledger](docs/PARITY.md)
+- [Dependencies](docs/DEPENDENCIES.md)
 - [Contributing](CONTRIBUTING.md), [release procedure](docs/RELEASE.md), and
   [changelog](CHANGELOG.md)
 
-## License and upstream attribution
+## License
 
-Ajent is a clean Java port derived from AgenTTY's observable behavior, tests,
-and documented interfaces. See [NOTICE](NOTICE) and
-[docs/PROVENANCE.md](docs/PROVENANCE.md) for attribution and source mapping.
+Ajent is distributed under the MIT License. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE).

@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.terminal.render;
 
-/** AgenTTY's bit-identical 64-bit terminal cell representation. */
+/** Ajent's bit-identical 64-bit terminal cell representation. */
 public record PackedCell(int character, int styleId, int hyperlinkId, int width) {
   public static final PackedCell BLANK = new PackedCell(' ', 0, 0, 0);
 

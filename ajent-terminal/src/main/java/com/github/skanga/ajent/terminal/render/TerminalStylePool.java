@@ -92,7 +92,7 @@ public final class TerminalStylePool {
     var parameters = new ArrayList<String>(7);
     parameters.add("0");
     if (style.bold()) parameters.add("1");
-    // Faint is intentionally identity-only: AgenTTY suppresses SGR 2 for readability.
+    // Faint is intentionally identity-only: Ajent suppresses SGR 2 for readability.
     if (style.italic()) parameters.add("3");
     if (style.underline()) parameters.add("4");
     if (style.inverse()) parameters.add("7");

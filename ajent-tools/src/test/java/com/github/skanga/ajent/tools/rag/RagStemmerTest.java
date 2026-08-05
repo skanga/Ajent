@@ -6,7 +6,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 final class RagStemmerTest {
-  @Test void portsAgenTtyAdvancedStemmerCases() {
+  @Test void portsAjentAdvancedStemmerCases() {
     assertThat(RagStemmer.stem("running")).isEqualTo("run");
     assertThat(RagStemmer.stem("configured")).isEqualTo("configur");
     assertThat(RagStemmer.stem("deployment")).isEqualTo("deploy");
@@ -49,7 +49,7 @@ final class RagStemmerTest {
     assertThat(stemmed.stemmed()).isTrue();
   }
 
-  @Test void matchesAgenTtyEnvironmentTruthiness() {
+  @Test void matchesAjentEnvironmentTruthiness() {
     assertThat(RagAlgorithms.stemmerEnabled(null)).isFalse();
     assertThat(RagAlgorithms.stemmerEnabled("")).isFalse();
     assertThat(RagAlgorithms.stemmerEnabled("0")).isFalse();

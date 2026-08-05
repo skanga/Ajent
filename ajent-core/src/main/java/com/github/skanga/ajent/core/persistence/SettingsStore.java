@@ -20,7 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** AgenTTY-compatible atomic persistence for {@code settings.json}. */
+/** Ajent-compatible atomic persistence for {@code settings.json}. */
 public final class SettingsStore {
   private static final ObjectMapper JSON = new ObjectMapper();
   private final Path dataDirectory;

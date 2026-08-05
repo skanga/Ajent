@@ -6,7 +6,7 @@ import com.github.skanga.ajent.domain.Thread;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** Filesystem persistence adapter with AgenTTY's coalescing, drain-on-close lifecycle. */
+/** Filesystem persistence adapter with Ajent's coalescing, drain-on-close lifecycle. */
 public final class FilePersistencePort implements PersistencePort {
   private final AsyncThreadWriter writer;
 

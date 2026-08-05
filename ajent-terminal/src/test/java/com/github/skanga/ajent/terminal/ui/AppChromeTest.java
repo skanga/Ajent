@@ -39,7 +39,7 @@ final class AppChromeTest {
     List<AppChrome.Row> narrow = AppChrome.welcome(new AppChrome.Welcome(
         "openai/gpt-5.4", Profile.ASK, false, 36, 4));
     assertThat(narrow).extracting(row -> row.text().strip()).contains("AJENT");
-    assertThat(text(narrow)).doesNotContain("AGENTTY", "type to begin");
+    assertThat(text(narrow)).doesNotContain("type to begin");
     assertThat(text(narrow)).contains("Ctrl+K", "Ctrl+J", "Ctrl+C")
         .doesNotContain("● GPT", "·  Ask", "Commands", "NEW HERE");
   }

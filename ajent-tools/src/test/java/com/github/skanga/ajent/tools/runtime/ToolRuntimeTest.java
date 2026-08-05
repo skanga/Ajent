@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 class ToolRuntimeTest {
   @Test
-  void errorLabelsAndRenderingMatchAgenTTY() {
+  void errorLabelsAndRenderingMatchAjent() {
     assertThat(ToolErrorKind.values()).extracting(Object::toString).containsExactly(
         "invalid args", "not found", "not a file", "not a directory", "too large", "binary",
         "ambiguous", "no match", "invalid regex", "network", "spawn failed",

@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Resolves and parses AgenTTY-compatible MCP configuration with its project spawn gate. */
+/** Resolves and parses Ajent-compatible MCP configuration with its project spawn gate. */
 public final class McpConfigLoader {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final Duration DEFAULT_CALL_TIMEOUT = Duration.ofSeconds(60);

@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Pure, non-blocking AgenTTY credential precedence and expiry policy. */
+/** Pure, non-blocking Ajent credential precedence and expiry policy. */
 public final class CredentialResolver {
   private CredentialResolver() {}
 

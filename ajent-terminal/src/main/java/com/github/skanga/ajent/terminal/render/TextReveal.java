@@ -2,7 +2,7 @@ package com.github.skanga.ajent.terminal.render;
 
 import java.util.Objects;
 
-/** Stateful UTF-16-safe text reveal driven by AgenTTY's rate cursor. */
+/** Stateful UTF-16-safe text reveal driven by Ajent's rate cursor. */
 public final class TextReveal {
   private static final double FRAME_GAP_CAP_SECONDS = 0.250;
 

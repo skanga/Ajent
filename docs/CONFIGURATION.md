@@ -1,7 +1,7 @@
 # Configuration and state
 
 Ajent owns its command-line, environment, credential, and persistence
-namespaces. It does not read or import AgenTTY state. This guide distinguishes
+namespaces. It does not read or import Ajent state. This guide distinguishes
 transient process configuration from durable state so an override never
 silently becomes a saved secret.
 
@@ -99,7 +99,7 @@ Anthropic login credentials are stored separately at
 `$XDG_CONFIG_HOME/ajent/credentials.json`, or
 `~/.config/ajent/credentials.json` when XDG configuration is unset. The file
 uses Ajent's encrypted credential envelope described in `AUTH.md`. Ajent does
-not inspect `.agentty` or `.config/agentty`.
+not inspect `.ajent` or `.config/ajent`.
 
 ## Workspace configuration and authored context
 

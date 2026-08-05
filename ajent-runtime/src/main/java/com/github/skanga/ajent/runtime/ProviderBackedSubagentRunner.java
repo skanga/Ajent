@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.function.Consumer;
 
-/** Production implementation of AgenTTY's isolated provider-backed {@code task} tool. */
+/** Production implementation of Ajent's isolated provider-backed {@code task} tool. */
 public final class ProviderBackedSubagentRunner implements HostServices.SubagentRunner {
   static final int MAX_DEPTH = 2;
   static final int MAX_TURNS = 24;
@@ -48,17 +48,17 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
     void sleep(Duration duration) throws InterruptedException;
   }
 
-  private record AgentType(String name, boolean readOnly, String role, Set<String> allow) {}
+  private record SubagentKind(String name, boolean readOnly, String role, Set<String> allow) {}
 
-  private static final Map<String, AgentType> TYPES = Map.of(
-      "explorer", new AgentType("explorer", true,
+  private static final Map<String, SubagentKind> TYPES = Map.of(
+      "explorer", new SubagentKind("explorer", true,
           "Your role: EXPLORER. Map and explain the codebase region the task names. Read widely, "
               + "trace call sites and definitions, and return a precise map: the key files, the "
               + "functions/types involved, how they connect, and any gotchas. Cite exact file "
               + "paths and line numbers. You are READ-ONLY — never modify anything.",
           Set.of("read", "grep", "glob", "list_dir", "find_definition", "repo_map",
               "web_search", "web_fetch")),
-      "reviewer", new AgentType("reviewer", true,
+      "reviewer", new SubagentKind("reviewer", true,
           "Your role: REVIEWER. Critically review the code or change the task names. Look for "
               + "bugs, edge cases, race conditions, security issues, and deviations from the "
               + "surrounding conventions. Return findings as a prioritised list (blocker / major "
@@ -66,19 +66,19 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
               + "You are READ-ONLY.",
           Set.of("read", "grep", "glob", "list_dir", "find_definition", "repo_map",
               "git_diff", "git_log", "git_status")),
-      "tester", new AgentType("tester", false,
+      "tester", new SubagentKind("tester", false,
           "Your role: TESTER. Reproduce, run, and diagnose. Build/run the relevant tests or "
               + "commands the task names, read the failures, and report the root cause with the "
               + "exact failing assertion and the file:line that produced it. Prefer running over "
               + "guessing. Do NOT rewrite production code — only run, read, and diagnose.",
           Set.of("read", "grep", "glob", "list_dir", "find_definition", "repo_map",
               "bash", "diagnostics", "git_diff", "git_status")),
-      "coder", new AgentType("coder", false,
+      "coder", new SubagentKind("coder", false,
           "Your role: CODER. Implement the change the task names end-to-end: read the relevant "
               + "code first, make the edits, and verify they build/compile if a build command is "
               + "obvious. Follow the surrounding conventions exactly. Report what you changed "
               + "(files + a one-line summary each) and whether it built.", Set.of()),
-      "general", new AgentType("general", false,
+      "general", new SubagentKind("general", false,
           "Your role: GENERAL. Complete the delegated task end-to-end using whatever tools fit, "
               + "then report the outcome.", Set.of()));
 
@@ -141,7 +141,7 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
         "subagent depth limit reached — a subagent cannot spawn further subagents at this "
             + "nesting level");
 
-    AgentType type = TYPES.getOrDefault(request.agentType(), TYPES.get("general"));
+    SubagentKind type = TYPES.getOrDefault(request.kind(), TYPES.get("general"));
     DEPTH.set(DEPTH.get() + 1);
     try {
       return execute(request.prompt(), type, selected.orElseThrow(), boundTools, cancellation,
@@ -152,7 +152,7 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
     }
   }
 
-  private HostServices.SubagentResponse execute(String prompt, AgentType type,
+  private HostServices.SubagentResponse execute(String prompt, SubagentKind type,
                                                  LiveProviderFactory.Configuration selected,
                                                  ToolPort boundTools,
                                                  CancellationSignal parentCancellation,
@@ -248,7 +248,7 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
         + "):\n\n" + report, failed);
   }
 
-  private static String activity(AgentType type, AgentState state) {
+  private static String activity(SubagentKind type, AgentState state) {
     var output = new StringBuilder("◆ ").append(type.name()).append(" agent");
     for (Message message : state.thread().messages()) {
       if (message.role() != Role.ASSISTANT) continue;
@@ -339,7 +339,7 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
     return value.auth().isEmpty() && !local ? Optional.empty() : Optional.of(value);
   }
 
-  private static boolean allowed(AgentType type, String name) {
+  private static boolean allowed(SubagentKind type, String name) {
     if (name.equals("task")) return false;
     if (!type.allow().isEmpty() && !type.allow().contains(name)) return false;
     if (!type.readOnly()) return ToolCatalog.byName(name).isPresent();
@@ -348,7 +348,7 @@ public final class ProviderBackedSubagentRunner implements HostServices.Subagent
   }
 
   private static String systemPrompt(LiveProviderFactory.Configuration configuration,
-                                     AgentType type) {
+                                     SubagentKind type) {
     String base = configuration.systemPrompt().anthropic();
     String prompt = base + "\n\n<subagent>\n" + type.role()
         + "\n\nYou are a SUBAGENT spawned to complete ONE delegated task in isolation. You do "

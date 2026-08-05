@@ -15,7 +15,7 @@ import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
-/** Ports AgenTTY's declarative visual_hash_coverage_test contract. */
+/** Ports Ajent's declarative visual_hash_coverage_test contract. */
 final class VisualHashCoverageTest {
   @Test void productionUiUsesTheContractAsItsRenderGate() {
     Message first = new Message(Role.USER, "hello", List.of(), List.of());

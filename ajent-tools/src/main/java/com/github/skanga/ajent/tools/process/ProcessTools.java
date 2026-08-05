@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/** AgenTTY-compatible bash and diagnostics tools. */
+/** Ajent-compatible bash and diagnostics tools. */
 public final class ProcessTools {
   private static final int CAPTURE_CAP = 8 * 1024 * 1024;
   private static final int MODEL_PREVIEW_BYTES = 30_000;

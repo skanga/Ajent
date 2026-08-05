@@ -14,7 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-/** AgenTTY-compatible status, diff, log, and commit tools. */
+/** Ajent-compatible status, diff, log, and commit tools. */
 public final class GitTools {
   private static final Duration TIMEOUT = Duration.ofSeconds(60);
   private final WorkspaceSandbox sandbox;

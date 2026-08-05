@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 
-/** Immutable user settings persisted by AgenTTY's filesystem store. */
+/** Immutable user settings persisted by Ajent's filesystem store. */
 public record Settings(
     ModelId modelId,
     Profile profile,

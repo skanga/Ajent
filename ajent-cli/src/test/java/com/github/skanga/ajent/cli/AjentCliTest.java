@@ -11,6 +11,11 @@ import org.junit.jupiter.api.Test;
 
 class AjentCliTest {
   @Test
+  void mainReturnsNormallyForSuccessfulCommands() {
+    AjentCli.main(new String[] {"--version"});
+  }
+
+  @Test
   void processBoundaryUsesNativeWindowsTextNewlinesWithoutDoublingCrLf() {
     var windowsBytes = new ByteArrayOutputStream();
     PrintStream windows = AjentCli.processStream(windowsBytes, "\r\n");

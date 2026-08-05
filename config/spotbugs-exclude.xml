@@ -6,7 +6,7 @@
     <Class name="~.*\.jmh_generated\..*"/>
   </Match>
 
-  <!-- AgenTTY probes these exact Unix machine identity paths. -->
+  <!-- Ajent probes these exact Unix machine identity paths. -->
   <Match>
     <Class name="com.github.skanga.ajent.provider.auth.MachineSeed"/>
     <Method name="readMachineId"/>
@@ -73,7 +73,7 @@
   </Match>
 
   <!-- These are intentional, executable source-parity constructs:
-       AgenTTY retains the unused burst knob for API compatibility, explicitly discards
+       Ajent retains the unused burst knob for API compatibility, explicitly discards
        the clamped redraw cursor after validation, and reads HOME for exact path display. -->
   <Match>
     <Class name="com.github.skanga.ajent.terminal.render.RateCursor"/>

@@ -11,7 +11,7 @@ A release commit must contain:
 - a versioned, green Maven reactor;
 - `LICENSE`, `NOTICE`, `README.md`, and the documentation set;
 - `ajent.cmd` and executable `ajent` launchers;
-- no `agentty` checkout, credentials, build output, captures, or local IDE
+- no `ajent` checkout, credentials, build output, captures, or local IDE
   files;
 - an updated `CHANGELOG.md` entry.
 
@@ -88,7 +88,7 @@ avoids platform-specific native-image differences.
 2. Update the Maven reactor version and `AjentCli.VERSION` together.
 3. Run the verification and launcher checks above.
 4. Inspect `git status --short`, `git diff --check`, and the staged file list.
-5. Confirm `agentty/` and every `target/` directory are absent from the staged
+5. Confirm `ajent/` and every `target/` directory are absent from the staged
    tree.
 6. Commit the release, create an annotated `vVERSION` tag, and push the commit
    and tag.

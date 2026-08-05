@@ -3,7 +3,7 @@ package com.github.skanga.ajent.terminal.ui;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
-/** Immutable text field whose cursor uses AgenTTY's UTF-8 byte offsets. */
+/** Immutable text field whose cursor uses Ajent's UTF-8 byte offsets. */
 public record Utf8Editor(String text, int cursor) {
   public Utf8Editor {
     Objects.requireNonNull(text, "text");

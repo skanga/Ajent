@@ -82,7 +82,7 @@ If browser launch is unavailable, copy the displayed URL manually. While the
 authorization-code field is empty, `c` copies the URL and `o` opens it again;
 `Ctrl-Y` and `Ctrl-O` provide those actions after code entry has started. The
 responsive login modal renders the same method picker, URL/code panel,
-exchange state, masked API-key input, and recoverable failure panel as AgenTTY.
+exchange state, masked API-key input, and recoverable failure panel as Ajent.
 Secrets are masked by UTF-8 byte length and are never painted in clear text.
 
 ## ChatGPT/Codex subscription import
@@ -129,7 +129,7 @@ provider output could be duplicated.
 Ajent uses its own credential path and versioned authenticated envelope:
 `$XDG_CONFIG_HOME/ajent/credentials.json`, or
 `~/.config/ajent/credentials.json` when XDG configuration is unset. It never
-reads `.config/agentty`. `CredentialPaths` selects the platform configuration
+reads `.config/ajent`. `CredentialPaths` selects the platform configuration
 root. The payload is encrypted as `v1` with:
 
 - a machine/user-specific seed (Windows MachineGuid plus user identity, or the

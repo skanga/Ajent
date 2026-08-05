@@ -68,7 +68,7 @@ class WorkspaceSandboxTest {
   }
 
   @Test
-  void skipListMatchesAgenTTY() {
+  void skipListMatchesAjent() {
     for (String name : new String[] {".git", "node_modules", "build", "target", "__pycache__",
         ".cache", "vendor", "dist", "out", ".next", ".venv", "cmake-build-debug",
         "cmake-build-release", ".idea", ".vscode", "_deps", "third_party", "thirdparty",

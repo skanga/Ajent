@@ -49,7 +49,7 @@ localized cleanup.
 | D | **`BashValidator` is a denylist masquerading as a control.** Blocks literal substrings; trivially bypassed by whitespace/quoting/vars/base64. Fine as UX guardrail, not a security boundary. | `ajent-tools/.../process/BashValidator.java:15-48` |
 | E | **Lossy reload.** No schema version field. On load, in-flight tool statuses are silently downgraded to `Failed("interrupted")` and missing timestamps default to `Instant.now()`. No forward-migration path. | `ajent-core/.../persistence/ThreadStore.java:151,225-236` |
 | F | **IO failures swallowed silently.** `ThreadStore.save` returns `false` with no log; `loadAllMetadata` returns `List.of()` on any IO error (looks like "no history"); `GitCheckpointStore` swallows scratch/copy IOException (checkpoint silently no-ops). | `ThreadStore.java:78-80,116-118`; `GitCheckpointStore.java:164-165` |
-| G | **Static, unbounded, cross-session caches.** `FileTools.READ_CACHE`/`SNAPSHOTS` are static, never evicted (cross-session staleness + leak). `EnvironmentHttpClient.BRIDGES` caches never-closed `SocksBridge`; sets `jdk...disableHostnameVerification` as a process-global property when `AGENTTY_INSECURE=1`. | `FileTools.java:62-63`; `EnvironmentHttpClient.java:39,91` |
+| G | **Static, unbounded, cross-session caches.** `FileTools.READ_CACHE`/`SNAPSHOTS` are static, never evicted (cross-session staleness + leak). `EnvironmentHttpClient.BRIDGES` caches never-closed `SocksBridge`; sets `jdk...disableHostnameVerification` as a process-global property when `AJENT_INSECURE=1`. | `FileTools.java:62-63`; `EnvironmentHttpClient.java:39,91` |
 
 ### 2. Structural — two god classes
 

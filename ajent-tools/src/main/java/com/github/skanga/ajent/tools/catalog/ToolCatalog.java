@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Closed, recall-ordered AgenTTY tool catalog. */
+/** Closed, recall-ordered Ajent tool catalog. */
 public final class ToolCatalog {
   private static final List<ToolSpec> ALL = List.of(
       spec("read", ToolKind.READ, 1, false, 20, 80_000, TruncationStrategy.HEAD),

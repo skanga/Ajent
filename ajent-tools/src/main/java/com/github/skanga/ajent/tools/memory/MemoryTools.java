@@ -9,7 +9,7 @@ import com.github.skanga.ajent.tools.runtime.ToolResult;
 import java.util.ArrayList;
 import java.util.List;
 
-/** AgenTTY-compatible remember, forget, and wipe protocol shells. */
+/** Ajent-compatible remember, forget, and wipe protocol shells. */
 public final class MemoryTools {
   private final MemoryStore store;
 

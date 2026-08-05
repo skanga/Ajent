@@ -17,7 +17,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
-/** Anthropic message-array serialization with AgenTTY-compatible tool-result budgeting. */
+/** Anthropic message-array serialization with Ajent-compatible tool-result budgeting. */
 public final class AnthropicMessages {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final int TOOL_RESULT_WIRE_BUDGET = 64 * 1024;

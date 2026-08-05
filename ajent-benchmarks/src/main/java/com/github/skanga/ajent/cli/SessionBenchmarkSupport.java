@@ -134,7 +134,7 @@ final class SessionBenchmarkSupport {
   }
 
   private static String bashOutput(int lines) {
-    String line = "[  0.084s] linking target agentty\n";
+    String line = "[  0.084s] linking target ajent\n";
     return line.repeat(lines);
   }
 }

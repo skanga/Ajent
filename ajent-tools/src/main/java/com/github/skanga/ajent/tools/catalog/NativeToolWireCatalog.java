@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Exact MCP descriptions and input schemas published by the pinned AgenTTY implementation. */
+/** Exact MCP descriptions and input schemas published by the pinned Ajent implementation. */
 public final class NativeToolWireCatalog {
   private static final String RESOURCE = "native-tools.json";
   private static final List<String> STANDALONE_MCP_ORDER = List.of(
@@ -33,12 +33,12 @@ public final class NativeToolWireCatalog {
     return CATALOG.all();
   }
 
-  /** Registration order in the checked-in AgenTTY source's standalone MCP server. */
+  /** Registration order in the checked-in Ajent source's standalone MCP server. */
   public static List<ToolSpecification> standaloneMcp() {
     return ordered(STANDALONE_MCP_ORDER, "standalone MCP");
   }
 
-  /** Exact recall-biased order advertised by AgenTTY in provider requests. */
+  /** Exact recall-biased order advertised by Ajent in provider requests. */
   public static List<ToolSpecification> providerFacing() {
     return ordered(PROVIDER_FACING_ORDER, "provider-facing");
   }

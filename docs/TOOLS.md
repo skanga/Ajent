@@ -1,6 +1,6 @@
 # Tools, permissions, and subagents
 
-Ajent exposes the ordered AgenTTY coding-tool catalog through the interactive
+Ajent exposes the ordered Ajent coding-tool catalog through the interactive
 agent, ACP, and standalone MCP server. Tool definitions, runtime dispatch,
 permissions, scheduling, output budgets, and isolated subagents share one
 composition path.
@@ -42,7 +42,7 @@ Literal/regex grep, glob/path discovery, symbol context, and PageRank-style
 repository mapping. Search filters binary/NUL input, merges context ranges,
 adds enclosing-symbol breadcrumbs, and uses bounded pagination/inter-file
 guards. The standalone MCP server publishes `repo_map` from the checked-in
-AgenTTY 23-tool registry; the older 0.2.8 Windows binary omitted that entry.
+Ajent 23-tool registry; the older 0.2.8 Windows binary omitted that entry.
 
 ### Processes and diagnostics
 
@@ -75,7 +75,7 @@ Todos/plans, document search, memory lifecycle, skills activation, and the
 `task` subagent tool. Host services are injected so protocol and interactive
 sessions use the same implementations.
 
-Standalone MCP matches AgenTTY's host boundary: `task` is published but
+Standalone MCP matches Ajent's host boundary: `task` is published but
 reports that subagents are unavailable. Interactive and ACP sessions install
 the provider-backed runner described below.
 
@@ -132,7 +132,7 @@ order. Cancellation and late results are checked against the active turn.
 
 ## Output budgets
 
-Each tool has a UTF-8-safe conversation budget. AgenTTY applies it twice: the
+Each tool has a UTF-8-safe conversation budget. Ajent applies it twice: the
 native provider layer first performs a head-only byte cap, then dynamic dispatch
 applies the catalog's head, tail, or structured head/tail policy. Ajent preserves
 both stages and their distinct elision markers. Structured file changes remain
@@ -193,10 +193,8 @@ At minimum cover:
 6. dispatcher integration and provider wire exposure;
 7. ACP/MCP exposure when applicable.
 
-`NativeMcpParityIT` additionally compares the full standalone catalog and all
-22 published tool families with the pinned executable. Its edge sweep covers
-validation, workspace refusal and recovery guidance, timeout, the native
-synchronous-cancellation limitation, large implicit reads, structured changes,
-and UTF-8-safe two-stage truncation.
+Integration tests cover the full standalone catalog, validation, workspace
+refusal and recovery guidance, timeout, synchronous cancellation, large
+implicit reads, structured changes, and UTF-8-safe two-stage truncation.
 
 Run `mvn -q verify` from the reactor root.

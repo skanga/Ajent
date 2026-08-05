@@ -9,7 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
-/** AgenTTY's bounded, two-stage tool-output inspector state machine. */
+/** Ajent's bounded, two-stage tool-output inspector state machine. */
 public final class ToolOutputViewer {
   public static final int MAX_ENTRIES = 50;
   public static final int SNAPSHOT_BUDGET_BYTES = 4 * 1024 * 1024;

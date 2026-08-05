@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
 
-/** AgenTTY-compatible grep, glob, and definition-search bodies. */
+/** Ajent-compatible grep, glob, and definition-search bodies. */
 public final class SearchTools {
   private static final int PER_PAGE = 20;
   private static final int CONTEXT_LINES = 2;

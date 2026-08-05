@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Pure provider picker, including AgenTTY's final virtual custom-host row. */
+/** Pure provider picker, including Ajent's final virtual custom-host row. */
 public final class ProviderPicker {
   private static final int PAGE_ROWS = 14;
 

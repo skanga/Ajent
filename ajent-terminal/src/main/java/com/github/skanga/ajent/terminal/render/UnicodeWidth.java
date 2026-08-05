@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.terminal.render;
 
-/** Unicode 16.0 terminal column widths, generated from AgenTTY's pinned UCD table. */
+/** Unicode 16.0 terminal column widths, generated from Ajent's pinned UCD table. */
 public final class UnicodeWidth {
   public enum Mode { LEGACY, MODERN }
 

@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
-/** Production reveal-on wire translation of AgenTTY's reveal_scrollback_test.cpp. */
+/** Production reveal-on wire translation of Ajent's reveal_scrollback_test.cpp. */
 final class RevealScrollbackTest {
   private static final int[][] NORMAL = {{80, 24}, {60, 16}, {100, 20}, {72, 12}};
   private static final int[][] TALL = {{80, 40}, {100, 50}, {120, 32}, {90, 60}};

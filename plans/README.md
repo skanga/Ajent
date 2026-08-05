@@ -1,3 +1,3 @@
 # Plans
 
-- [Ajent AgenTTY Java port](ajent-agentty-java-port.md) — active construction blueprint and dependency graph.
+No active construction plans are currently checked in.

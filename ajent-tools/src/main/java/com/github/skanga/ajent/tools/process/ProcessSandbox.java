@@ -8,7 +8,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/** AgenTTY-compatible process sandbox selection and command wrapping. */
+/** Ajent-compatible process sandbox selection and command wrapping. */
 public final class ProcessSandbox {
   private enum Backend { NONE, BWRAP, SANDBOX_EXEC }
 

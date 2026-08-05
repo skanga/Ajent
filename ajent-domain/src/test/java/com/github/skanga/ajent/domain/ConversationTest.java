@@ -26,7 +26,7 @@ class ConversationTest {
   }
 
   @Test
-  void profilesPreserveAgenTTYOrdinalsAndSafelyDefaultUnknownValues() {
+  void profilesPreserveAjentOrdinalsAndSafelyDefaultUnknownValues() {
     assertThat(Profile.fromPersistedOrdinal(0)).isEqualTo(Profile.WRITE);
     assertThat(Profile.fromPersistedOrdinal(1)).isEqualTo(Profile.ASK);
     assertThat(Profile.fromPersistedOrdinal(2)).isEqualTo(Profile.MINIMAL);

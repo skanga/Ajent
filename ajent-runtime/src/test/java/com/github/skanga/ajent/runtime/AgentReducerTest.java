@@ -552,7 +552,7 @@ final class AgentReducerTest {
         .isEqualTo(failed.state());
   }
 
-  @Test void transientFailureSchedulesAgenTTYBackoffAndDedupeThenRetriesSameTurn() {
+  @Test void transientFailureSchedulesAjentBackoffAndDedupeThenRetriesSameTurn() {
     AgentReducer reducer = reducer(PermissionVerdict.ALLOW);
     AgentState active = submit(reducer);
     AgentReducer.Step failed = reducer.update(active, new RuntimeMessage.ProviderEvent(1,

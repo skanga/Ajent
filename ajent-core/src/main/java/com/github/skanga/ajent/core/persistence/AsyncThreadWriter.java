@@ -82,7 +82,7 @@ public final class AsyncThreadWriter implements AutoCloseable {
         save.accept(next);
       } catch (RuntimeException | LinkageError failure) {
         AjentDebugLog.log("persistence.async_save", failure);
-        // AgenTTY treats background persistence as best effort and keeps draining.
+        // Ajent treats background persistence as best effort and keeps draining.
       }
     }
   }

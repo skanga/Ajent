@@ -956,7 +956,7 @@ public final class AcpJsonRpcServer {
       }
     } catch (IOException | RuntimeException failure) {
       AjentDebugLog.log("acp.index_session", failure);
-      // AgenTTY's session sidecar is best effort; thread persistence is authoritative.
+      // Ajent's session sidecar is best effort; thread persistence is authoritative.
     } finally {
       try {
         Files.deleteIfExists(temporary);

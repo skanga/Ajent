@@ -25,7 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-/** AgenTTY-compatible read/write/edit/list_dir implementations. */
+/** Ajent-compatible read/write/edit/list_dir implementations. */
 public final class FileTools {
   private static final long MAX_READ_BYTES = 1024L * 1024L;
   private static final long MAX_WRITE_BYTES = 5L * 1024L * 1024L;
@@ -57,7 +57,7 @@ public final class FileTools {
   private final WorkspaceSandbox sandbox;
   // Process-wide file-state caches shared across sessions. Bounded LRU so long-lived server
   // processes cannot grow without limit; the capacity is generous enough that realistic sessions
-  // never evict. Deliberate divergence from AgenTTY's unbounded cache (see docs/PARITY.md).
+  // never evict, keeping memory bounded in long-running workspaces.
   // ponytail: coarse global lock via synchronizedMap, fine at file-tool call rates.
   static int fileStateCacheCapacity = 8192; // package-private so tests can force eviction
   private static final Map<ReadKey, FileTime> READ_CACHE = Collections.synchronizedMap(new LruMap<>());

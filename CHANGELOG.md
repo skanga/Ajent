@@ -1,141 +1,29 @@
 # Changelog
 
 All notable Ajent changes are documented here. Versions follow Semantic
-Versioning while the pre-1.0 port may still change unsupported extension APIs.
+Versioning while pre-1.0 releases may still change unsupported extension APIs.
 
 ## [0.2.8] - 2026-07-19
 
 ### Added
 
-- Modern Java 25 Maven reactor covering AgenTTY's domain, persistence,
-  providers, tool runtime, agent loop, ACP/MCP protocols, terminal UI, parity
-  fixtures, and performance probes.
-- Anthropic OAuth/API-key authentication, OpenAI Chat Completions-compatible
-  providers, and native Ollama transport.
-- Interactive saved threads, queued prompts, attachments, plans, permissions,
-  checkpoints, diff review, code-block execution, skills, memory, and RAG.
-- Native-responsive interactive login panels with exact method/API-key views,
-  UTF-8-byte secret masking, OAuth URL copy/reopen shortcuts, asynchronous
-  exchange/failure recovery, and executable terminal comparison.
-- Windows and POSIX launchers, cross-platform CI, source provenance, parity
-  ledger, and subsystem documentation.
-- Reproducible ZIP and TAR.GZ distributions, a CycloneDX 1.6 SBOM, SHA-256
-  checksums, and tag-validated GitHub Release automation.
-- Native-executable MCP client characterization for configured stdio and
-  Streamable HTTP servers, including rich tool results, resources, prompts,
-  progress, list refresh, timeouts, sessions, headers, and JSON/SSE envelopes.
-- Native-executable standalone MCP characterization that executes every one of
-  the 22 published tool families against paired deterministic workspaces.
-- Executable skills, durable-memory, document-RAG, memory-fusion, and
-  repository-map characterization; `mcp-serve` now follows the checked-in
-  source's full 23-tool registry while recording the pinned binary's omission.
-- Native-executable Ollama characterization for `/api/chat` request bodies,
-  fragmented NDJSON, persisted images, native and weak-model JSON-protocol tool
-  execution/continuation, HTTP errors, and live cancellation.
-- Native-executable Anthropic characterization for exact Messages API requests,
-  fragmented SSE, tool execution/continuation, HTTP errors, and cancellation.
-- Native-executable persistence characterization for settings save ordering,
-  complete ACP thread/session-index JSON, atomic cleanup, and shutdown flush.
-- Native-executable tool edge characterization for validation, workspace
-  recovery guidance, timeout, cancellation, large implicit reads, UTF-8-safe
-  truncation, and structured changes.
-- A real Windows child-PTY characterization seam and executable startup/shutdown
-  capture for deterministic 80x24 terminal comparisons.
-- A deterministic Unicode-width ANSI viewport emulator for executable terminal
-  differentials, with cursor, erase, scroll, wrap, OSC, and wide-cell coverage.
+- Standalone Java 25 Maven application with immutable domain state,
+  virtual-thread effect execution, and a terminal-first interactive UI.
+- Anthropic OAuth and API-key authentication, OpenAI-compatible providers,
+  ChatGPT/Codex subscription import, native Ollama transport, and local model
+  support.
+- Sandboxed coding tools, permission profiles, skills, memory, repository RAG,
+  subagents, plans, attachments, diff review, code-block execution, and Git
+  checkpoints with recoverable rewind.
+- Saved and queued conversations, streaming Markdown, responsive terminal
+  rendering, model/provider pickers, and interactive authentication.
+- ACP and MCP protocol servers, air-gap mode, Windows and POSIX launchers,
+  cross-platform CI, reproducible archives, SBOM generation, checksums, and
+  release automation.
 
-### Changed
+### Quality
 
-- Ported native state machines to immutable records and sealed interfaces with
-  virtual-thread effect execution.
-- Matched AgenTTY's Windows process CRLF behavior and terminal blank line in
-  CLI usage output; added a pinned executable characterization profile.
-- Matched hosted OpenAI-compatible HTTP/2 routing, preset paths and headers,
-  versioned user agents, dial/SOCKS overrides, and exact TLS cancellation.
-- Matched AgenTTY's MCP empty-parameter envelopes, protocol-version headers,
-  timeout wording, structured JSON formatting, and absence of unsolicited
-  cancellation notifications; progress delivery no longer blocks response
-  processing.
-- Pinned AgenTTY's explicit MCP cancellation limitation: a cancellation
-  notification queued during a synchronous configured tool call neither
-  preempts the call nor propagates downstream, and the normal timeout wins.
-- Matched standalone MCP edit diffs, terminal-newline grep context, typed local
-  error wrapping, host-shell error wrapping, TLS-only URL validation, Git
-  output, application-data paths, and unavailable `task` behavior.
-- Matched Ollama's synthetic missing tool-call ids and model-specific HTTP 404
-  recovery hint.
-- Matched Ollama's UTF-8-byte tool-description truncation and recursively
-  canonical JSON-protocol continuation history.
-- Matched Anthropic's request prompt terminator and ACP projection of the latest
-  provider usage frame; documented three source-defined fields absent from the
-  downloaded 0.2.8 binary.
-- Matched native pre-validation model persistence and ACP title derivation from
-  the newline-terminated stored user message.
-- Matched native large-file read outlining/leading slices, inclusive
-  `end_line`, workspace recovery guidance, and the provider-plus-dispatcher
-  two-stage output budget.
-- Matched AgenTTY's stable 80x24 startup viewport below the animated wordmark:
-  welcome alignment and compact labels, the six-row Maya composer, attachment
-  cursor projection, and the three-row provider/context status panel.
-- Matched executable composer editing for cursor insertion, Shift+Enter
-  continuation rows, multiline border captions, wide-Unicode soft wrapping,
-  Backspace, and Maya's pre-wrap two-logical-row height floor.
-- Matched a complete settled provider turn cell-for-cell against AgenTTY,
-  including fragmented OpenAI-compatible SSE, conversation insets and rails,
-  turn separators, header alignment, assistant Markdown padding, first-message
-  title derivation, the title-chip edge, and bottom chrome placement.
-- Matched AgenTTY's executable Ask-profile permission flow cell-for-cell,
-  including the six-row permission card, native argument descriptions, running
-  and completed Bash action timelines, phase elapsed slot, assistant
-  continuation seam, completed output, and measured idle-status degradation.
-- Matched the executable provider picker cell-for-cell, including its bordered
-  bottom overlay, registry descriptions, protected authentication/local notes,
-  footer legend and hints, cursor navigation, and short-terminal height clamp.
-- Matched the source-correct searchable command palette chrome and filtering,
-  with an executable exact differential for a uniquely filtered command and an
-  explicit record of the pinned binary's missing tool-output command entry.
-- Matched the executable saved-thread picker cell-for-cell, including the
-  active/current marker, local timestamp, position counter, navigation footer,
-  responsive list viewport, and enhanced Ctrl+J/Escape lifecycle.
-- Matched real saved-thread selection and asynchronous session replacement:
-  selected-only navigation rail, persisted conversation rehydration, modal and
-  draft cleanup, and the checked-in source's destructive inline hard reset.
-- Matched the searchable model picker cell-for-cell, including catalog loading,
-  empty and filtered states, active/favorite markers, reasoning-effort tiers,
-  navigation hints, responsive viewport, and enhanced Ctrl+/ lifecycle.
-- Matched the mention-file and symbol pickers cell-for-cell, including typed
-  filtering, filename/symbol loci, parent-directory columns, selected rails,
-  empty/no-match states, and long-list position footers.
-- Matched the executable Ctrl+G code-block picker and post-run result view
-  cell-for-cell, including numbered language/line metadata, real PowerShell
-  execution, exit/line/byte status, output scrollbar gutter, and decision hints.
-- Matched executable composer attachments and live queuing: real run-output
-  attach/whole-chip Backspace, queued user-turn rails and metadata, contextual
-  queue placeholder/count, animated Braille phase glyphs, and automatic drain.
-- Added a real 80x24 → 96x28 PTY resize differential proving WINCH-driven
-  shortcut and composer reflow in both executables.
-- Added a three-turn real-provider scrollback differential proving that both
-  executables only append committed rows, plus AgenTTY-compatible
-  hyphen-boundary wrapping for settled assistant prose.
-- Replaced the live diff-review placeholder with AgenTTY's complete bordered
-  two-axis panel: file counters, every structured hunk, nested numbered diffs,
-  pending/accepted/rejected tags, navigation, and exact Y/N/A/X workflow.
-- Matched the executable checkpoint picker and rewind workflow cell-for-cell:
-  oldest-to-newest `#turn` rows, relative times, resolved Git diff summaries,
-  warning chrome, restoration footer, real worktree rewind, transcript
-  truncation, composer refill, and native `▎ ▶` completion banner.
-
-### Known limitations
-
-- Animated wordmark-frame and wide-only first-run/status density terminal
-  differentials remain under parity work;
-  startup, composer interactions, a settled streamed provider turn, and a live
-  permissioned Bash-tool turn now compare cell-for-cell.
-- AgenTTY's checked-in runtime never adds tool changes to `pending_changes`;
-  its pinned executable therefore reports no changes after a successful write.
-  Ajent retains the intended, fully wired source-defined diff-review workflow.
-- OpenAI Responses API and ChatGPT/Codex OAuth are not implemented; AgenTTY's
-  OpenAI-compatible transport uses Chat Completions and API keys.
-- The pinned AgenTTY 0.2.8 Windows binary has a positive `find_definition`
-  false-negative and predates the checked-in multi-source/confidence RAG
-  output. Ajent retains the source-correct implementations for both.
+- Unit, integration, wire, terminal, fuzz, and performance coverage across the
+  full Maven reactor.
+- Enforced dependency convergence, JaCoCo coverage, Spotless formatting,
+  SpotBugs analysis, and an opt-in OWASP dependency scan.

@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 final class PartialJsonTest {
-  @Test void closesContainersValuesStringsAndDanglingCommasLikeAgentty() {
+  @Test void closesContainersValuesStringsAndDanglingCommasLikeAjent() {
     assertThat(PartialJson.close("")).isEqualTo("null");
     assertThat(PartialJson.close("{\"path\":")).isEqualTo("{\"path\":null}");
     assertThat(PartialJson.close("{\"items\":[1,2,")).isEqualTo("{\"items\":[1,2]}");

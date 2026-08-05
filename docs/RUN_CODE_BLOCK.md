@@ -2,7 +2,7 @@
 
 Ajent can extract fenced code blocks from the newest assistant reply and run a
 supported shell block without copying it manually. The workflow mirrors
-AgenTTY and keeps execution, capture, terminal suspension, and result staging
+Ajent and keeps execution, capture, terminal suspension, and result staging
 explicit.
 
 ## Open the picker

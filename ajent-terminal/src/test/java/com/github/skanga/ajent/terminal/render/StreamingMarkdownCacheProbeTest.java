@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** Exact workload translation of AgenTTY's md_cache_probe.cpp. */
+/** Exact workload translation of Ajent's md_cache_probe.cpp. */
 final class StreamingMarkdownCacheProbeTest {
   private static final int WIDTH = 100;
   private static final int CHUNK = 24;

@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
-/** Responsive top-level chrome derived from AgenTTY's Maya welcome/status/change widgets. */
+/** Responsive top-level chrome derived from Ajent's Maya welcome/status/change widgets. */
 public final class AppChrome {
   public enum Tone { NORMAL, DIM, MUTED, BRAND, ACCENT, SUCCESS, WARNING, DANGER }
   public enum Phase {
@@ -238,7 +238,7 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
-  /** Stable three-row status panel used by AgenTTY after ShortcutRow was retired. */
+  /** Stable three-row status panel used by Ajent after ShortcutRow was retired. */
   public static List<Row> statusPanel(Status config) {
     Objects.requireNonNull(config, "config");
     String rule = "─".repeat(config.width());
@@ -555,7 +555,7 @@ public final class AppChrome {
     return List.copyOf(rows);
   }
 
-  /** AgenTTY's responsive interactive authentication modal. */
+  /** Ajent's responsive interactive authentication modal. */
   public static List<Row> login(LoginModal.State state, int width) {
     Objects.requireNonNull(state, "state");
     if (state instanceof LoginModal.Closed) return List.of();

@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** Line-oriented dynamic-programming matcher ported from AgenTTY's edit tool. */
+/** Line-oriented dynamic-programming matcher ported from Ajent's edit tool. */
 public final class FuzzyMatcher {
   private static final int REPLACEMENT_COST = 1;
   private static final int INSERTION_COST = 3;

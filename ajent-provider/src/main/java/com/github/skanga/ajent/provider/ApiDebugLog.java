@@ -11,7 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Opt-in, process-lifetime append log matching AgenTTY's raw Anthropic API diagnostics. */
+/** Opt-in, process-lifetime append log matching Ajent's raw Anthropic API diagnostics. */
 final class ApiDebugLog {
   private static final Map<Path, ApiDebugLog> LOGS = new ConcurrentHashMap<>();
   private static final System.Logger LOGGER = System.getLogger(ApiDebugLog.class.getName());

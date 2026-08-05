@@ -6,7 +6,7 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 final class ProviderErrorPolicyTest {
-  @Test void classifiesEveryTypedHttpFailureShapeLikeAgentty() {
+  @Test void classifiesEveryTypedHttpFailureShapeLikeAjent() {
     assertThat(ProviderErrorPolicy.classify(HttpErrorKind.CANCELLED, 0))
         .isEqualTo(ErrorClass.CANCELLED);
     assertThat(new HttpErrorKind[] {HttpErrorKind.RESOLVE, HttpErrorKind.CONNECT,

@@ -19,7 +19,7 @@ import java.util.Locale;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
 
-/** Durable AgenTTY-compatible user/project JSONL memory store. */
+/** Durable Ajent-compatible user/project JSONL memory store. */
 public final class JsonlMemoryStore implements MemoryStore {
   static final int MAX_TEXT_BYTES = 2 * 1024;
   static final int MAX_FILE_BYTES = 256 * 1024;

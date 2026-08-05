@@ -27,7 +27,7 @@ class NativeToolWireCatalogTest {
       "task", "skill", "search_docs");
 
   @Test
-  void publishesEveryPinnedAgenTTYToolInRecallBiasOrder() {
+  void publishesEveryPinnedAjentToolInRecallBiasOrder() {
     assertThat(NativeToolWireCatalog.all())
         .extracting(ToolSpecification::name)
         .containsExactlyElementsOf(PINNED_ORDER);

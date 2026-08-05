@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** Exact deterministic-walk translation of AgenTTY's frozen_invariant_fuzz.cpp. */
+/** Exact deterministic-walk translation of Ajent's frozen_invariant_fuzz.cpp. */
 final class FrozenInvariantFuzzTest {
   @Test void arbitraryProductionCadencePreservesAllSevenFrozenPrefixInvariants() {
     int[] widths = {60, 80, 100, 140};

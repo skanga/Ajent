@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
-/** Pure AgenTTY-compatible discriminator for inline tool-body previews. */
+/** Pure Ajent-compatible discriminator for inline tool-body previews. */
 public final class ToolBodyPreview {
   private static final Pattern GIT_PLUMBING = Pattern.compile(
       "^(diff |index |new file|deleted file|old mode|new mode|similarity |rename |copy )");

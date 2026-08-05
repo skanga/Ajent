@@ -16,7 +16,7 @@ class ToolSchedulerTest {
   private final AtomicInteger ids = new AtomicInteger();
 
   @Test
-  void portsEveryPathAwareSchedulingConditionFromAgenTTY() {
+  void portsEveryPathAwareSchedulingConditionFromAjent() {
     assertThat(schedule(
             pending("write", "file_path", "a.cpp"),
             pending("write", "file_path", "b.cpp")))

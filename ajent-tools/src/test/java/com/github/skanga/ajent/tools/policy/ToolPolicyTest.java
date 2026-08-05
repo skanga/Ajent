@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 class ToolPolicyTest {
 
   @Test
-  void permissionMatchesAllFortyEightAgenTTYCells() {
+  void permissionMatchesAllFortyEightAjentCells() {
     for (int bits = 0; bits < 16; bits++) {
       var effects = new EffectSet(bits);
       for (Profile profile : Profile.values()) {
@@ -24,7 +24,7 @@ class ToolPolicyTest {
   }
 
   @Test
-  void reasonUsesAgenTTYCapabilityPrecedence() {
+  void reasonUsesAjentCapabilityPrecedence() {
     assertThat(PermissionPolicy.reason(EffectSet.of(Effect.EXEC, Effect.WRITE_FS), Profile.ASK))
         .isEqualTo("wants to run an arbitrary subprocess");
     assertThat(PermissionPolicy.reason(EffectSet.of(Effect.WRITE_FS, Effect.NET), Profile.ASK))
@@ -40,7 +40,7 @@ class ToolPolicyTest {
   }
 
   @Test
-  void parallelSafetyAndEffectLabelsMatchAgenTTY() {
+  void parallelSafetyAndEffectLabelsMatchAjent() {
     var read = EffectSet.of(Effect.READ_FS);
     var net = EffectSet.of(Effect.NET);
     var write = EffectSet.of(Effect.WRITE_FS);

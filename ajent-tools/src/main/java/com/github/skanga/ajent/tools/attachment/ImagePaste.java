@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** AgenTTY-compatible ingestion of raw image pastes and pasted image paths. */
+/** Ajent-compatible ingestion of raw image pastes and pasted image paths. */
 public final class ImagePaste {
   static final long MAX_FILE_BYTES = 8L * 1024 * 1024;
 

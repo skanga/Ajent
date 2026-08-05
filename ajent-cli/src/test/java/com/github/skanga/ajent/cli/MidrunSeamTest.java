@@ -23,7 +23,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
-/** Production-UI translation of AgenTTY's midrun_seam_test.cpp regression program. */
+/** Production-UI translation of Ajent's midrun_seam_test.cpp regression program. */
 final class MidrunSeamTest {
   @Test void growingDeepRunKeepsEverySettledCardOnceAndFreezesOnlyAtSettle() {
     var messages = new ArrayList<Message>();

@@ -18,7 +18,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** Cached AgenTTY-compatible workspace file and declaration index. */
+/** Cached Ajent-compatible workspace file and declaration index. */
 public final class WorkspaceIndex {
   private static final int FILE_CAP = 5_000;
   private static final int SYMBOL_CAP = 50_000;

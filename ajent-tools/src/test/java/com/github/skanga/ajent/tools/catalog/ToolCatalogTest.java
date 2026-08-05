@@ -10,7 +10,7 @@ class ToolCatalogTest {
                      TruncationStrategy strategy) {}
 
   @Test
-  void catalogExactlyMatchesAgenTTYOrderAndOperationalMetadata() {
+  void catalogExactlyMatchesAjentOrderAndOperationalMetadata() {
     List<Row> expected = List.of(
         row("read",1,false,20,80000,"HEAD"), row("edit",3,true,20,40000,"HEAD"),
         row("write",2,true,20,40000,"HEAD"), row("bash",8,true,0,30000,"TAIL"),

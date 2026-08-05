@@ -24,7 +24,7 @@ public final class HostServices {
   }
   @FunctionalInterface public interface DocRetriever { DocResponse retrieve(DocQuery query); }
 
-  public record SubagentRequest(String prompt, String agentType) {}
+  public record SubagentRequest(String prompt, String kind) {}
   public record SubagentResponse(String report, boolean error) {}
   public interface SubagentRunner {
     boolean available();

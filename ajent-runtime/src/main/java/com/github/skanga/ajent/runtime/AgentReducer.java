@@ -716,7 +716,7 @@ public final class AgentReducer {
       if (verdict == PermissionVerdict.PROMPT) {
         effects.add(new RuntimeEffect.RequestPermission(revised.activeTurnId(), current));
         prompt = true;
-        break; // AgenTTY presents one permission card at a time.
+        break; // Ajent presents one permission card at a time.
       }
       revised = updateTool(revised, current.id().value(), value -> new ToolUse(value.id(),
           value.name(), value.arguments(), new ToolStatus.Running(

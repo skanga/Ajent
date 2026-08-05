@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
-/** Exact behavioral translation of AgenTTY's stream_async_freeze_test.cpp. */
+/** Exact behavioral translation of Ajent's stream_async_freeze_test.cpp. */
 final class StreamingMarkdownAsyncFreezeTest {
   private static final int ASYNC_THRESHOLD = 16 * 1024;
 

@@ -4,7 +4,7 @@ import com.github.skanga.ajent.terminal.input.TerminalKey;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Exact AgenTTY composer key-routing priorities, independent of terminal protocol. */
+/** Exact Ajent composer key-routing priorities, independent of terminal protocol. */
 public final class ComposerKeyRouter {
   private ComposerKeyRouter() {}
 

@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** Rotating-turn/deep-run translation of AgenTTY's scrollback_oracle_test.cpp. */
+/** Rotating-turn/deep-run translation of Ajent's scrollback_oracle_test.cpp. */
 final class ScrollbackOracleTest {
   private static final int[][] SHAPES = {{80, 30}, {60, 18}, {100, 50}, {46, 76}};
 

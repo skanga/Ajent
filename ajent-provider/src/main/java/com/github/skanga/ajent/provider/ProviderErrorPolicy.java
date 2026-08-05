@@ -3,7 +3,7 @@ package com.github.skanga.ajent.provider;
 import java.time.Duration;
 import java.util.Locale;
 
-/** AgenTTY's provider error classification, retry caps, and backoff ladders. */
+/** Ajent's provider error classification, retry caps, and backoff ladders. */
 public final class ProviderErrorPolicy {
   public static final int MAX_RETRIES = 6;
   public static final Duration RETRY_DECAY = Duration.ofSeconds(90);

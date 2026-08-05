@@ -1,8 +1,4 @@
 Ajent
 
-This project is a Java port derived from behavioral study of AgenTTY.
-
-AgenTTY is Copyright (c) 2026 Ayush Bhat and licensed under the MIT License.
-The AgenTTY copyright and permission notice must accompany substantial
-portions derived from that work. See docs/PROVENANCE.md for the current
-source-to-port mapping.
+This distribution includes MIT-licensed work Copyright (c) 2026 Ayush Bhat.
+The applicable copyright and permission notice is retained in LICENSE.

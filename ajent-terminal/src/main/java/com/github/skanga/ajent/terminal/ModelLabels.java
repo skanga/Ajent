@@ -2,7 +2,7 @@ package com.github.skanga.ajent.terminal;
 
 import java.util.Set;
 
-/** Human-readable model labels matching AgenTTY's turn-header normalization. */
+/** Human-readable model labels matching Ajent's turn-header normalization. */
 public final class ModelLabels {
   private static final Set<String> LOWERCASE_ACRONYMS = Set.of("gpt", "glm", "sql", "tts", "vl");
 

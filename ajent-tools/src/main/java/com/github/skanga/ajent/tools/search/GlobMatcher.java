@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.tools.search;
 
-/** Small AgenTTY-compatible filename glob matcher. */
+/** Small Ajent-compatible filename glob matcher. */
 public final class GlobMatcher {
   private GlobMatcher() {}
 

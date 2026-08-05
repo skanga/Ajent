@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Parentless-commit worktree snapshots compatible with AgenTTY's checkpoint refs. */
+/** Parentless-commit worktree snapshots compatible with Ajent's checkpoint refs. */
 public final class GitCheckpointStore {
   private static final String REF_PREFIX = "refs/ajent/checkpoints/";
   private static final String BACKUP_PREFIX = "refs/ajent/rewind-backups/";

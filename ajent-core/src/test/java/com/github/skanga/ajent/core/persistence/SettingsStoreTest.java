@@ -33,7 +33,7 @@ class SettingsStoreTest {
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @Test
-  void missingAndMalformedFilesReturnAgenTTYDefaults(@TempDir Path directory) throws Exception {
+  void missingAndMalformedFilesReturnAjentDefaults(@TempDir Path directory) throws Exception {
     var store = new SettingsStore(directory);
 
     assertThat(store.load()).isEqualTo(Settings.defaults());
@@ -67,7 +67,7 @@ class SettingsStoreTest {
   }
 
   @Test
-  void saveOmitsOptionalEmptyFieldsLikeAgenTTY(@TempDir Path directory) throws Exception {
+  void saveOmitsOptionalEmptyFieldsLikeAjent(@TempDir Path directory) throws Exception {
     var store = new SettingsStore(directory);
 
     assertThat(store.save(Settings.defaults())).isTrue();

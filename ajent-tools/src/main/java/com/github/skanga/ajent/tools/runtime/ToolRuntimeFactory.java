@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Production composition root for the complete local AgenTTY-compatible toolset. */
+/** Production composition root for the complete local Ajent-compatible toolset. */
 public final class ToolRuntimeFactory {
   private ToolRuntimeFactory() {}
 

@@ -2,7 +2,7 @@ package com.github.skanga.ajent.tools.catalog;
 
 import java.nio.charset.StandardCharsets;
 
-/** UTF-8-safe dispatcher output truncation compatible with AgenTTY. */
+/** UTF-8-safe dispatcher output truncation compatible with Ajent. */
 public final class OutputBudget {
   private OutputBudget() {}
 
@@ -39,7 +39,7 @@ public final class OutputBudget {
     };
   }
 
-  /** mcp-cpp provider-layer cap applied before AgenTTY's strategy-aware dispatch cap. */
+  /** mcp-cpp provider-layer cap applied before Ajent's strategy-aware dispatch cap. */
   public static String applyProvider(String text, int budget) {
     if (budget <= 0) return text;
     byte[] bytes = text.getBytes(StandardCharsets.UTF_8);

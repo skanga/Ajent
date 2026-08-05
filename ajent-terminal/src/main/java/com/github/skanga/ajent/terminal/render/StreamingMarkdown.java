@@ -22,7 +22,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.time.Duration;
 
-/** Incremental Markdown block parser mirroring AgenTTY's streaming block vocabulary. */
+/** Incremental Markdown block parser mirroring Ajent's streaming block vocabulary. */
 public final class StreamingMarkdown {
   private static final int ASYNC_PARSE_THRESHOLD_BYTES = 16 * 1024;
   private static final Parser PARSER = parser();

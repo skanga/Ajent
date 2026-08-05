@@ -42,7 +42,7 @@ tool-specific previews. Queued turns look like user turns and carry
 
 ### Conversation turns
 
-Every settled or live conversation turn uses AgenTTY's left `┃` rail. The
+Every settled or live conversation turn uses Ajent's left `┃` rail. The
 header identifies user turns as `❯ You` and assistant turns with `✦` plus the
 capability-aware model name, such as `Opus 4.6`, `Sonnet 4`, or a normalized
 local model label. User, Opus, Sonnet, Haiku, and fallback rails use the
@@ -105,7 +105,6 @@ bubblewrap) — the chrome shows a persistent `⚠  sandbox: …` warning row ab
 the status panel, and the same notice is printed to stderr at startup. Bash and
 other process tools still run (contained only by the permission prompt and the
 workspace path checks), so the warning stays visible for the whole session.
-This is a deliberate divergence from AgenTTY (see [PARITY.md](PARITY.md)).
 
 ## Composer
 
@@ -255,7 +254,7 @@ xhigh-capable models expose `xhigh`.
 ## Permission prompt and profiles
 
 The interactive profile is restored from settings; a new settings file uses
-AgenTTY's `write` default. Under `ask`, a consequential tool opens a blocking
+Ajent's `write` default. Under `ask`, a consequential tool opens a blocking
 prompt:
 
 - `y`: allow this call;
@@ -311,7 +310,7 @@ old session, drains/persists it, reconstructs the selected provider/tool
 composition, clears draft/modal/reveal state, and resets the inline surface.
 The executable parity run seeds an older saved conversation, navigates to it,
 performs the asynchronous swap, and compares its rehydrated viewport against
-AgenTTY. Ajent uses the checked-in native source's destructive
+Ajent. Ajent uses the checked-in native source's destructive
 viewport-and-scrollback reset for this explicit content replacement.
 
 In a Git workspace, submitted user turns can carry a checkpoint. Rewind opens
@@ -330,8 +329,7 @@ tree to a `refs/ajent/rewind-backups/<timestamp>` ref (newest 16 kept), so a
 rewind is recoverable, and the banner points at that namespace. To inspect or
 restore the pre-rewind state, run `git for-each-ref refs/ajent/rewind-backups/`
 and check out or diff that commit. These backup refs are internal and never
-appear in the checkpoint picker. This banner is a deliberate divergence from
-AgenTTY (see [PARITY.md](PARITY.md)).
+appear in the checkpoint picker.
 
 ## Change review
 
@@ -359,11 +357,9 @@ slower animation cadence to reduce progressive repaint and wire traffic.
 On resize, Ajent rehydrates the mutable surface at the new width rather than
 diffing incompatible cell geometry. If display corruption occurs, press
 `Ctrl-L`; this intentionally clears Ajent's inline scrollback region.
-The executable parity gate performs a real 80x24 to 96x28 PTY resize and
-compares the reflowed shortcut and composer regions against AgenTTY.
-It also runs three loopback-provider turns and verifies that physical
-scrollback grows by exact prefix extension while the final committed
-conversation matches AgenTTY cell-for-cell.
+Terminal tests exercise resize reflow and loopback-provider turns, verifying
+that physical scrollback grows by exact prefix extension while the final
+committed conversation remains stable.
 
 ## Accessibility and diagnostics
 

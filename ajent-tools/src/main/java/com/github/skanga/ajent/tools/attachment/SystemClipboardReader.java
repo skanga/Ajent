@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 
-/** Platform clipboard reader with AgenTTY's command override and binary size bound. */
+/** Platform clipboard reader with Ajent's command override and binary size bound. */
 public final class SystemClipboardReader implements ClipboardReader {
   static final int CAP = 8 * 1024 * 1024;
   private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(5);

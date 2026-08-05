@@ -44,7 +44,7 @@ import okhttp3.RequestBody;
 /**
  * {@link HttpClient} adapter that keeps the logical URI, Host header, TLS SNI, and certificate
  * verification target while dialing a different TCP endpoint. The JDK client cannot retain HTTP/2
- * through an HTTP CONNECT proxy, so AgenTTY's dial-only provider override uses this adapter.
+ * through an HTTP CONNECT proxy, so Ajent's dial-only provider override uses this adapter.
  */
 final class RoutedHttpClient extends HttpClient {
   private final HttpClient configuration;

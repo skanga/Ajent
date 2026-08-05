@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
-/** Wire-level translation of AgenTTY's midrun_wire_test.cpp terminal oracle. */
+/** Wire-level translation of Ajent's midrun_wire_test.cpp terminal oracle. */
 final class MidrunWireTest {
   @Test void growingLiveRunAndLateGrepHighlightStaySyncedAndAppendOnly() {
     var messages = new ArrayList<Message>();

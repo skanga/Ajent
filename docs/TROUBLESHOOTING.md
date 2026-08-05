@@ -38,7 +38,7 @@ do not lower the threshold or skip JaCoCo for a release-quality build.
 Treat findings in handwritten code as defects first. Fix ownership, nullability,
 resource lifecycle, or concurrency at the source. Add an entry to
 `config/spotbugs-exclude.xml` only for a narrow, documented contract such as
-generated JMH padding or an intentionally exact AgenTTY wire/platform behavior.
+generated JMH padding or an intentionally exact Ajent wire/platform behavior.
 
 ### Dependency-Check cannot update the NVD database
 

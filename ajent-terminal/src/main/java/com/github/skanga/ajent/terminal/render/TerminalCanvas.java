@@ -4,7 +4,7 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
 
-/** Mutable packed-cell canvas preserving AgenTTY's clipping and content-extent invariants. */
+/** Mutable packed-cell canvas preserving Ajent's clipping and content-extent invariants. */
 public final class TerminalCanvas {
   public enum Stage { DRAINED, PAINTED }
 

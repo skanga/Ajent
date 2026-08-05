@@ -27,7 +27,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.X509TrustManager;
 
-/** JDK HTTP clients honoring AgenTTY's process-wide SOCKS5 air-gap contract. */
+/** JDK HTTP clients honoring Ajent's process-wide SOCKS5 air-gap contract. */
 public final class EnvironmentHttpClient {
   private static final System.Logger LOGGER =
       System.getLogger(EnvironmentHttpClient.class.getName());

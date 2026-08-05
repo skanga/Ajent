@@ -1,7 +1,7 @@
 # Environment variable reference
 
 Ajent uses its own `AJENT_` environment namespace and does not read legacy
-`AGENTTY_` or `MAYA_` variables. Command-line options take precedence where the
+`AJENT_` or `MAYA_` variables. Command-line options take precedence where the
 same setting has a CLI form. Unless stated otherwise, unset or empty variables
 select the documented default.
 

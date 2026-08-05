@@ -2,7 +2,7 @@ package com.github.skanga.ajent.terminal.ui;
 
 import java.util.Objects;
 
-/** Sum-typed picker state and AgenTTY's ASCII-only incremental filter. */
+/** Sum-typed picker state and Ajent's ASCII-only incremental filter. */
 public final class PickerState {
   private PickerState() {}
 

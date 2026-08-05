@@ -1,22 +1,20 @@
 # Ajent design notes
 
-This document records the invariants that make Ajent behave like AgenTTY. It
-is a guide for changing the implementation without accidentally changing the
-agent.
+This document records the invariants that define Ajent's behavior. It is a
+guide for changing the implementation without accidentally changing the agent.
 
-## Porting rule
+## Compatibility rule
 
-Observable reference behavior wins over convenience, framework convention, or
-what a new implementation would normally choose. A change starts with one of:
+Observable product behavior wins over convenience or framework convention. A
+change starts with one of:
 
-- a translated AgenTTY assertion;
+- an existing Java assertion;
 - a captured wire, terminal, or CLI fixture;
-- an explicit source-derived invariant with a Java test;
-- an approved Ajent extension clearly separated from parity behavior.
+- an explicit invariant with a Java test;
+- an approved extension with documented compatibility impact.
 
-Passing compilation or a generic chat smoke test is not parity evidence. The
-authoritative status is tracked in [PARITY.md](PARITY.md) and the reference
-manifest under `ajent-parity/src/test/resources/reference/`.
+Passing compilation or a generic chat smoke test is not behavioral evidence.
+The authoritative contracts are the Java tests and the documented interfaces.
 
 ## Immutable center, imperative edges
 
@@ -39,7 +37,7 @@ scalability; they do not authorize concurrent mutation of session state.
 
 ## Exhaustive state
 
-Sealed interfaces are used wherever AgenTTY has a closed variant set: session
+Sealed interfaces are used wherever Ajent has a closed variant set: session
 phases, stream events, runtime messages/effects, tool results, credentials,
 retry state, picker state, and terminal frame state. Switch expressions must
 remain exhaustive. A new variant therefore forces every relevant boundary to
@@ -181,7 +179,7 @@ An Ajent-only feature is acceptable when it does not silently replace the
 reference path. It should have:
 
 - an explicit configuration or command boundary;
-- tests proving default AgenTTY behavior is unchanged;
+- tests proving default Ajent behavior is unchanged;
 - documentation labeling the extension;
 - no new dependency unless the JDK cannot meet the requirement cleanly.
 
@@ -193,9 +191,9 @@ OpenAI Chat Completions builder used for parity.
 
 Before merging a behavioral change, verify:
 
-1. The relevant AgenTTY source/test or capture is identified.
+1. The relevant contract, test, or capture is identified.
 2. A Java test failed for the intended behavioral reason before implementation.
 3. State remains immutable and new variants are exhaustively handled.
 4. Cancellation, stale callbacks, byte limits, and secret handling were tested.
 5. The complete reactor passes `mvn -q verify`.
-6. Documentation and the parity ledger describe the resulting truth.
+6. Documentation describes the resulting behavior and compatibility impact.

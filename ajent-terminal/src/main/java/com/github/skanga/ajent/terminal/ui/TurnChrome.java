@@ -12,7 +12,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
-/** AgenTTY turn identity, metadata, and left-rail formatting. */
+/** Ajent turn identity, metadata, and left-rail formatting. */
 public final class TurnChrome {
   public enum SpeakerTone { USER, OPUS, SONNET, HAIKU, FALLBACK }
 

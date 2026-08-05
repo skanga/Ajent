@@ -106,7 +106,7 @@ class OllamaWireTest {
   }
 
   @Test
-  void optionEnvironmentOverridesMatchAgenTTYParsingAndPrecedence() {
+  void optionEnvironmentOverridesMatchAjentParsingAndPrecedence() {
     var request = new OllamaRequestOptions(16_384, 32_768, true);
     assertThat(OllamaWire.buildOptions(request, Map.of(
         "AJENT_OLLAMA_NUM_CTX", "12288trailing",
@@ -148,7 +148,7 @@ class OllamaWireTest {
             "- os: Windows", "- shell: cmd.exe", "- cwd: " + project,
             "<user-memory>\nuser guidance", "<project-memory>\nproject guidance",
             "<local-memory>\nlocal guidance")
-        .doesNotContain("agentty-compatible", "<learned-memory");
+        .doesNotContain("ajent-compatible", "<learned-memory");
     assertThat(OllamaWire.systemPrompt(project, home, "Darwin"))
         .contains("- os: macOS", "- shell: sh");
   }

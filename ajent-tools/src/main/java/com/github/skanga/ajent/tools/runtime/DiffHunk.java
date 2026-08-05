@@ -2,7 +2,7 @@ package com.github.skanga.ajent.tools.runtime;
 
 import java.util.Objects;
 
-/** One structured unified-diff hunk using AgenTTY's one-based coordinates. */
+/** One structured unified-diff hunk using Ajent's one-based coordinates. */
 public record DiffHunk(
     int oldStart, int oldLength, int newStart, int newLength, String patch, Status status) {
   public enum Status { PENDING, ACCEPTED, REJECTED }

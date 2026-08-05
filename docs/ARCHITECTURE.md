@@ -1,11 +1,11 @@
 # Ajent architecture
 
-Ajent is a behavior-first Java 25 port of AgenTTY. Its architecture preserves
-the reference agent's functional update loop while separating wire protocols,
-tools, persistence, terminal rendering, and process entry points into Maven
-modules. Records carry immutable data, sealed interfaces make state variants
-exhaustive, and virtual threads host blocking edge work without moving mutable
-session state out of the reducer.
+Ajent is a standalone Java 25 terminal coding agent. Its architecture separates
+the functional update loop, wire protocols, tools, persistence, terminal
+rendering, and process entry points into Maven modules. Records carry immutable
+data, sealed interfaces make state variants exhaustive, and virtual threads
+host blocking edge work without moving mutable session state out of the
+reducer.
 
 ## Runtime shape
 
@@ -67,7 +67,7 @@ flows. It does not own conversation state.
 
 ### `ajent-tools`
 
-The AgenTTY-compatible tool catalog and dispatch implementation: workspace
+The Ajent-compatible tool catalog and dispatch implementation: workspace
 filesystem operations, edit matching, processes, search, repository map, Git,
 web, memory, skills, RAG, todos, and subagent host services. Workspace and
 process sandboxes are enforced here, before operating-system work begins.
@@ -100,12 +100,11 @@ providers, tools, MCP servers, persistence, checkpoints, and terminal services,
 then connects them to `AgentLoop`. It also implements `login`, `logout`,
 `status`, `skills`, `mcp-serve`, `acp`, and `airgap` process modes.
 
-### `ajent-parity` and `ajent-benchmarks`
+### `ajent-benchmarks`
 
-These modules may depend on the application, but production code never depends
-on them. `ajent-parity` owns frozen reference manifests, source mappings,
-goldens, and differential contracts. `ajent-benchmarks` contains JMH ports of
-native probes and standalone diagnostic entry points.
+This module may depend on the application, but production code never depends
+on it. It contains JMH performance probes and standalone diagnostic entry
+points.
 
 ## Dependency direction
 
@@ -187,7 +186,7 @@ and permission path.
 
 ## Persistence
 
-Threads and settings use AgenTTY-compatible JSON shapes. Writes are atomic and
+Threads and settings use Ajent-compatible JSON shapes. Writes are atomic and
 thread persistence is coalesced asynchronously. Loop shutdown first prevents
 new dispatch, waits for effect workers to schedule their follow-up work, then
 drains the persistence writer.
@@ -199,7 +198,7 @@ terminal or debug log.
 
 ## Why no general agent framework
 
-Ajent does not use LangChain4j in its core. AgenTTY's observable behavior
+Ajent does not use LangChain4j in its core. Ajent's observable behavior
 depends on exact wire blocks, retry decisions, permission transitions,
 incremental parsing, and terminal timing. A general orchestration framework
 would add a second state machine and make those contracts harder to prove.
@@ -218,8 +217,7 @@ Tests are organized around boundaries rather than implementation layers:
 - reducer traces with stable hashes and typed effects;
 - ACP/MCP transcript tests over duplex streams;
 - cell, ANSI, scrollback, fuzz, and performance probes for terminal behavior;
-- a 53-entry reference manifest that maps every pinned AgenTTY test/probe to
-  Java evidence.
+- focused unit, integration, wire, terminal, fuzz, and performance tests.
 
 `mvn -q verify` is the release-quality local gate. It runs the whole reactor,
 enforces dependency convergence, compiles for Java 25 with lint warnings, runs
@@ -235,5 +233,4 @@ ordinary offline development depend on the NVD service.
 - [AUTH.md](AUTH.md): credentials, OAuth, and provider precedence
 - [UI.md](UI.md): interactive workflows and key ownership
 - [RENDERING.md](RENDERING.md): canvas, inline frame, reveal, and scrollback
-- [PARITY.md](PARITY.md): requirement-by-requirement evidence ledger
-- [PROVENANCE.md](PROVENANCE.md): pinned upstream source and fixture policy
+- [DEPENDENCIES.md](DEPENDENCIES.md): external library boundaries

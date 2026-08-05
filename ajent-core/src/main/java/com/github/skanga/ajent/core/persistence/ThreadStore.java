@@ -42,7 +42,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
-/** Filesystem-backed AgenTTY-compatible thread persistence. */
+/** Filesystem-backed Ajent-compatible thread persistence. */
 public final class ThreadStore {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final TypeReference<Map<String, Object>> ARGUMENTS = new TypeReference<>() {};

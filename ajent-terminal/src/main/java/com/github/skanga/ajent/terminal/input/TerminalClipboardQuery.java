@@ -3,7 +3,7 @@ package com.github.skanga.ajent.terminal.input;
 import java.util.Map;
 import java.util.Objects;
 
-/** Exact Maya OSC clipboard-read query selection used by AgenTTY. */
+/** Exact Maya OSC clipboard-read query selection used by Ajent. */
 public final class TerminalClipboardQuery {
   public static final String OSC_52_TEXT = "\u001b]52;c;?\u001b\\";
   public static final String OSC_5522_KITTY = "\u001b]5522;type=read;"

@@ -4,7 +4,7 @@ import java.net.URI;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Immutable port of AgenTTY's in-app authentication modal reducer. */
+/** Immutable port of Ajent's in-app authentication modal reducer. */
 public final class LoginModal {
   private LoginModal() {}
 

@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Random;
 
-/** Pure-Java HNSW cosine index, binary-compatible with AgenTTY's native graph cache. */
+/** Pure-Java HNSW cosine index, binary-compatible with Ajent's native graph cache. */
 public final class HnswIndex {
   private static final int MAGIC = 0x484E5301;
   private static final int MAX_ELEMENTS = 10_000_000;
@@ -159,7 +159,7 @@ public final class HnswIndex {
     return List.copyOf(result);
   }
 
-  /** Encodes the exact native little-endian HNSW section appended to AgenTTY RAG caches. */
+  /** Encodes the exact native little-endian HNSW section appended to Ajent RAG caches. */
   public byte[] serialize() {
     var output = new ByteArrayOutputStream();
     putInt(output, MAGIC);

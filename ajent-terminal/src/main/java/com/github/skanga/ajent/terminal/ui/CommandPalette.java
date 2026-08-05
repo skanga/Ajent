@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** AgenTTY's command catalog and immutable command-palette reducer. */
+/** Ajent's command catalog and immutable command-palette reducer. */
 public final class CommandPalette {
   private CommandPalette() {}
 

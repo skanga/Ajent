@@ -203,10 +203,9 @@ final class InteractiveCommandTest {
     });
   }
 
-  @Test void startupUsesAjentStateAndNeverImportsLegacyAgenttySettings() {
-    var legacy = new SettingsStore(directory.resolve(".agentty"));
-    assertThat(legacy.save(Settings.defaults()
-        .withProviderModel("ollama", new ModelId("qwen2.5-coder:7b")))).isTrue();
+  @Test void startupUsesAjentStateAndPersistsProviderSelection() {
+    var state = new SettingsStore(directory.resolve(".ajent"));
+    assertThat(state.save(Settings.defaults())).isTrue();
 
     var configured = command(Map.of()).configure(CliArguments.parse(new String[] {
         "--sandbox", "off"}), stream(new ByteArrayOutputStream()));
@@ -227,11 +226,16 @@ final class InteractiveCommandTest {
         "--sandbox", "off", "--provider", "openai", "--model", "gpt-5"}),
         stream(new ByteArrayOutputStream()));
     assertThat(selected).isNotNull();
-    assertThat(new SettingsStore(directory.resolve(".ajent")).load()).satisfies(settings -> {
+    assertThat(state.load()).satisfies(settings -> {
       assertThat(settings.provider()).isEqualTo("openai");
       assertThat(settings.modelId().value()).isEqualTo("gpt-5");
     });
-    assertThat(legacy.load().provider()).isEqualTo("ollama");
+
+    var restored = command(Map.of()).configure(CliArguments.parse(new String[] {
+        "--sandbox", "off"}), stream(new ByteArrayOutputStream()));
+    assertThat(restored).isNotNull();
+    assertThat(restored.providerConfiguration().provider()).isEqualTo("openai");
+    assertThat(restored.model()).isEqualTo("gpt-5");
   }
 
   @Test

@@ -12,14 +12,11 @@ Uses the Messages API with typed content blocks, tool use/results, images,
 prompt caching, signed thinking replay, adaptive reasoning, usage counters, and
 incremental SSE. Both API-key and Anthropic OAuth credentials are supported.
 
-Executable parity tests route Ajent and the pinned AgenTTY binary through the
-same loopback Anthropic server. They compare the exact Messages API path,
-API-key headers, complete request bodies, generated metadata shape, fragmented
-SSE text and tool-input assembly, four-counter usage, stop reasons, a real
-permissioned write and tool-result continuation, one-shot `429` handling, and
-cancellation of an open response body. The downloaded 0.2.8 binary predates two
-checked-in prompt sections and the `todo` eager-streaming flag; Ajent follows
-the pinned source for those three fields, as recorded in the parity ledger.
+Loopback tests cover the exact Messages API path, API-key headers, complete
+request bodies, generated metadata shape, fragmented SSE text and tool-input
+assembly, four-counter usage, stop reasons, a permissioned write and
+tool-result continuation, one-shot `429` handling, and cancellation of an open
+response body.
 
 ### Ollama
 
@@ -28,15 +25,14 @@ context capabilities, selects native or JSON-protocol tool handling according
 to model strength, and can use Ollama for optional repository embeddings,
 query expansion, and reranking.
 
-Executable parity tests route both Ajent and the pinned AgenTTY binary through
-the same loopback Ollama server. They compare complete `/api/chat` bodies,
+Loopback tests verify complete `/api/chat` bodies,
 fragmented NDJSON, usage and stop reasons, structured tool execution and
 continuation, persisted-image replay, no-key operation, model-specific 404
 guidance, and cancellation of an open response body. A weak
 `qwen2.5-coder:7b` turn additionally proves the exact grammar schema, inline
 UTF-8-byte-truncated tool catalog, fragmented JSON call salvage, argument
 repair, filesystem execution, canonical continuation history, and unwrapped
-`response` pseudo-tool. Missing native tool-call ids use AgenTTY's exact
+`response` pseudo-tool. Missing native tool-call ids use Ajent's exact
 `call_ollama_<sequence>_<index>` form.
 
 ### OpenAI-compatible
@@ -45,23 +41,22 @@ Presets include OpenAI, Groq, OpenRouter, Together, Cerebras, llama.cpp, and a
 custom host. They use `/v1/chat/completions`, incremental SSE, OpenAI-style
 tool calls, and `/v1/models` where supported.
 
-The executable characterization gate drives AgenTTY and Ajent through the same
-loopback OpenAI-compatible turns and compares their complete request sequences,
+Loopback tests drive OpenAI-compatible turns and verify complete request sequences,
 including accepted, rejected, and two sequential tool-result continuations. It
 also splits each of two calls across multiple SSE frames, executes the
 same-path batch in order, and compares the canonical two-result continuation.
 For a weak `qwen2.5-coder:7b` model, it additionally streams a bare JSON call
 through `delta.content` with `finish_reason: stop`, then proves identical
 salvage, one execution, synthetic call identity, and structured continuation.
-The same gate proves the native ACP-specific error policy: `429` is one-shot
+The same suite proves the ACP-specific error policy: `429` is one-shot
 even with `Retry-After`, and a terminal `400` becomes the same refusal with
-exact error metadata. The interactive reducer separately retains AgenTTY's
+exact error metadata. The interactive reducer separately retains
 transient/rate-limit retry ladders; provider recovery is surface-specific.
 This covers the native 22-tool provider subset and recall-biased order,
 system/user messages, output controls, tool-call replay, canonical argument
 encoding, and usage/stop stream handling without sending traffic to an external
 provider.
-The same gate holds local HTTP and hosted HTTP/2 SSE bodies open, cancels each
+The suite also holds local HTTP and hosted HTTP/2 SSE bodies open, cancels each
 turn through ACP, and requires the native cancellation error and prompt
 metadata. For OpenAI, Groq, OpenRouter, Together, and Cerebras it also preserves
 the logical Host and TLS SNI while safely dialing a loopback server, then
@@ -69,12 +64,11 @@ compares the exact preset path, bearer/content headers, versioned user agent,
 request body, and streamed result.
 
 Concurrent Ajent sessions always receive the full immutable provider tool
-catalog; the pinned executable's cold-cache data race is documented in the
-[parity ledger](PARITY.md#deliberate-differences).
+catalog.
 
 ### Codex (ChatGPT subscription)
 
-Codex is an Ajent extension and a distinct provider kind. It uses the streaming
+Codex is a distinct provider kind. It uses the streaming
 Responses protocol at the ChatGPT Codex backend, not API-key OpenAI Chat
 Completions. Requests contain stateless user/assistant messages, images,
 function calls, and `function_call_output` continuations. The decoder handles

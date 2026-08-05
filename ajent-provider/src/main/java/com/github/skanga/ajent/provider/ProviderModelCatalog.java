@@ -75,7 +75,7 @@ public final class ProviderModelCatalog {
     }
   }
 
-  /** Lists Anthropic models, with AgenTTY's stable offline seed as the floor. */
+  /** Lists Anthropic models, with Ajent's stable offline seed as the floor. */
   public List<ProviderModel> listAnthropicModels(ProviderAuth auth) {
     return listAnthropicModels(auth, ANTHROPIC_MODELS);
   }

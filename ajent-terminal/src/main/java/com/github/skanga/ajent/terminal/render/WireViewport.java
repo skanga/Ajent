@@ -2,7 +2,7 @@ package com.github.skanga.ajent.terminal.render;
 
 import java.util.Objects;
 
-/** Viewport-closed terminal row coordinates from AgenTTY's renderer witness chain. */
+/** Viewport-closed terminal row coordinates from Ajent's renderer witness chain. */
 public final class WireViewport {
   private static final ThreadLocal<long[]> NEXT_ID = ThreadLocal.withInitial(() -> new long[] {1});
 

@@ -107,7 +107,7 @@ public final class RagCorpus {
         }
       });
     } catch (IOException ignored) {
-      // AgenTTY treats traversal failures as a partial or empty corpus.
+      // Ajent treats traversal failures as a partial or empty corpus.
     }
 
     chunks = sanitizeEmbeddings(embedMissing(rebuilt, embedding, EMBEDDING_BATCH));

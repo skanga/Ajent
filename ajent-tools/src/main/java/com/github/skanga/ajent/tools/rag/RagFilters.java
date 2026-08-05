@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Predicate;
 
-/** Metadata and path predicates matching AgenTTY's document filters. */
+/** Metadata and path predicates matching Ajent's document filters. */
 public final class RagFilters {
   private RagFilters() {}
 

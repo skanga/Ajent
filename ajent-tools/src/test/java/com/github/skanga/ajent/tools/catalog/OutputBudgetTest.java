@@ -16,7 +16,7 @@ class OutputBudgetTest {
   }
 
   @Test
-  void headTailAndHeadTailStrategiesUseExactAgenTTYMarkers() {
+  void headTailAndHeadTailStrategiesUseExactAjentMarkers() {
     assertThat(OutputBudget.apply("0123456789", 4, TruncationStrategy.HEAD))
         .isEqualTo("0123\n\n[... 6 chars elided — output exceeded tool's budget; "
             + "refine your request to see more ...]");
@@ -27,7 +27,7 @@ class OutputBudgetTest {
   }
 
   @Test
-  void everyStrategyKeepsUtf8BoundariesAndCountsBytesLikeAgenTTY() {
+  void everyStrategyKeepsUtf8BoundariesAndCountsBytesLikeAjent() {
     String value = "ab😀cd";
     assertThat(value.getBytes(StandardCharsets.UTF_8)).hasSize(8);
     assertThat(OutputBudget.apply(value, 4, TruncationStrategy.HEAD))

@@ -40,7 +40,7 @@ class HostToolsTest {
     assertThat(runner.limit).isZero();
     assertThat(success(tools.execute("task", JSON.createObjectNode().put("prompt", "inspect")
         .put("agent_type", "reviewer")))).isEqualTo("done");
-    assertThat(runner.request.agentType()).isEqualTo("reviewer");
+    assertThat(runner.request.kind()).isEqualTo("reviewer");
   }
 
   @Test

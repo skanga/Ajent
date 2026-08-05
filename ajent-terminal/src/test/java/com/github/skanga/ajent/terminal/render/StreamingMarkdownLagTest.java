@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral and performance-bound translation of AgenTTY's stream_md_lag_test.cpp. */
+/** Behavioral and performance-bound translation of Ajent's stream_md_lag_test.cpp. */
 final class StreamingMarkdownLagTest {
   private static final int WIDTH = 100;
   private static final long FRAME_NANOS = 2_000_000;

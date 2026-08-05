@@ -3,7 +3,7 @@ package com.github.skanga.ajent.domain;
 import java.util.ArrayList;
 import java.util.List;
 
-/** User-selectable adaptive-thinking tier with AgenTTY's model capability clamps. */
+/** User-selectable adaptive-thinking tier with Ajent's model capability clamps. */
 public enum Effort {
   NONE(""), LOW("low"), MEDIUM("medium"), HIGH("high"), XHIGH("xhigh"), MAX("max");
 

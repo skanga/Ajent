@@ -12,7 +12,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.nio.charset.StandardCharsets;
 
-/** Pure text projection of AgenTTY's stable bordered tool-action timeline. */
+/** Pure text projection of Ajent's stable bordered tool-action timeline. */
 public final class AgentTimeline {
   public enum Tone {
     NORMAL, MUTED, WHITE, INSPECT, EXECUTE, MUTATE, VCS, PLAN, AGENT,

@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class MachineSeedTest {
 
   @Test
-  void windowsSeedMatchesAgenTTYMachineGuidAndUsernameComposition() {
+  void windowsSeedMatchesAjentMachineGuidAndUsernameComposition() {
     assertThat(MachineSeed.windows(
         Optional.of("machine-guid"), Optional.of("fallback-host"),
         Map.of("USERNAME", "alice")))
@@ -20,7 +20,7 @@ class MachineSeedTest {
   }
 
   @Test
-  void windowsFallbackAndUnixUidBindingMatchAgenTTY() {
+  void windowsFallbackAndUnixUidBindingMatchAjent() {
     assertThat(MachineSeed.windows(Optional.empty(), Optional.empty(), Map.of()))
         .isEqualTo("ajent-fallback-seed\u001fajent-credentials-v1");
     assertThat(MachineSeed.unix(Optional.of("machine-id"), Optional.of("host"), 1001))

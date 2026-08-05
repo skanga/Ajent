@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.tools.policy;
 
-/** Observable tool capability using AgenTTY's bit assignments. */
+/** Observable tool capability using Ajent's bit assignments. */
 public enum Effect {
   READ_FS(1, "ReadFs"),
   WRITE_FS(2, "WriteFs"),

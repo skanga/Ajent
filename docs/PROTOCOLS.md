@@ -24,16 +24,16 @@ cancellation, and durable thread replay. Sessions are isolated and one active
 prompt owns a session at a time.
 
 `authenticate` requires the ACP v1 string `methodId`. It validates the same
-wire shape as AgenTTY, succeeds when startup resolved installed credentials,
+wire shape as Ajent, succeeds when startup resolved installed credentials,
 and returns `AuthRequired` after `logout` clears them.
 
 Clients may advertise `fs.readTextFile`, `fs.writeTextFile`, and `terminal` in
-their initialize capabilities. AgenTTY accepts but does not retain or invoke
+their initialize capabilities. Ajent accepts but does not retain or invoke
 those capabilities: its built-in filesystem and terminal tools execute in the
 agent runtime, and its only outbound request is `session/request_permission`.
 Ajent intentionally matches that application behavior. The `fs/*` and
 `terminal/*` methods provided by the generic `acp-cpp` client library are not
-call sites in AgenTTY itself.
+call sites in Ajent itself.
 
 Each session composes a real `AgentLoop` with selected provider, profile-derived
 tool catalog, persistence, checkpoints, skills/memory/RAG, MCP external tools,
@@ -52,7 +52,7 @@ Prompt completion maps normal end, maximum tokens, refusal, cancellation, and
 errors to the corresponding ACP stop reason. Cancellation is scoped to the
 session and does not stop another concurrent session.
 
-ACP provider failures are fail-fast, matching AgenTTY's direct ACP stream
+ACP provider failures are fail-fast, matching Ajent's direct ACP stream
 loop: a transient or rate-limited HTTP response completes that prompt as a
 refusal and is not retried, even when it includes `Retry-After`. This differs
 intentionally from the interactive agent loop, whose native behavior includes
@@ -84,18 +84,16 @@ JSON-RPC ids/results/errors and close outstanding calls on transport failure.
 Streamable HTTP retains the negotiated session id and protocol version on
 subsequent POSTs and accepts both JSON and event-stream response envelopes.
 Request timeouts fail locally without inventing a downstream cancellation
-notification, matching AgenTTY.
+notification, matching Ajent.
 
 External tool schemas and annotations are retained, then Ajent applies its own
 effect/permission/output safety boundary. Configuration/server failure is
 reported without disabling the native catalog.
 
-The pinned AgenTTY executable currently sends a list refresh when a downstream
-`notifications/tools/list_changed` arrives during an active call, but its
-response reader then times out that call. Ajent preserves this observable
-behavior pending an upstream semantic change. External MCP catalog order is
-protocol-unordered; Ajent deliberately keeps deterministic local-first order
-instead of reproducing AgenTTY's hash-table interleaving.
+Ajent sends a list refresh when a downstream
+`notifications/tools/list_changed` arrives during an active call. External MCP
+catalog order is protocol-unordered; Ajent keeps deterministic local-first
+order.
 
 Explicit `notifications/cancelled` sent to the standalone server during a
 blocking tool call are likewise queued behind that call in both programs. The
@@ -114,23 +112,17 @@ Run:
 
 This publishes the complete validated native tool set over stdio JSON-RPC.
 The same production `ToolRuntimeFactory` provides workspace filesystem,
-process/search/map/Git, web, memory, skills, RAG, and todos. Matching AgenTTY,
-the published `task` shell reports that subagents are unavailable in standalone
+process/search/map/Git, web, memory, skills, RAG, and todos. The published
+`task` shell reports that subagents are unavailable in standalone
 MCP mode; ACP and interactive sessions provide provider-backed subagents.
 
 The server validates workspace and sandbox configuration before entering the
 protocol loop. stdout contains protocol bytes only.
 
-Executable characterization runs all 22 published tool families against paired
-Git workspaces, including real filesystem mutation, process/search operations,
+Integration tests exercise all published tool families in temporary Git
+workspaces, including real filesystem mutation, process/search operations,
 offline web validation, Git commit/log, memory lifecycle, skill activation,
-host validation failures, and exact MCP result envelopes. The pinned 0.2.8
-Windows executable has two release-binary defects that Ajent deliberately does
-not copy: positive `find_definition` calls return no matches because its `rg`
-command uses POSIX quoting, and its `search_docs` output predates the source
-tree's skills/memory fusion and confidence metadata. Source-derived Java tests
-pin the corrected behavior; the executable sweep uses deterministic validation
-paths for those two calls.
+host validation failures, and exact MCP result envelopes.
 
 ## Debugging protocol mode
 
@@ -157,8 +149,7 @@ server/transport boundary but should not echo secret environment values.
 Protocol verification includes codecs, schema round trips, loopback duplex
 streams, asynchronous prompts, real tool execution, permissions, usage/tool
 updates, cancellation/concurrency, persistence, notification suppression,
-error mappings, and top-level Java 25 launch smokes. The parity module also
-retains source mappings and captured method assertions from AgenTTY.
+error mappings, and top-level Java 25 launch smokes.
 
 ## Integrating an editor or client
 

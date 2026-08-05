@@ -6,7 +6,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class EffortTest {
-  @Test void wireValuesAndLabelsMatchAgenTTY() {
+  @Test void wireValuesAndLabelsMatchAjent() {
     assertThat(Effort.values()).extracting(Effort::wire)
         .containsExactly("", "low", "medium", "high", "xhigh", "max");
     assertThat(Effort.values()).extracting(Effort::label)

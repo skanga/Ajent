@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** AgenTTY's deterministic @file fuzzy ranking and #symbol filtering. */
+/** Ajent's deterministic @file fuzzy ranking and #symbol filtering. */
 public final class WorkspaceMatcher {
   private static final Set<String> SOURCE_EXTENSIONS = Set.of(
       "c", "cc", "cpp", "cxx", "c++", "h", "hh", "hpp", "hxx", "h++", "rs", "go",

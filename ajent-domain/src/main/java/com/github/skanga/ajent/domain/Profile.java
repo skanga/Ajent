@@ -1,6 +1,6 @@
 package com.github.skanga.ajent.domain;
 
-/** Tool-permission tier, in AgenTTY's persisted ordinal order. */
+/** Tool-permission tier, in Ajent's persisted ordinal order. */
 public enum Profile {
   WRITE,
   ASK,

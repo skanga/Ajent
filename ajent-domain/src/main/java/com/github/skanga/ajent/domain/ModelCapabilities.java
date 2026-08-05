@@ -2,7 +2,7 @@ package com.github.skanga.ajent.domain;
 
 import java.util.Locale;
 
-/** Capabilities inferred from the model identifier, matching AgenTTY's catalog rules. */
+/** Capabilities inferred from the model identifier, matching Ajent's catalog rules. */
 public record ModelCapabilities(
     Family family,
     int generation,

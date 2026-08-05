@@ -104,7 +104,7 @@ public final class OpenAiWire {
     }
   }
 
-  /** AgenTTY's concise prompt for OpenAI-compatible and other local-model endpoints. */
+  /** Ajent's concise prompt for OpenAI-compatible and other local-model endpoints. */
   public static String localModelSystemPrompt(
       Path workingDirectory, Path home, String operatingSystem) {
     Path workspace = workingDirectory.toAbsolutePath().normalize();

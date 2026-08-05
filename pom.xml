@@ -17,7 +17,6 @@
         <module>ajent-protocol</module>
         <module>ajent-terminal</module>
         <module>ajent-cli</module>
-        <module>ajent-parity</module>
         <module>ajent-benchmarks</module>
     </modules>
     <properties>
@@ -36,9 +35,7 @@
         <jackson.version>2.22.1</jackson.version>
         <jline.version>4.3.1</jline.version>
         <flexmark.version>0.64.8</flexmark.version>
-        <jetty.version>12.1.11</jetty.version>
         <okhttp.version>5.4.0</okhttp.version>
-        <pty4j.version>0.13.12</pty4j.version>
         <jacoco.version>0.8.15</jacoco.version>
         <cyclonedx.maven.version>2.9.2</cyclonedx.maven.version>
         <spotless.maven.version>3.8.0</spotless.maven.version>
@@ -62,13 +59,6 @@
                 <groupId>com.fasterxml.jackson</groupId>
                 <artifactId>jackson-bom</artifactId>
                 <version>${jackson.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-bom</artifactId>
-                <version>${jetty.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -128,11 +118,6 @@
                 <groupId>org.openjdk.jmh</groupId>
                 <artifactId>jmh-generator-annprocess</artifactId>
                 <version>${jmh.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jetbrains.pty4j</groupId>
-                <artifactId>pty4j</artifactId>
-                <version>${pty4j.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

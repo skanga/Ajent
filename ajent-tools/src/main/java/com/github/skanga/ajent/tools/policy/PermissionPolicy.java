@@ -2,7 +2,7 @@ package com.github.skanga.ajent.tools.policy;
 
 import com.github.skanga.ajent.domain.Profile;
 
-/** Single source of truth for AgenTTY's effects-by-profile permission table. */
+/** Single source of truth for Ajent's effects-by-profile permission table. */
 public final class PermissionPolicy {
   private PermissionPolicy() {}
 

@@ -3,7 +3,7 @@ package com.github.skanga.ajent.domain;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-/** AgenTTY-compatible attachment placeholders, wire expansion, and compact labels. */
+/** Ajent-compatible attachment placeholders, wire expansion, and compact labels. */
 public final class AttachmentText {
   public static final char SENTINEL = '\u0001';
   private static final int FILE_LIMIT = 256 * 1024;

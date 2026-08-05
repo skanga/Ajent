@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** Small byte-faithful ANSI viewport/scrollback oracle translated from AgenTTY's tests. */
+/** Small byte-faithful ANSI viewport/scrollback oracle translated from Ajent's tests. */
 final class AnsiTerminalEmulator {
   private final int columns;
   private final int rows;

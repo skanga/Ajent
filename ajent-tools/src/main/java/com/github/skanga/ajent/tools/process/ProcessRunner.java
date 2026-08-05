@@ -175,7 +175,7 @@ public class ProcessRunner {
           if (count > 0) chunks.put(Arrays.copyOf(buffer, count));
         }
       } catch (IOException ignored) {
-        // AgenTTY treats a pipe read failure as end-of-output and still reaps the child.
+        // Ajent treats a pipe read failure as end-of-output and still reaps the child.
       } catch (InterruptedException exception) {
         interrupted = true;
         Thread.currentThread().interrupt();
